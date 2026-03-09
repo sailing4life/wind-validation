@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -384,9 +385,11 @@ class ValidationService:
         catalog = self.repo.models
 
         models_series = []
-        for model in catalog:
+        for i, model in enumerate(catalog):
             if model.status != "ACTIVE":
                 continue
+            if i > 0:
+                time.sleep(0.6)  # stay within Open-Meteo free-tier rate limit
             try:
                 fvs = self.forecast_adapter.fetch_forecast_with_extras(
                     model, [(lat, lon)], now, end

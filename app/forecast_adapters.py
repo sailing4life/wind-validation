@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -91,6 +92,10 @@ class OpenMeteoForecastAdapter:
         try:
             with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
                 resp = client.get(url, params=params)
+                if resp.status_code == 429:
+                    logger.debug("429 from %s, retrying after 2s", url)
+                    time.sleep(2)
+                    resp = client.get(url, params=params)
                 resp.raise_for_status()
         except Exception as exc:
             logger.warning("Batch fetch failed from %s: %s", url, exc)
