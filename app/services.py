@@ -141,7 +141,9 @@ class ValidationService:
 
         # On-demand fetch: augment index with exact pin + obs station coordinates
         all_coords = list({(lat, lon)} | {(s.lat, s.lon) for s in stations})
-        for model in candidates:
+        for i, model in enumerate(candidates):
+            if i > 0:
+                time.sleep(1.0)  # stay within Open-Meteo free-tier rate limit
             try:
                 for fv in self.forecast_adapter.fetch_model_at_coords(
                     model, all_coords, window_start, forecast_end

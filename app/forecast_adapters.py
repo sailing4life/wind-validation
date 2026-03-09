@@ -194,6 +194,8 @@ class OpenMeteoForecastAdapter:
         if end > now:
             endpoint = self._endpoint(model.model_id)
             if endpoint:
+                if rows:  # already made a past call; pause before the future call
+                    time.sleep(0.5)
                 model_param = self.model_param_map.get(model.model_id, "")
                 rows.extend(self._fetch_batch(
                     endpoint, model.model_id, model_param, in_cov,
