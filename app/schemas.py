@@ -77,6 +77,7 @@ class ModelMetricDTO(BaseModel):
     dir_err_deg: float | None
     status: str
     reasons: list[str] = Field(default_factory=list)
+    run_time_utc: datetime | None = None
 
 
 class ValidatePointResponse(BaseModel):
