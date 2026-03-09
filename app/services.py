@@ -149,6 +149,13 @@ class ValidationService:
             except Exception as exc:
                 logger.warning("On-demand batch fetch failed for %s", model.model_id, exc_info=exc)
 
+        # Track latest run time per model (for display)
+        latest_run: dict[str, datetime] = {}
+        for (mid, _), fvs in fc_index.items():
+            for fv in fvs:
+                if fv.run_time_utc and (mid not in latest_run or fv.run_time_utc > latest_run[mid]):
+                    latest_run[mid] = fv.run_time_utc
+
         def nearest_fc(model_id: str, slat: float, slon: float, t: datetime):
             cands = fc_index.get((model_id, t), [])
             if not cands:
@@ -334,6 +341,7 @@ class ValidationService:
                     "dir_err_deg": row.dir_err_deg,
                     "status": row.status,
                     "reasons": row.reasons,
+                    "run_time_utc": latest_run.get(row.model_id),
                 }
                 for row in rows
             ],

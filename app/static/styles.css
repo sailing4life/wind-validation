@@ -177,6 +177,7 @@ main {
   color: #fff;
 }
 .model-toggle.active .mt-dot { background: rgba(255,255,255,0.8); }
+.mt-run { font-size: 9px; font-weight: 400; opacity: 0.75; margin-left: 3px; }
 
 .chart-sublabel {
   font-size: 11px;

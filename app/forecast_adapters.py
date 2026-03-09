@@ -137,12 +137,23 @@ class OpenMeteoForecastAdapter:
         # Past portion — use previous runs API (actual archived forecast runs)
         if start < now:
             past_days = max(1, math.ceil((now - start).total_seconds() / 86400))
-            model_param = self.previous_runs_model_map.get(model.model_id, "")
-            rows.extend(self._fetch_batch(
-                self.previous_runs_url, model.model_id, model_param, in_cov,
+            prev_param = self.previous_runs_model_map.get(model.model_id, "")
+            past_rows = self._fetch_batch(
+                self.previous_runs_url, model.model_id, prev_param, in_cov,
                 past_days=past_days, forecast_days=1,
                 start=start, end=min(end, now),
-            ))
+            )
+            # Fall back to regular API if previous runs returned nothing (e.g. model not in archive)
+            if not past_rows:
+                endpoint = self._endpoint(model.model_id)
+                if endpoint:
+                    fc_param = self.model_param_map.get(model.model_id, "")
+                    past_rows = self._fetch_batch(
+                        endpoint, model.model_id, fc_param, in_cov,
+                        past_days=past_days, forecast_days=1,
+                        start=start, end=min(end, now),
+                    )
+            rows.extend(past_rows)
 
         # Future portion — use regular forecast API
         if end > now:

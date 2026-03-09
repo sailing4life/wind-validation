@@ -116,7 +116,7 @@ function windBarbMarker(lat, lon, wdDeg, wsMs, color) {
 }
 
 // ── model toggles ────────────────────────────────────────────────────────────
-function populateModelToggles(series, winner) {
+function populateModelToggles(series, winner, runTimes) {
   modelToggles.innerHTML = "";
   selectedModels.clear();
 
@@ -125,12 +125,13 @@ function populateModelToggles(series, winner) {
     const isWinner = s.model_id === winner;
     if (isWinner) selectedModels.add(s.model_id);
 
+    const runLabel = fmtRun(runTimes[s.model_id]);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "model-toggle" + (isWinner ? " active" : "");
     btn.style.setProperty("--mt-color", color);
     btn.dataset.modelId = s.model_id;
-    btn.innerHTML = `<span class="mt-dot"></span>${s.model_id}${isWinner ? " ★" : ""}`;
+    btn.innerHTML = `<span class="mt-dot"></span>${s.model_id}${isWinner ? " ★" : ""}${runLabel ? `<span class="mt-run">${runLabel}</span>` : ""}`;
     btn.addEventListener("click", () => {
       if (selectedModels.has(s.model_id)) {
         selectedModels.delete(s.model_id);
@@ -437,6 +438,12 @@ function fmtUTC(iso) {
   const d = new Date(iso);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")} ${String(d.getUTCHours()).padStart(2,"0")}:00 UTC`;
 }
+function fmtRun(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const mon = d.toLocaleString("en", { month: "short", timeZone: "UTC" });
+  return `${mon} ${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,"0")}z`;
+}
 function fmt2(v) { return v != null ? Number(v).toFixed(2) : "—"; }
 
 // ── main validation ──────────────────────────────────────────────────────────
@@ -512,8 +519,9 @@ async function runValidation() {
     const isWinner = row.model_id === data.winner_model_id;
     const badgeCls = row.status === "ok" ? "badge-ok" : row.status === "excluded" ? "badge-excl" : "badge-insuf";
     const note = row.reasons.join(", ");
+    const runTip = row.run_time_utc ? `title="Run: ${fmtUTC(row.run_time_utc)}"` : "";
     tr.innerHTML = `
-      <td class="model-cell ${isWinner ? "winner-cell" : ""}">${row.model_id}${isWinner ? " ★" : ""}</td>
+      <td class="model-cell ${isWinner ? "winner-cell" : ""}" ${runTip}>${row.model_id}${isWinner ? " ★" : ""}</td>
       <td>${fmt2(row.vector_rmse_uv)}</td>
       <td>${fmt2(row.rmse_ws)}</td>
       <td>${fmt2(row.bias_ws)}</td>
@@ -575,7 +583,9 @@ async function runValidation() {
   // ── charts ──
   latestSeries = data.time_series || [];
   modelColorMap.clear();
-  populateModelToggles(latestSeries, data.winner_model_id);
+  const runTimes = {};
+  (data.models || []).forEach(m => { if (m.run_time_utc) runTimes[m.model_id] = m.run_time_utc; });
+  populateModelToggles(latestSeries, data.winner_model_id, runTimes);
   drawCharts();
 }
 
