@@ -93,8 +93,8 @@ class OpenMeteoForecastAdapter:
             with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
                 resp = client.get(url, params=params)
                 if resp.status_code == 429:
-                    logger.debug("429 from %s, retrying after 2s", url)
-                    time.sleep(2)
+                    logger.debug("429 from %s, retrying after 5s", url)
+                    time.sleep(5)
                     resp = client.get(url, params=params)
                 resp.raise_for_status()
         except Exception as exc:

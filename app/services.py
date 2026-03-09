@@ -387,11 +387,11 @@ class ValidationService:
         catalog = self.repo.models
 
         models_series = []
-        for i, model in enumerate(catalog):
+        for model in catalog:
             if model.status != "ACTIVE":
                 continue
-            if i > 0:
-                time.sleep(0.6)  # stay within Open-Meteo free-tier rate limit
+            if models_series:  # sleep only after a real HTTP call was made
+                time.sleep(2.0)
             try:
                 fvs = self.forecast_adapter.fetch_forecast_with_extras(
                     model, [(lat, lon)], now, end
