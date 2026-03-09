@@ -75,6 +75,8 @@ class Settings:
     openmeteo_knmi_model: str = os.getenv("OPENMETEO_KNMI_MODEL", "knmi_seamless")
     openmeteo_meteofrance_url: str = os.getenv("OPENMETEO_METEOFRANCE_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_meteofrance_model: str = os.getenv("OPENMETEO_METEOFRANCE_MODEL", "meteofrance_seamless")
+    openmeteo_arome_hd_url: str = os.getenv("OPENMETEO_AROME_HD_URL", "https://api.open-meteo.com/v1/forecast")
+    openmeteo_arome_hd_model: str = os.getenv("OPENMETEO_AROME_HD_MODEL", "meteofrance_arome_france_hd")
     openmeteo_dwd_url: str = os.getenv("OPENMETEO_DWD_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_dwd_model: str = os.getenv("OPENMETEO_DWD_MODEL", "icon_seamless")
     openmeteo_ecmwf_url: str = os.getenv("OPENMETEO_ECMWF_URL", "https://api.open-meteo.com/v1/ecmwf")

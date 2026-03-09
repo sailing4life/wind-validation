@@ -31,6 +31,7 @@ class OpenMeteoForecastAdapter:
         self.endpoint_map = {
             "harmonie_nl":  settings.openmeteo_knmi_url,
             "arome_fr":     settings.openmeteo_meteofrance_url,
+            "arome_hd":     settings.openmeteo_arome_hd_url,
             "icon_it":      settings.openmeteo_dwd_url,
             "icon_eu":      settings.openmeteo_icon_eu_url,
             "arpege":       settings.openmeteo_arpege_url,
@@ -39,6 +40,7 @@ class OpenMeteoForecastAdapter:
         self.model_param_map = {
             "harmonie_nl":  settings.openmeteo_knmi_model,
             "arome_fr":     settings.openmeteo_meteofrance_model,
+            "arome_hd":     settings.openmeteo_arome_hd_model,
             "icon_it":      settings.openmeteo_dwd_model,
             "icon_eu":      settings.openmeteo_icon_eu_model,
             "arpege":       settings.openmeteo_arpege_model,
