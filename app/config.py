@@ -73,8 +73,6 @@ class Settings:
     ncei_token: str | None = os.getenv("NCEI_TOKEN")
     openmeteo_knmi_url: str = os.getenv("OPENMETEO_KNMI_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_knmi_model: str = os.getenv("OPENMETEO_KNMI_MODEL", "knmi_seamless")
-    openmeteo_meteofrance_url: str = os.getenv("OPENMETEO_METEOFRANCE_URL", "https://api.open-meteo.com/v1/forecast")
-    openmeteo_meteofrance_model: str = os.getenv("OPENMETEO_METEOFRANCE_MODEL", "meteofrance_seamless")
     openmeteo_arome_hd_url: str = os.getenv("OPENMETEO_AROME_HD_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_arome_hd_model: str = os.getenv("OPENMETEO_AROME_HD_MODEL", "meteofrance_arome_france_hd")
     openmeteo_dwd_url: str = os.getenv("OPENMETEO_DWD_URL", "https://api.open-meteo.com/v1/forecast")

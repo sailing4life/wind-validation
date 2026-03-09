@@ -17,13 +17,6 @@ def default_model_catalog() -> list[ModelDefinition]:
             priority_by_country={"NL": 1, "FR": 50, "IT": 50, "OTHER": 90},
         ),
         ModelDefinition(
-            model_id="arome_fr",
-            provider="Meteo-France",
-            category="regional",
-            coverage_bbox={"min_lat": 37.5, "max_lat": 52.0, "min_lon": -6.0, "max_lon": 11.0},
-            priority_by_country={"FR": 1, "NL": 40, "IT": 35, "OTHER": 80},
-        ),
-        ModelDefinition(
             model_id="arome_hd",
             provider="Meteo-France",
             category="regional",

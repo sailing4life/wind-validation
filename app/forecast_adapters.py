@@ -30,7 +30,6 @@ class OpenMeteoForecastAdapter:
         # Regular forecast endpoints (used for near-future data)
         self.endpoint_map = {
             "harmonie_nl":  settings.openmeteo_knmi_url,
-            "arome_fr":     settings.openmeteo_meteofrance_url,
             "arome_hd":     settings.openmeteo_arome_hd_url,
             "icon_it":      settings.openmeteo_dwd_url,
             "icon_eu":      settings.openmeteo_icon_eu_url,
@@ -39,7 +38,6 @@ class OpenMeteoForecastAdapter:
         }
         self.model_param_map = {
             "harmonie_nl":  settings.openmeteo_knmi_model,
-            "arome_fr":     settings.openmeteo_meteofrance_model,
             "arome_hd":     settings.openmeteo_arome_hd_model,
             "icon_it":      settings.openmeteo_dwd_model,
             "icon_eu":      settings.openmeteo_icon_eu_model,
@@ -50,9 +48,11 @@ class OpenMeteoForecastAdapter:
         self.previous_runs_url = settings.openmeteo_previous_runs_url
         self.previous_runs_model_map = {
             **self.model_param_map,
-            # ECMWF has no model param on its dedicated endpoint but needs one on the unified endpoint
+            # ECMWF needs an explicit model param on the unified previous-runs endpoint
             "ecmwf_global": settings.openmeteo_ecmwf_previous_runs_model,
         }
+        # Models that must always use the regular API (previous runs archive not available)
+        self.regular_api_only = {"ecmwf_global"}
 
     def _endpoint(self, model_id: str) -> str | None:
         return self.endpoint_map.get(model_id)
@@ -136,26 +136,35 @@ class OpenMeteoForecastAdapter:
         now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         rows: list[ForecastValue] = []
 
-        # Past portion — use previous runs API (actual archived forecast runs)
+        # Past portion
         if start < now:
             past_days = max(1, math.ceil((now - start).total_seconds() / 86400))
-            prev_param = self.previous_runs_model_map.get(model.model_id, "")
-            past_rows = self._fetch_batch(
-                self.previous_runs_url, model.model_id, prev_param, in_cov,
-                past_days=past_days, forecast_days=1,
-                start=start, end=min(end, now),
-            )
-            # Fall back to regular API if previous runs returned nothing (e.g. model not in archive)
-            if not past_rows:
-                endpoint = self._endpoint(model.model_id)
+            endpoint = self._endpoint(model.model_id)
+            if model.model_id in self.regular_api_only:
+                # Use regular API directly (previous runs archive not available for this model)
                 if endpoint:
+                    fc_param = self.model_param_map.get(model.model_id, "")
+                    rows.extend(self._fetch_batch(
+                        endpoint, model.model_id, fc_param, in_cov,
+                        past_days=past_days, forecast_days=1,
+                        start=start, end=min(end, now),
+                    ))
+            else:
+                prev_param = self.previous_runs_model_map.get(model.model_id, "")
+                past_rows = self._fetch_batch(
+                    self.previous_runs_url, model.model_id, prev_param, in_cov,
+                    past_days=past_days, forecast_days=1,
+                    start=start, end=min(end, now),
+                )
+                # Fall back to regular API if previous runs returned nothing
+                if not past_rows and endpoint:
                     fc_param = self.model_param_map.get(model.model_id, "")
                     past_rows = self._fetch_batch(
                         endpoint, model.model_id, fc_param, in_cov,
                         past_days=past_days, forecast_days=1,
                         start=start, end=min(end, now),
                     )
-            rows.extend(past_rows)
+                rows.extend(past_rows)
 
         # Future portion — use regular forecast API
         if end > now:
