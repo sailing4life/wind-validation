@@ -27,6 +27,7 @@ class OpenMeteoForecastAdapter:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Regular forecast endpoints (used for near-future data)
         self.endpoint_map = {
             "harmonie_nl":  settings.openmeteo_knmi_url,
             "arome_fr":     settings.openmeteo_meteofrance_url,
@@ -43,47 +44,49 @@ class OpenMeteoForecastAdapter:
             "arpege":       settings.openmeteo_arpege_model,
             "ecmwf_global": settings.openmeteo_ecmwf_model,
         }
+        # Previous runs API — single endpoint, returns actual archived forecast runs
+        self.previous_runs_url = settings.openmeteo_previous_runs_url
+        self.previous_runs_model_map = {
+            **self.model_param_map,
+            # ECMWF has no model param on its dedicated endpoint but needs one on the unified endpoint
+            "ecmwf_global": settings.openmeteo_ecmwf_previous_runs_model,
+        }
 
     def _endpoint(self, model_id: str) -> str | None:
         return self.endpoint_map.get(model_id)
 
-    def fetch_model_at_coords(
+    def _fetch_batch(
         self,
-        model: ModelDefinition,
-        coords: list[tuple[float, float]],
+        url: str,
+        model_id: str,
+        model_param: str,
+        in_cov: list[tuple[float, float]],
+        past_days: int,
+        forecast_days: int,
         start: datetime,
         end: datetime,
     ) -> list[ForecastValue]:
-        """Fetch forecasts for multiple (lat, lon) pairs in a single batched request."""
-        endpoint = self._endpoint(model.model_id)
-        if not endpoint:
-            return []
-
-        in_cov = [(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)]
-        if not in_cov:
-            return []
-
-        past_days   = max(1, math.ceil((end - start).total_seconds() / 86400))
-        model_param = self.model_param_map.get(model.model_id, "")
-
+        """Single HTTP fetch for a list of coordinates."""
         params: dict = {
             "latitude":        ",".join(str(lat) for lat, _ in in_cov),
             "longitude":       ",".join(str(lon) for _, lon in in_cov),
             "hourly":          "wind_speed_10m,wind_direction_10m",
             "wind_speed_unit": "ms",
-            "past_days":       past_days,
-            "forecast_days":   1,
             "timezone":        "UTC",
         }
+        if past_days > 0:
+            params["past_days"] = past_days
+        if forecast_days > 0:
+            params["forecast_days"] = forecast_days
         if model_param:
             params["models"] = model_param
 
         try:
             with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
-                resp = client.get(endpoint, params=params)
+                resp = client.get(url, params=params)
                 resp.raise_for_status()
         except Exception as exc:
-            logger.warning("On-demand batch fetch failed for %s", model.model_id, exc_info=exc)
+            logger.warning("Batch fetch failed from %s: %s", url, exc)
             return []
 
         payload = resp.json()
@@ -109,25 +112,61 @@ class OpenMeteoForecastAdapter:
                     continue
                 u10, v10 = speed_dir_to_uv(ws_ms, wd_deg)
                 rows.append(ForecastValue(
-                    model_id=model.model_id,
+                    model_id=model_id,
                     run_time_utc=valid_time - timedelta(hours=6),
                     valid_time_utc=valid_time,
                     lat=lat, lon=lon, u10=u10, v10=v10,
                 ))
         return rows
 
-    def fetch_model(self, model: ModelDefinition, request: ForecastFetchRequest) -> list[ForecastValue]:
-        endpoint = self._endpoint(model.model_id)
-        if not endpoint:
+    def fetch_model_at_coords(
+        self,
+        model: ModelDefinition,
+        coords: list[tuple[float, float]],
+        start: datetime,
+        end: datetime,
+    ) -> list[ForecastValue]:
+        """Fetch forecasts using previous-runs API for past data, regular API for future."""
+        in_cov = [(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)]
+        if not in_cov:
             return []
 
+        now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         rows: list[ForecastValue] = []
-        past_days = max(1, math.ceil((request.end - request.start).total_seconds() / 86400))
+
+        # Past portion — use previous runs API (actual archived forecast runs)
+        if start < now:
+            past_days = max(1, math.ceil((now - start).total_seconds() / 86400))
+            model_param = self.previous_runs_model_map.get(model.model_id, "")
+            rows.extend(self._fetch_batch(
+                self.previous_runs_url, model.model_id, model_param, in_cov,
+                past_days=past_days, forecast_days=1,
+                start=start, end=min(end, now),
+            ))
+
+        # Future portion — use regular forecast API
+        if end > now:
+            endpoint = self._endpoint(model.model_id)
+            if endpoint:
+                model_param = self.model_param_map.get(model.model_id, "")
+                rows.extend(self._fetch_batch(
+                    endpoint, model.model_id, model_param, in_cov,
+                    past_days=0, forecast_days=1,
+                    start=now, end=end,
+                ))
+
+        return rows
+
+    def fetch_model(self, model: ModelDefinition, request: ForecastFetchRequest) -> list[ForecastValue]:
         stations = [s for s in request.stations if in_bbox(s.lat, s.lon, model.coverage_bbox)]
         if not stations:
             return []
 
-        model_param = self.model_param_map.get(model.model_id, "")
+        now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+        rows: list[ForecastValue] = []
+        past_days = max(1, math.ceil((now - request.start).total_seconds() / 86400))
+        prev_model_param = self.previous_runs_model_map.get(model.model_id, "")
+
         with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
             for station in stations:
                 params: dict = {
@@ -139,10 +178,10 @@ class OpenMeteoForecastAdapter:
                     "forecast_days": 1,
                     "timezone": "UTC",
                 }
-                if model_param:
-                    params["models"] = model_param
+                if prev_model_param:
+                    params["models"] = prev_model_param
                 try:
-                    resp = client.get(endpoint, params=params)
+                    resp = client.get(self.previous_runs_url, params=params)
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     logger.warning(

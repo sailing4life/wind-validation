@@ -83,6 +83,12 @@ class Settings:
     openmeteo_icon_eu_model: str = os.getenv("OPENMETEO_ICON_EU_MODEL", "icon_eu")
     openmeteo_arpege_url: str = os.getenv("OPENMETEO_ARPEGE_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_arpege_model: str = os.getenv("OPENMETEO_ARPEGE_MODEL", "meteofrance_arpege_europe")
+    # Previous runs API — returns actual archived forecast runs (true forecast skill)
+    openmeteo_previous_runs_url: str = os.getenv(
+        "OPENMETEO_PREVIOUS_RUNS_URL", "https://previous-runs-api.open-meteo.com/v1/forecast"
+    )
+    # ECMWF needs an explicit model param on the unified previous-runs endpoint
+    openmeteo_ecmwf_previous_runs_model: str = os.getenv("OPENMETEO_ECMWF_PREVIOUS_RUNS_MODEL", "ecmwf_ifs04")
 
 
 SETTINGS = Settings()
