@@ -369,6 +369,52 @@ class ValidationService:
         self.cache.set(cache_key, result)
         return result
 
+    def forecast_point(
+        self,
+        lat: float,
+        lon: float,
+        winner_model_id: str,
+        bias_ws_ms: float,
+        hours_ahead: int,
+    ) -> dict:
+        from .scoring import uv_to_speed_dir
+
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        end = now + timedelta(hours=hours_ahead)
+        catalog = self.repo.models
+
+        models_series = []
+        for model in catalog:
+            if model.status != "ACTIVE":
+                continue
+            try:
+                fvs = self.forecast_adapter.fetch_forecast_with_extras(
+                    model, [(lat, lon)], now, end
+                )
+            except Exception as exc:
+                logger.warning("forecast_point fetch failed for %s: %s", model.model_id, exc)
+                fvs = []
+
+            hours_list = []
+            for fv in sorted(fvs, key=lambda x: x.valid_time_utc):
+                ws, wd = uv_to_speed_dir(fv.u10, fv.v10)
+                hours_list.append({
+                    "time_utc": fv.valid_time_utc,
+                    "ws_ms": ws,
+                    "gust_ms": fv.gust_ms,
+                    "wd_deg": wd,
+                    "temp_c": fv.temp_c,
+                })
+            if hours_list:
+                models_series.append({"model_id": model.model_id, "hours": hours_list})
+
+        return {
+            "winner_model_id": winner_model_id,
+            "bias_ws_ms": bias_ws_ms,
+            "hours_ahead": hours_ahead,
+            "models": models_series,
+        }
+
 
 async def run_hourly_refresh(ingestion_service, refresh_seconds: int, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():

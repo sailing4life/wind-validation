@@ -111,3 +111,33 @@ class CoverageModelDTO(BaseModel):
 class FreshnessDTO(BaseModel):
     sources: dict[str, datetime | None]
     models: dict[str, datetime | None]
+
+
+# ── Forecast tab ──────────────────────────────────────────────────────────────
+
+class ForecastRequest(BaseModel):
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
+    winner_model_id: str
+    bias_ws_ms: float = 0.0
+    hours_ahead: int = Field(default=48, ge=6, le=168)
+
+
+class ForecastHour(BaseModel):
+    time_utc: datetime
+    ws_ms: float | None = None
+    gust_ms: float | None = None
+    wd_deg: float | None = None
+    temp_c: float | None = None
+
+
+class ForecastModelSeries(BaseModel):
+    model_id: str
+    hours: list[ForecastHour]
+
+
+class ForecastResponse(BaseModel):
+    winner_model_id: str
+    bias_ws_ms: float
+    hours_ahead: int
+    models: list[ForecastModelSeries]

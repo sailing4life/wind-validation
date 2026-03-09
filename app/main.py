@@ -14,7 +14,7 @@ from .forecast_broker import ForecastBroker
 from .ingestion import IngestionService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
-from .schemas import FreshnessDTO, ValidatePointRequest, ValidatePointResponse
+from .schemas import ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
 from .services import ValidationService, run_hourly_refresh
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,6 +61,17 @@ def validate_point(payload: ValidatePointRequest) -> dict:
         lon=payload.lon,
         hours_back=payload.hours_back,
         radius_km=payload.radius_km,
+    )
+
+
+@app.post("/api/forecast", response_model=ForecastResponse)
+def forecast(payload: ForecastRequest) -> dict:
+    return validation_service.forecast_point(
+        lat=payload.lat,
+        lon=payload.lon,
+        winner_model_id=payload.winner_model_id,
+        bias_ws_ms=payload.bias_ws_ms,
+        hours_ahead=payload.hours_ahead,
     )
 
 

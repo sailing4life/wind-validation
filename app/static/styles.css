@@ -384,6 +384,189 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 .source-brightsky   { background: #ede9fe; color: #5b21b6; }
 .source-other       { background: #f1f5f9; color: #475569; }
 
+/* ── Tab navigation ─────────────────────────────────────────────────────────── */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tab {
+  padding: 4px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.tab:hover { background: #e0e7ef; }
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Forecast layout ────────────────────────────────────────────────────────── */
+.fc-layout {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 12px;
+  padding: 12px;
+  align-items: start;
+}
+
+.fc-map-section {
+  position: sticky;
+  top: 12px;
+}
+
+#fcMap {
+  width: 100%;
+  height: clamp(400px, 65vh, 700px);
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  display: block;
+}
+
+.fc-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fc-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fc-controls label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.fc-controls input[type="number"] {
+  width: 70px;
+  padding: 5px 7px;
+  font-size: 12px;
+}
+
+.fc-status {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* Forecast Plotly container */
+#fcCharts > div {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+/* Forecast table */
+.fc-table-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.fc-table-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.fc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.fc-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+  font-size: 10px;
+  padding: 6px 5px;
+  border-bottom: 2px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fc-table th:first-child { text-align: left; }
+
+.fc-table td {
+  padding: 5px 5px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  text-align: right;
+}
+
+.fc-table tr:last-child td { border-bottom: none; }
+.fc-table tr:hover td { background: var(--bg) !important; filter: brightness(0.97); }
+
+.fc-time {
+  font-family: monospace;
+  font-size: 11px;
+  text-align: left !important;
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+
+.fc-num {
+  font-variant-numeric: tabular-nums;
+  transition: background 0.1s;
+}
+
+.note-col { width: 110px; text-align: left !important; }
+
+.note-cell {
+  text-align: left !important;
+  background: #f8fafc;
+  color: var(--ink);
+  min-width: 90px;
+  cursor: text;
+  border-radius: 3px;
+  outline: none;
+}
+
+.note-cell:focus { background: #fffbeb; box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* Column widths */
+.fc-table th:nth-child(1), .fc-table td:nth-child(1) { width: 80px; }
+.fc-table th:nth-child(2), .fc-table td:nth-child(2) { width: 58px; }
+.fc-table th:nth-child(3), .fc-table td:nth-child(3) { width: 58px; }
+.fc-table th:nth-child(4), .fc-table td:nth-child(4) { width: 50px; }
+.fc-table th:nth-child(5), .fc-table td:nth-child(5) { width: 58px; }
+.fc-table th:nth-child(6), .fc-table td:nth-child(6) { width: 110px; }
+
+@media (max-width: 900px) {
+  .fc-layout {
+    grid-template-columns: 1fr;
+  }
+  .fc-map-section { position: static; }
+  #fcMap { height: 55vw; min-height: 300px; }
+}
+
 @media (max-width: 860px) {
   main { grid-template-columns: 1fr; }
   #map { height: 55vw; min-height: 320px; }

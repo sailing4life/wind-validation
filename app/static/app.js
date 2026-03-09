@@ -587,6 +587,17 @@ async function runValidation() {
   (data.models || []).forEach(m => { if (m.run_time_utc) runTimes[m.model_id] = m.run_time_utc; });
   populateModelToggles(latestSeries, data.winner_model_id, runTimes);
   drawCharts();
+
+  // Pass params to forecast tab
+  const winnerRow = (data.models || []).find(m => m.model_id === data.winner_model_id);
+  if (typeof setForecastParams === 'function') {
+    setForecastParams(
+      data.lat,
+      data.lon,
+      data.winner_model_id ?? '',
+      winnerRow?.bias_ws ?? 0,
+    );
+  }
 }
 
 // ── chart hover (crosshair + tooltip) ────────────────────────────────────────

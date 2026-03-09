@@ -67,12 +67,17 @@ class OpenMeteoForecastAdapter:
         forecast_days: int,
         start: datetime,
         end: datetime,
+        include_extras: bool = False,
     ) -> list[ForecastValue]:
-        """Single HTTP fetch for a list of coordinates."""
+        """Single HTTP fetch for a list of coordinates.
+        Set include_extras=True to also fetch windgusts_10m and temperature_2m."""
+        hourly_vars = "wind_speed_10m,wind_direction_10m"
+        if include_extras:
+            hourly_vars += ",windgusts_10m,temperature_2m"
         params: dict = {
             "latitude":        ",".join(str(lat) for lat, _ in in_cov),
             "longitude":       ",".join(str(lon) for _, lon in in_cov),
-            "hourly":          "wind_speed_10m,wind_direction_10m",
+            "hourly":          hourly_vars,
             "wind_speed_unit": "ms",
             "timezone":        "UTC",
         }
@@ -100,11 +105,13 @@ class OpenMeteoForecastAdapter:
             if i >= len(payload):
                 break
             hourly = payload[i].get("hourly", {})
-            for t_raw, ws, wd in zip(
+            gusts = hourly.get("windgusts_10m", []) if include_extras else []
+            temps = hourly.get("temperature_2m", []) if include_extras else []
+            for j, (t_raw, ws, wd) in enumerate(zip(
                 hourly.get("time", []),
                 hourly.get("wind_speed_10m", []),
                 hourly.get("wind_direction_10m", []),
-            ):
+            )):
                 try:
                     valid_time = datetime.fromisoformat(str(t_raw)).replace(tzinfo=UTC)
                     ws_ms, wd_deg = float(ws), float(wd)
@@ -113,11 +120,23 @@ class OpenMeteoForecastAdapter:
                 if valid_time < start or valid_time > end:
                     continue
                 u10, v10 = speed_dir_to_uv(ws_ms, wd_deg)
+                gust_ms: float | None = None
+                temp_c: float | None = None
+                if include_extras:
+                    try:
+                        gust_ms = float(gusts[j]) if j < len(gusts) and gusts[j] is not None else None
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        temp_c = float(temps[j]) if j < len(temps) and temps[j] is not None else None
+                    except (TypeError, ValueError):
+                        pass
                 rows.append(ForecastValue(
                     model_id=model_id,
                     run_time_utc=valid_time - timedelta(hours=6),
                     valid_time_utc=valid_time,
                     lat=lat, lon=lon, u10=u10, v10=v10,
+                    gust_ms=gust_ms, temp_c=temp_c,
                 ))
         return rows
 
@@ -178,6 +197,30 @@ class OpenMeteoForecastAdapter:
                 ))
 
         return rows
+
+    def fetch_forecast_with_extras(
+        self,
+        model: ModelDefinition,
+        coords: list[tuple[float, float]],
+        start: datetime,
+        end: datetime,
+    ) -> list[ForecastValue]:
+        """Future-only fetch with gust and temperature included (for Forecast tab)."""
+        in_cov = [(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)]
+        if not in_cov:
+            return []
+        endpoint = self._endpoint(model.model_id)
+        if not endpoint:
+            return []
+        now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+        forecast_days = max(1, math.ceil((end - now).total_seconds() / 86400) + 1)
+        model_param = self.model_param_map.get(model.model_id, "")
+        return self._fetch_batch(
+            endpoint, model.model_id, model_param, in_cov,
+            past_days=0, forecast_days=forecast_days,
+            start=start, end=end,
+            include_extras=True,
+        )
 
     def fetch_model(self, model: ModelDefinition, request: ForecastFetchRequest) -> list[ForecastValue]:
         stations = [s for s in request.stations if in_bbox(s.lat, s.lon, model.coverage_bbox)]
