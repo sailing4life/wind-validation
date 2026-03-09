@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: wind-validation
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: LIVE_OBSERVATIONS_ENABLED
+        value: "true"
+      - key: LIVE_FORECASTS_ENABLED
+        value: "true"
+      - key: REFRESH_INTERVAL_SECONDS
+        value: "600"
+      # Add your API keys in the Render dashboard (not here):
+      # KNMI_API_KEY, METEOFRANCE_API_KEY, NCEI_TOKEN

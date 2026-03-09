@@ -1,0 +1,1 @@
+"""Wind validation application package."""

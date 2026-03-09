@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wind Validation</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+</head>
+<body>
+  <header>
+    <div class="header-row">
+      <h1>Wind Model Validation</h1>
+      <div id="window-info" class="window-info">no data loaded yet</div>
+    </div>
+    <p class="subtitle">Click the map or enter coordinates to rank NWP models by vector RMSE on U/V components.</p>
+  </header>
+
+  <main>
+    <div class="col-left">
+      <section class="panel map-panel">
+        <div id="map"></div>
+        <div class="map-legend">
+          <svg width="20" height="20" style="vertical-align:middle;overflow:visible" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(180,10,10)"><line x1="10" y1="10" x2="10" y2="1" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="1" x2="16" y2="3.5" stroke="#16a34a" stroke-width="1.5"/><circle cx="10" cy="10" r="2.5" fill="#16a34a"/></g></svg>
+          <span>Observed (barb)</span>
+          &nbsp;&nbsp;
+          <svg width="20" height="20" style="vertical-align:middle;overflow:visible" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(180,10,10)"><line x1="10" y1="10" x2="10" y2="1" stroke="#2563eb" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="1" x2="16" y2="3.5" stroke="#2563eb" stroke-width="1.5"/><circle cx="10" cy="10" r="2.5" fill="#2563eb"/></g></svg>
+          <span>Model at query pt</span>
+          &nbsp;&nbsp;
+          <span class="legend-dot" style="background:#94a3b8;border:2px solid #475569;display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle"></span>
+          <span>Station</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="chart-header">
+          <h2>Observed vs Forecast</h2>
+          <div class="mode-pills">
+            <label class="mode-pill"><input type="radio" name="analysisMode" value="pin" checked><span>At pin</span></label>
+            <label class="mode-pill"><input type="radio" name="analysisMode" value="obs"><span>At obs stations</span></label>
+            <label class="mode-pill mode-pill-sep"><input type="checkbox" id="errorModeToggle"><span>Error</span></label>
+          </div>
+        </div>
+        <div id="modelToggles" class="model-toggles"></div>
+        <div id="chart-status" class="chart-status"></div>
+        <p id="speedLabel" class="chart-sublabel">Wind speed (kt)</p>
+        <canvas id="timePlot"></canvas>
+        <p id="dirLabel" class="chart-sublabel" style="margin-top:10px">Wind direction (°)</p>
+        <canvas id="dirPlot"></canvas>
+        <div class="chart-footer">
+          <span class="legend-swatch obs-swatch"></span> Observed &nbsp;
+          <span style="color:#94a3b8;font-size:11px">— model colors match toggles above</span>
+          <span class="chart-tz">UTC</span>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-right">
+      <section class="panel controls">
+        <h2>Query</h2>
+        <label>Latitude <input id="lat" type="number" step="0.0001" value="52.1" /></label>
+        <label>Longitude <input id="lon" type="number" step="0.0001" value="5.1" /></label>
+        <label>Radius (km) <input id="radius" type="number" step="1" value="50" /></label>
+        <label>Hours back <input id="hoursBack" type="number" step="1" value="48" min="1" max="168" /></label>
+        <button id="run">Validate</button>
+        <div id="meta" class="meta-block"></div>
+      </section>
+
+      <section class="panel ranking-panel">
+        <h2>Model ranking</h2>
+        <table id="ranking">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th title="Vector RMSE on U/V components (m/s)">Vec&nbsp;RMSE</th>
+              <th title="RMSE of wind speed (m/s)">RMSE&nbsp;ws</th>
+              <th title="Mean bias of wind speed (m/s)">Bias&nbsp;ws</th>
+              <th title="Number of matched obs-forecast pairs">n</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="panel stations-panel">
+        <h2>Stations in radius</h2>
+        <ul id="stations"></ul>
+      </section>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
