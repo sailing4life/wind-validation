@@ -411,8 +411,8 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   border-color: var(--accent);
 }
 
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
+.tab-panel { display: none !important; }
+.tab-panel.active { display: block !important; }
 
 /* ── Forecast layout ────────────────────────────────────────────────────────── */
 .fc-layout {
