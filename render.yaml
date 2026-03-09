@@ -1,9 +1,7 @@
 services:
   - type: web
     name: wind-validation
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    runtime: docker
     envVars:
       - key: LIVE_OBSERVATIONS_ENABLED
         value: "true"
