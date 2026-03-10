@@ -745,37 +745,89 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   gap: 12px;
 }
 
-/* ── Print styles ────────────────────────────────────────────────────────────── */
+/* ── Print / PDF ─────────────────────────────────────────────────────────────── */
+@page {
+  size: A4 portrait;
+  margin: 18mm 18mm 15mm;
+}
+
 @media print {
+  /* ── Visibility ── */
   header, .bf-actions, #tab-validation, #tab-forecast { display: none !important; }
   #tab-briefing { display: block !important; }
 
-  body { background: #fff; font-size: 11px; margin: 0; }
-  .bf-page { padding: 0; gap: 10px; }
-  .panel { border: 1px solid #ccc; border-radius: 0; box-shadow: none; padding: 10px; }
+  /* ── Base ── */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body { background: #fff; font-size: 11px; margin: 0; color: #1e293b; }
 
-  /* Stack grid columns vertically for print so nothing overflows */
-  .bf-top-row,
-  .bf-ensemble-row { grid-template-columns: 1fr; gap: 10px; }
+  /* ── Strip card styling — use document sections instead ── */
+  .bf-page  { padding: 0; gap: 0; display: block; }
+  .panel    { border: none; border-radius: 0; box-shadow: none; padding: 0; background: transparent; }
+  .bf-section { padding: 0; }
 
-  /* Collapse table scroll constraints */
-  .bf-table-panel .fc-table-scroll { max-height: none !important; overflow: visible !important; }
-
-  /* Force background colors on table cells to print */
-  .fc-num, td[style*="background"] {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+  /* ── Document header: title in navy, subtitle in slate, rule below ── */
+  .bf-header-section {
+    display: flex; flex-direction: column; gap: 4px;
+    border-bottom: 3px solid #1e3a8a;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+  }
+  .bf-title-input {
+    border: none !important; box-shadow: none !important; outline: none !important;
+    font-size: 22px !important; font-weight: 700 !important;
+    color: #1e3a8a !important; background: transparent !important;
+    padding: 0 !important; margin: 0 !important; width: 100%;
+  }
+  .bf-subtitle-input {
+    border: none !important; box-shadow: none !important; outline: none !important;
+    font-size: 13px !important; font-weight: 400 !important;
+    color: #475569 !important; background: transparent !important;
+    padding: 0 !important; margin: 0 !important; width: 100%;
+  }
+  .bf-notes {
+    border: none !important; background: transparent !important; box-shadow: none !important;
+    padding: 0 !important; margin: 0 !important; resize: none;
+    font-size: 11px !important; line-height: 1.7; min-height: 0; width: 100%;
+    color: #1e293b !important;
   }
 
-  /* Keep table on page, allow natural page breaks between rows */
+  /* ── Section labels ── */
+  .fc-chart-title {
+    font-size: 9px; font-weight: 600; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.6px;
+    border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px;
+  }
+
+  /* ── Top row: keep chart + table side by side ── */
+  .bf-top-row {
+    display: grid !important;
+    grid-template-columns: 55% 43% !important;
+    gap: 14px !important;
+    align-items: start;
+    margin-bottom: 14px;
+  }
+
+  /* ── Ensemble row: side by side with a rule above ── */
+  .bf-ensemble-row {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 14px !important;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 12px;
+    margin-top: 4px;
+  }
+
+  /* ── Table ── */
+  .bf-table-panel .fc-table-scroll { max-height: none !important; overflow: visible !important; }
   .bf-wind-table { page-break-inside: auto; }
   .bf-wind-table tr { page-break-inside: avoid; }
-
-  /* Page break before ensemble row so it starts fresh if needed */
-  .bf-ensemble-row { page-break-before: auto; }
-
-  .bf-notes { border: 1px solid #ccc; background: #fff; min-height: 0; }
-  .bf-title-input, .bf-subtitle-input { border-bottom-color: #ccc; }
+  .bf-wind-table th {
+    background: #f1f5f9 !important; font-size: 9px;
+    padding: 4px 3px; border-bottom: 1.5px solid #cbd5e1;
+    position: static; /* un-sticky for print */
+  }
+  .bf-wind-table td { padding: 3px 4px; }
+  .bf-note-cell { background: transparent !important; }
 }
 
 @media (max-width: 860px) {
