@@ -197,6 +197,8 @@ function windSpeedColor(kt) {
 // ── Chart 1: Best Forecast (winner model, expedition style) ───────────────────
 function renderBestForecastChart() {
   const panel = document.getElementById('fcBestPanel');
+  const chartDiv = document.getElementById('fcBestChart');
+  if (!panel || !chartDiv) return;
   const { winner_model_id, bias_ws_ms, models } = forecastData;
   const winner = models.find(m => m.model_id === winner_model_id) || models[0];
   if (!winner) { panel.style.display = 'none'; return; }
@@ -290,13 +292,14 @@ function renderBestForecastChart() {
     },
   };
 
-  Plotly.newPlot(document.getElementById('fcBestChart'), traces, layout,
-    { responsive: true, displayModeBar: false });
+  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 }
 
 // ── Chart 2: Ensemble (all selected models + mean ± 1σ) ──────────────────────
 function renderEnsembleChart() {
   const panel = document.getElementById('fcEnsemblePanel');
+  const chartDiv = document.getElementById('fcEnsembleChart');
+  if (!panel || !chartDiv) return;
   if (_correctedOnly) { panel.style.display = 'none'; return; }
 
   const { winner_model_id, models } = forecastData;
@@ -363,13 +366,14 @@ function renderEnsembleChart() {
     yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
   };
 
-  Plotly.newPlot(document.getElementById('fcEnsembleChart'), traces, layout,
-    { responsive: true, displayModeBar: false });
+  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 }
 
 // ── Chart 3: Temperature ───────────────────────────────────────────────────────
 function renderTempChart() {
   const panel = document.getElementById('fcTempPanel');
+  const chartDiv = document.getElementById('fcTempChart');
+  if (!panel || !chartDiv) return;
   if (_correctedOnly) { panel.style.display = 'none'; return; }
 
   const { models } = forecastData;
@@ -401,13 +405,14 @@ function renderTempChart() {
     yaxis: { title: 'Temp (°C)', gridcolor: '#e2e8f0', tickfont: { color: '#64748b' } },
   };
 
-  Plotly.newPlot(document.getElementById('fcTempChart'), traces, layout,
-    { responsive: true, displayModeBar: false });
+  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 }
 
 // ── Chart 4: Precipitation ────────────────────────────────────────────────────
 function renderPrecipChart() {
   const panel = document.getElementById('fcPrecipPanel');
+  const chartDiv = document.getElementById('fcPrecipChart');
+  if (!panel || !chartDiv) return;
   if (_correctedOnly) { panel.style.display = 'none'; return; }
 
   const { winner_model_id, models } = forecastData;
@@ -430,7 +435,7 @@ function renderPrecipChart() {
     bargap: 0.15,
   };
 
-  Plotly.newPlot(document.getElementById('fcPrecipChart'), [{
+  Plotly.newPlot(chartDiv, [{
     x: times, y: precip,
     name: 'Precipitation',
     type: 'bar',
@@ -451,13 +456,14 @@ function renderAllCharts() {
 // ── Hourly forecast table ──────────────────────────────────────────────────────
 function renderForecastTable() {
   const wrap = document.getElementById('fcTableWrap');
-  wrap.innerHTML = '';
+  if (!wrap) return;
 
   const { winner_model_id, bias_ws_ms, models } = forecastData;
   if (!models || models.length === 0) { wrap.style.display = 'none'; return; }
 
   const winner = models.find(m => m.model_id === winner_model_id) || models[0];
   const biasKt = bias_ws_ms * MS_TO_KT;
+  wrap.innerHTML = '';
   wrap.style.display = '';
 
   const heading = document.createElement('div');
