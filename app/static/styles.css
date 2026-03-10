@@ -731,8 +731,21 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 }
 .bf-note-cell:focus { background: #fffbeb; box-shadow: inset 0 0 0 1.5px var(--accent); }
 
-/* Side-by-side charts */
-.bf-charts-row {
+/* Top row: forecast chart (left) + scrollable table (right) */
+.bf-top-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.bf-table-panel .fc-table-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Bottom row: ensemble TWS + TWD */
+.bf-ensemble-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
@@ -744,13 +757,12 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   #tab-briefing { display: block !important; }
   .bf-page { padding: 0; gap: 16px; }
   .panel { border: 1px solid #ccc; border-radius: 0; }
-  .fc-table-scroll { max-height: none; overflow: visible; }
+  .bf-table-panel .fc-table-scroll { max-height: none; overflow: visible; }
   body { background: #fff; font-size: 12px; }
   .bf-notes { border: 1px solid #ccc; background: #fff; min-height: 0; }
   .bf-title-input, .bf-subtitle-input { border-bottom-color: #ccc; }
-  .bf-charts-row { grid-template-columns: 1fr 1fr; }
 }
 
-@media (max-width: 700px) {
-  .bf-charts-row { grid-template-columns: 1fr; }
+@media (max-width: 860px) {
+  .bf-top-row, .bf-ensemble-row { grid-template-columns: 1fr; }
 }

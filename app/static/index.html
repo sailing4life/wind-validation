@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=9" />
+  <link rel="stylesheet" href="/static/styles.css?v=10" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -187,20 +187,26 @@
           <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here…&#10;&#10;• Wind: …&#10;• Conditions: …&#10;• Outlook: …"></textarea>
         </div>
 
-        <!-- Charts side-by-side -->
-        <div class="bf-charts-row">
+        <!-- Top row: forecast chart + hourly table -->
+        <div class="bf-top-row">
           <div class="panel bf-section" id="bfBestPanel" style="display:none">
             <div class="fc-chart-title">Wind Forecast — <span id="bfBestTitle"></span></div>
             <div id="bfBestChart"></div>
           </div>
-          <div class="panel bf-section" id="bfEnsemblePanel" style="display:none">
-            <div class="fc-chart-title">Ensemble — All Models</div>
-            <div id="bfEnsembleChart"></div>
-          </div>
+          <div class="panel bf-section bf-table-panel" id="bfTableWrap"></div>
         </div>
 
-        <!-- Hourly table -->
-        <div class="panel bf-section" id="bfTableWrap"></div>
+        <!-- Bottom row: ensemble TWS + TWD -->
+        <div class="bf-ensemble-row" id="bfEnsembleRow" style="display:none">
+          <div class="panel bf-section" id="bfEnsemblePanel">
+            <div class="fc-chart-title">Ensemble TWS — All Models</div>
+            <div id="bfEnsembleChart"></div>
+          </div>
+          <div class="panel bf-section" id="bfEnsembleDirPanel">
+            <div class="fc-chart-title">Ensemble TWD — All Models</div>
+            <div id="bfEnsembleDirChart"></div>
+          </div>
+        </div>
 
       </div>
     </div>
@@ -208,8 +214,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=9"></script>
-  <script src="/static/forecast.js?v=9"></script>
-  <script src="/static/briefing.js?v=9"></script>
+  <script src="/static/app.js?v=10"></script>
+  <script src="/static/forecast.js?v=10"></script>
+  <script src="/static/briefing.js?v=10"></script>
 </body>
 </html>

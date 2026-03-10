@@ -127,51 +127,78 @@ function renderBriefingBestChart() {
   }, { responsive: true, displayModeBar: false });
 }
 
-// ── Ensemble chart ────────────────────────────────────────────────────────────
-function renderBriefingEnsembleChart() {
-  const panel   = document.getElementById('bfEnsemblePanel');
-  const chartDiv= document.getElementById('bfEnsembleChart');
-  if (!panel || !chartDiv || !forecastData || _correctedOnly) {
-    if (panel) panel.style.display = 'none'; return;
-  }
+// ── Ensemble charts (TWS + TWD, share a row wrapper) ─────────────────────────
+function renderBriefingEnsembleCharts() {
+  const row = document.getElementById('bfEnsembleRow');
+  if (!row || !forecastData || _correctedOnly) { if (row) row.style.display = 'none'; return; }
 
   const { winner_model_id, models } = forecastData;
   const selected = models.filter(m => _selectedModels.has(m.model_id));
-  if (selected.length < 2) { panel.style.display = 'none'; return; }
-  panel.style.display = '';
+  if (selected.length < 2) { row.style.display = 'none'; return; }
+  row.style.display = '';
 
-  const traces = [];
-  selected.forEach(series => {
-    const color = modelColor(series.model_id);
-    const fh    = bfFilterHours(series.hours);
-    const times = fh.map(h => h.time_utc);
-    const ws_kt = fh.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null);
-    traces.push({
-      x: times, y: ws_kt, name: series.model_id,
-      type: 'scatter', mode: 'lines',
-      line: { color, width: series.model_id === winner_model_id ? 2 : 1.5 },
-      opacity: 0.85,
-    });
-  });
-
-  // Ensemble mean ± 1σ — computed over the filtered time window
   const filteredSelected = selected.map(s => ({ ...s, hours: bfFilterHours(s.hours) }));
-  const stats = computeEnsembleStats(filteredSelected);
-  const upper = stats.means.map((m, i) => +(m + stats.stds[i]).toFixed(2));
-  const lower = stats.means.map((m, i) => +(m - stats.stds[i]).toFixed(2));
 
-  traces.push({ x: stats.times, y: upper, type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
-  traces.push({ x: stats.times, y: lower, name: '±1σ',    type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
-  traces.push({ x: stats.times, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
+  // ── TWS ──
+  const twsDiv = document.getElementById('bfEnsembleChart');
+  if (twsDiv) {
+    const traces = [];
+    filteredSelected.forEach(series => {
+      const color = modelColor(series.model_id);
+      const times = series.hours.map(h => h.time_utc);
+      const ws_kt = series.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null);
+      traces.push({
+        x: times, y: ws_kt, name: series.model_id,
+        type: 'scatter', mode: 'lines',
+        line: { color, width: series.model_id === winner_model_id ? 2 : 1.5 },
+        opacity: 0.85,
+      });
+    });
+    const stats = computeEnsembleStats(filteredSelected);
+    const upper = stats.means.map((m, i) => +(m + stats.stds[i]).toFixed(2));
+    const lower = stats.means.map((m, i) => +(m - stats.stds[i]).toFixed(2));
+    traces.push({ x: stats.times, y: upper, type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
+    traces.push({ x: stats.times, y: lower, name: '±1σ', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
+    traces.push({ x: stats.times, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
+    Plotly.newPlot(twsDiv, traces, {
+      ...LIGHT_LAYOUT,
+      height: 300,
+      margin: { t: 40, b: 30, l: 50, r: 20 },
+      legend: { orientation: 'h', x: 0, y: 1.15, font: { size: 10 } },
+      xaxis: { ...LIGHT_XAXIS },
+      yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
+    }, { responsive: true, displayModeBar: false });
+  }
 
-  Plotly.newPlot(chartDiv, traces, {
-    ...LIGHT_LAYOUT,
-    height: 340,
-    margin: { t: 40, b: 30, l: 50, r: 20 },
-    legend: { orientation: 'h', x: 0, y: 1.15, font: { size: 10 } },
-    xaxis: { ...LIGHT_XAXIS },
-    yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
-  }, { responsive: true, displayModeBar: false });
+  // ── TWD ──
+  const twdDiv = document.getElementById('bfEnsembleDirChart');
+  if (twdDiv) {
+    const traces = [];
+    filteredSelected.forEach(series => {
+      const color = modelColor(series.model_id);
+      const times = series.hours.map(h => h.time_utc);
+      const wd    = series.hours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null);
+      traces.push({
+        x: times, y: wd, name: series.model_id,
+        type: 'scatter', mode: 'lines',
+        line: { color, width: series.model_id === winner_model_id ? 2 : 1.5 },
+        opacity: 0.85, showlegend: false,
+      });
+    });
+    Plotly.newPlot(twdDiv, traces, {
+      ...LIGHT_LAYOUT,
+      height: 300,
+      margin: { t: 20, b: 30, l: 50, r: 20 },
+      showlegend: false,
+      xaxis: { ...LIGHT_XAXIS },
+      yaxis: {
+        title: 'TWD (°)', range: [0, 360], dtick: 90,
+        gridcolor: '#e2e8f0', tickfont: { color: '#64748b' },
+        tickvals: [0, 90, 180, 270, 360],
+        ticktext: ['N (0°)', 'E (90°)', 'S (180°)', 'W (270°)', 'N (360°)'],
+      },
+    }, { responsive: true, displayModeBar: false });
+  }
 }
 
 // ── Hourly wind table ─────────────────────────────────────────────────────────
@@ -231,7 +258,7 @@ function renderBriefingWindTable() {
 // ── Re-render charts + table (called by range selects) ────────────────────────
 function bfRerender() {
   renderBriefingBestChart();
-  renderBriefingEnsembleChart();
+  renderBriefingEnsembleCharts();
   renderBriefingWindTable();
 }
 
