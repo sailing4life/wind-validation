@@ -701,6 +701,17 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   outline: 2px solid var(--accent);
   border-color: transparent;
 }
+.bf-notes-tools {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.bf-note-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.1;
+}
 
 /* Briefing table  -  class-based column widths so optional Rain col doesn't break layout */
 .bf-wind-table { table-layout: fixed; width: 100%; }
