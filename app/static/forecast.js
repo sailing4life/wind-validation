@@ -197,7 +197,7 @@ function windSpeedColor(kt) {
 
 // ── Range sync: best-forecast slider → all other charts ───────────────────────
 function syncChartRanges(range) {
-  for (const id of ['fcEnsembleChart', 'fcTempChart', 'fcPrecipChart']) {
+  for (const id of ['fcEnsembleChart', 'fcEnsembleDirChart', 'fcTempChart', 'fcPrecipChart']) {
     const el = document.getElementById(id);
     if (el && el._fullLayout) Plotly.relayout(el, { 'xaxis.range': range });
   }
@@ -324,7 +324,7 @@ function renderBestForecastChart() {
     if (ev['xaxis.range[0]'] != null) {
       syncChartRanges([ev['xaxis.range[0]'], ev['xaxis.range[1]']]);
     } else if (ev['xaxis.autorange']) {
-      for (const id of ['fcEnsembleChart', 'fcTempChart', 'fcPrecipChart']) {
+      for (const id of ['fcEnsembleChart', 'fcEnsembleDirChart', 'fcTempChart', 'fcPrecipChart']) {
         const el = document.getElementById(id);
         if (el && el._fullLayout) Plotly.relayout(el, { 'xaxis.autorange': true });
       }
@@ -335,15 +335,15 @@ function renderBestForecastChart() {
 
 // ── Chart 2: Ensemble (all selected models + mean ± 1σ) ──────────────────────
 function renderEnsembleChart() {
-  const panel = document.getElementById('fcEnsemblePanel');
+  const row = document.getElementById('fcEnsembleRow');
   const chartDiv = document.getElementById('fcEnsembleChart');
-  if (!panel || !chartDiv) return;
-  if (_correctedOnly) { panel.style.display = 'none'; return; }
+  if (!row || !chartDiv) return;
+  if (_correctedOnly) { row.style.display = 'none'; return; }
 
   const { winner_model_id, models } = forecastData;
   const selected = models.filter(m => _selectedModels.has(m.model_id));
-  if (selected.length === 0) { panel.style.display = 'none'; return; }
-  panel.style.display = '';
+  if (selected.length === 0) { row.style.display = 'none'; return; }
+  row.style.display = '';
 
   const traces = [];
 
@@ -405,6 +405,47 @@ function renderEnsembleChart() {
   };
 
   Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+
+  renderEnsembleDirChart(selected, winner_model_id);
+}
+
+// ── Chart 2b: Ensemble TWD ────────────────────────────────────────────────────
+function renderEnsembleDirChart(selected, winner_model_id) {
+  const chartDiv = document.getElementById('fcEnsembleDirChart');
+  if (!chartDiv) return;
+
+  const traces = [];
+  selected.forEach(series => {
+    const color = modelColor(series.model_id);
+    const isWinner = series.model_id === winner_model_id;
+    const times = series.hours.map(h => h.time_utc);
+    const wd = series.hours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null);
+    traces.push({
+      x: times, y: wd,
+      name: series.model_id,
+      type: 'scatter', mode: 'lines+markers',
+      line: { color, width: isWinner ? 2 : 1.5 },
+      marker: { color, size: isWinner ? 5 : 4 },
+      opacity: 0.85,
+      showlegend: false,
+    });
+  });
+
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 370,
+    margin: { t: 20, b: 50, l: 55, r: 20 },
+    showlegend: false,
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: {
+      title: 'TWD (°)',
+      range: [0, 360], dtick: 90,
+      gridcolor: '#e2e8f0',
+      tickfont: { color: '#64748b' },
+      tickvals: [0, 90, 180, 270, 360],
+      ticktext: ['N (0°)', 'E (90°)', 'S (180°)', 'W (270°)', 'N (360°)'],
+    },
+  }, { responsive: true, displayModeBar: false });
 }
 
 // ── Chart 3: Temperature ───────────────────────────────────────────────────────

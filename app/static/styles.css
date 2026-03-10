@@ -477,6 +477,17 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   /* inherits .panel */
 }
 
+/* Ensemble TWS + TWD side by side */
+.fc-ensemble-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 860px) {
+  .fc-ensemble-row { grid-template-columns: 1fr; }
+}
+
 .fc-chart-title {
   font-size: 13px;
   font-weight: 600;

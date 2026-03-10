@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=7" />
+  <link rel="stylesheet" href="/static/styles.css?v=8" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -129,9 +129,15 @@
         <div id="fcBestChart"></div>
       </div>
 
-      <div class="fc-chart-panel panel" id="fcEnsemblePanel" style="display:none">
-        <div class="fc-chart-title">Ensemble — All Models</div>
-        <div id="fcEnsembleChart"></div>
+      <div class="fc-ensemble-row" id="fcEnsembleRow" style="display:none">
+        <div class="fc-chart-panel panel" id="fcEnsemblePanel">
+          <div class="fc-chart-title">Ensemble TWS — All Models</div>
+          <div id="fcEnsembleChart"></div>
+        </div>
+        <div class="fc-chart-panel panel" id="fcEnsembleDirPanel">
+          <div class="fc-chart-title">Ensemble TWD — All Models</div>
+          <div id="fcEnsembleDirChart"></div>
+        </div>
       </div>
 
       <div class="fc-chart-panel panel" id="fcTempPanel" style="display:none">
@@ -201,8 +207,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=7"></script>
-  <script src="/static/forecast.js?v=7"></script>
-  <script src="/static/briefing.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
+  <script src="/static/forecast.js?v=8"></script>
+  <script src="/static/briefing.js?v=8"></script>
 </body>
 </html>
