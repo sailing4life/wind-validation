@@ -5,12 +5,25 @@
  *   _winnerModelId, _biasWsMs, _selectedModels, _correctedOnly
  */
 
-// ── Time formatting ───────────────────────────────────────────────────────────
+// ── Time formatting (local time) ──────────────────────────────────────────────
 const BF_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+function bfParseUtc(isoStr) {
+  // Always treat server strings as UTC (append Z if missing)
+  return new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z');
+}
+
 function bfFmt(isoStr) {
-  const t = new Date(isoStr);
-  return `${String(t.getUTCDate()).padStart(2,'0')} ${BF_MONTHS[t.getUTCMonth()]} ${String(t.getUTCHours()).padStart(2,'0')}z`;
+  const d = bfParseUtc(isoStr);
+  return `${String(d.getDate()).padStart(2,'0')} ${BF_MONTHS[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}`;
+}
+
+// Shift a UTC ISO string to a local-time ISO string so Plotly shows local time
+function bfLocalISO(isoStr) {
+  const d = bfParseUtc(isoStr);
+  // Build YYYY-MM-DDTHH:MM using local date parts
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ── Range selects ─────────────────────────────────────────────────────────────
@@ -19,7 +32,7 @@ function bfInitRange() {
   const sel = ['bfRangeStart', 'bfRangeEnd'].map(id => document.getElementById(id));
   sel.forEach(s => { s.innerHTML = ''; });
   hours.forEach((h, i) => {
-    const label = bfFmt(h.time_utc);
+    const label = bfFmt(h.time_utc);   // local time label
     sel.forEach(s => s.add(new Option(label, i)));
   });
   sel[0].value = '0';
@@ -65,7 +78,7 @@ function renderBriefingBestChart() {
 
   const fh      = bfFilterHours(winner.hours);
   const biasKt  = bias_ws_ms * MS_TO_KT;
-  const times   = fh.map(h => h.time_utc);
+  const times   = fh.map(h => bfLocalISO(h.time_utc));
   const ws_kt   = fh.map(h => h.ws_ms   != null ? +(h.ws_ms   * MS_TO_KT).toFixed(1) : null);
   const corr_kt = ws_kt.map(v  => v != null ? +(v - biasKt).toFixed(1) : null);
   const gust_kt = fh.map(h => h.gust_ms != null ? +(h.gust_ms * MS_TO_KT).toFixed(1) : null);
@@ -145,7 +158,7 @@ function renderBriefingEnsembleCharts() {
     const traces = [];
     filteredSelected.forEach(series => {
       const color = modelColor(series.model_id);
-      const times = series.hours.map(h => h.time_utc);
+      const times = series.hours.map(h => bfLocalISO(h.time_utc));
       const ws_kt = series.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null);
       traces.push({
         x: times, y: ws_kt, name: series.model_id,
@@ -155,11 +168,12 @@ function renderBriefingEnsembleCharts() {
       });
     });
     const stats = computeEnsembleStats(filteredSelected);
+    const statTimes = stats.times.map(bfLocalISO);
     const upper = stats.means.map((m, i) => +(m + stats.stds[i]).toFixed(2));
     const lower = stats.means.map((m, i) => +(m - stats.stds[i]).toFixed(2));
-    traces.push({ x: stats.times, y: upper, type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
-    traces.push({ x: stats.times, y: lower, name: '±1σ', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
-    traces.push({ x: stats.times, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
+    traces.push({ x: statTimes, y: upper, type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
+    traces.push({ x: statTimes, y: lower, name: '±1σ', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
+    traces.push({ x: statTimes, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
     Plotly.newPlot(twsDiv, traces, {
       ...LIGHT_LAYOUT,
       height: 300,
@@ -176,7 +190,7 @@ function renderBriefingEnsembleCharts() {
     const traces = [];
     filteredSelected.forEach(series => {
       const color = modelColor(series.model_id);
-      const times = series.hours.map(h => h.time_utc);
+      const times = series.hours.map(h => bfLocalISO(h.time_utc));
       const wd    = series.hours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null);
       traces.push({
         x: times, y: wd, name: series.model_id,
@@ -214,8 +228,12 @@ function renderBriefingWindTable() {
   const biasKt   = bias_ws_ms * MS_TO_KT;
   const hasPrecip= winner.hours.some(h => h.precip_mm != null);
 
-  let headerCols = '<th>Time UTC</th><th>TWS (kt)</th><th>Gust (kt)</th><th>TWD (°)</th><th>Temp (°C)</th>';
-  if (hasPrecip) headerCols += '<th>Rain (mm)</th>';
+  let headerCols = '<th class="bfc-time">Time</th>'
+    + '<th class="bfc-num" title="True wind speed (kt)">TWS</th>'
+    + '<th class="bfc-num" title="Wind gust (kt)">Gust</th>'
+    + '<th class="bfc-num" title="True wind direction (°)">TWD</th>'
+    + '<th class="bfc-num" title="Temperature (°C)">Temp</th>';
+  if (hasPrecip) headerCols += '<th class="bfc-rain" title="Precipitation (mm/h)">Rain</th>';
   headerCols += '<th class="bf-note-col">Notes</th>';
 
   const table = document.createElement('table');
@@ -225,18 +243,18 @@ function renderBriefingWindTable() {
   const tbody = document.createElement('tbody');
   for (const hour of fh) {
     const raw_kt  = hour.ws_ms   != null ? (hour.ws_ms   * MS_TO_KT) : null;
-    const tws_kt  = raw_kt != null ? (raw_kt - biasKt).toFixed(1) : null;  // always corrected
+    const tws_kt  = raw_kt != null ? (raw_kt - biasKt).toFixed(1) : null;
     const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
     const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)}°` : '—';
     const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : '—';
     const precip  = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : '—';
 
     const tr = document.createElement('tr');
-    let cells = `<td class="fc-time">${bfFmt(hour.time_utc)}</td>`;
-    cells += `<td class="fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? '—'}</td>`;
-    cells += `<td class="fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? '—'}</td>`;
-    cells += `<td class="fc-num">${wd}</td><td class="fc-num">${temp}</td>`;
-    if (hasPrecip) cells += `<td class="fc-num">${precip}</td>`;
+    let cells = `<td class="bfc-time fc-time">${bfFmt(hour.time_utc)}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? '—'}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? '—'}</td>`;
+    cells += `<td class="bfc-num fc-num">${wd}</td><td class="bfc-num fc-num">${temp}</td>`;
+    if (hasPrecip) cells += `<td class="bfc-rain fc-num">${precip}</td>`;
     cells += `<td class="bf-note-cell" contenteditable="true"></td>`;
     tr.innerHTML = cells;
     tbody.appendChild(tr);
