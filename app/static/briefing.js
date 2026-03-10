@@ -71,11 +71,11 @@ function renderBriefingBestChart() {
   const gust_kt = fh.map(h => h.gust_ms != null ? +(h.gust_ms * MS_TO_KT).toFixed(1) : null);
   const wd      = fh.map(h => h.wd_deg);
 
-  const mainWs    = _correctedOnly ? corr_kt : ws_kt;
-  const mainLabel = _correctedOnly ? 'Corrected TWS (kt)' : 'TWS (kt)';
+  // Briefing always shows corrected TWS when a bias exists
+  const mainWs = bias_ws_ms !== 0 ? corr_kt : ws_kt;
 
   const traces = [{
-    x: times, y: mainWs, name: mainLabel,
+    x: times, y: mainWs, name: 'TWS (kt)',
     type: 'scatter', mode: 'lines+markers+text',
     line: { color: '#2563eb', width: 2 },
     marker: { color: '#2563eb', size: 5 },
@@ -84,16 +84,6 @@ function renderBriefingBestChart() {
     textfont: { size: 9, color: '#1e3a8a' },
     yaxis: 'y1',
   }];
-
-  if (!_correctedOnly && bias_ws_ms !== 0) {
-    traces.push({
-      x: times, y: corr_kt, name: 'Corrected TWS (kt)',
-      type: 'scatter', mode: 'lines+markers',
-      line: { color: '#f59e0b', width: 2 },
-      marker: { color: '#f59e0b', size: 4 },
-      yaxis: 'y1',
-    });
-  }
 
   if (gust_kt.some(v => v != null)) {
     traces.push({
@@ -195,23 +185,20 @@ function renderBriefingWindTable() {
 
   const fh       = bfFilterHours(winner.hours);
   const biasKt   = bias_ws_ms * MS_TO_KT;
-  const hasCorr  = bias_ws_ms !== 0;
   const hasPrecip= winner.hours.some(h => h.precip_mm != null);
 
-  let headerCols = '<th>Time UTC</th><th>TWS (kt)</th>';
-  if (hasCorr)   headerCols += '<th>Corr (kt)</th>';
-  headerCols += '<th>Gust (kt)</th><th>TWD (°)</th><th>Temp (°C)</th>';
+  let headerCols = '<th>Time UTC</th><th>TWS (kt)</th><th>Gust (kt)</th><th>TWD (°)</th><th>Temp (°C)</th>';
   if (hasPrecip) headerCols += '<th>Rain (mm)</th>';
-  headerCols += '<th class="note-col">Notes</th>';
+  headerCols += '<th class="bf-note-col">Notes</th>';
 
   const table = document.createElement('table');
-  table.className = 'fc-table';
+  table.className = 'fc-table bf-wind-table';
   table.innerHTML = `<thead><tr>${headerCols}</tr></thead>`;
 
   const tbody = document.createElement('tbody');
   for (const hour of fh) {
-    const ws_kt   = hour.ws_ms   != null ? (hour.ws_ms   * MS_TO_KT).toFixed(1) : null;
-    const corr_kt = ws_kt != null ? (parseFloat(ws_kt) - biasKt).toFixed(1) : null;
+    const raw_kt  = hour.ws_ms   != null ? (hour.ws_ms   * MS_TO_KT) : null;
+    const tws_kt  = raw_kt != null ? (raw_kt - biasKt).toFixed(1) : null;  // always corrected
     const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
     const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)}°` : '—';
     const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : '—';
@@ -219,12 +206,11 @@ function renderBriefingWindTable() {
 
     const tr = document.createElement('tr');
     let cells = `<td class="fc-time">${bfFmt(hour.time_utc)}</td>`;
-    cells += `<td class="fc-num" style="background:${ws_kt   != null ? windSpeedColor(+ws_kt)   : ''}">${ws_kt   ?? '—'}</td>`;
-    if (hasCorr) cells += `<td class="fc-num" style="background:${corr_kt != null ? windSpeedColor(+corr_kt) : ''}">${corr_kt ?? '—'}</td>`;
+    cells += `<td class="fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? '—'}</td>`;
     cells += `<td class="fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? '—'}</td>`;
     cells += `<td class="fc-num">${wd}</td><td class="fc-num">${temp}</td>`;
     if (hasPrecip) cells += `<td class="fc-num">${precip}</td>`;
-    cells += `<td class="note-cell" contenteditable="true"></td>`;
+    cells += `<td class="bf-note-cell" contenteditable="true"></td>`;
     tr.innerHTML = cells;
     tbody.appendChild(tr);
   }

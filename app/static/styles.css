@@ -691,6 +691,35 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   border-color: transparent;
 }
 
+/* Briefing table — tighter data cols, notes gets the rest */
+.bf-wind-table { table-layout: fixed; width: 100%; }
+.bf-wind-table th,
+.bf-wind-table td { padding: 4px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.bf-wind-table th { font-size: 10px; padding-bottom: 6px; }
+.bf-wind-table td:first-child,
+.bf-wind-table th:first-child { width: 80px; }    /* Time */
+.bf-wind-table td:nth-child(2),
+.bf-wind-table th:nth-child(2),
+.bf-wind-table td:nth-child(3),
+.bf-wind-table th:nth-child(3) { width: 55px; }   /* TWS, Gust */
+.bf-wind-table td:nth-child(4),
+.bf-wind-table th:nth-child(4) { width: 48px; }   /* TWD */
+.bf-wind-table td:nth-child(5),
+.bf-wind-table th:nth-child(5) { width: 50px; }   /* Temp */
+
+.bf-note-col  { text-align: left !important; }
+.bf-note-cell {
+  text-align: left !important;
+  background: #f8fafc;
+  color: var(--ink);
+  cursor: text;
+  border-radius: 3px;
+  outline: none;
+  overflow: visible;
+  white-space: normal;
+}
+.bf-note-cell:focus { background: #fffbeb; box-shadow: inset 0 0 0 1.5px var(--accent); }
+
 /* Side-by-side charts */
 .bf-charts-row {
   display: grid;
