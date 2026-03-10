@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=4" />
+  <link rel="stylesheet" href="/static/styles.css?v=5" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -14,6 +14,7 @@
       <div class="tab-nav">
         <button class="tab active" data-tab="validation">Validation</button>
         <button class="tab" data-tab="forecast">Forecast</button>
+        <button class="tab" data-tab="briefing">Briefing</button>
       </div>
       <div id="window-info" class="window-info">no data loaded yet</div>
     </div>
@@ -148,9 +149,51 @@
     </div>
   </div>
 
+  <!-- ── Briefing tab ───────────────────────────────────────────────────── -->
+  <div id="tab-briefing" class="tab-panel">
+    <div class="bf-page">
+
+      <!-- Action bar -->
+      <div class="bf-actions panel">
+        <span id="bfMetaText" class="bf-meta">Run Validation + load Forecast first.</span>
+        <div class="bf-btn-group">
+          <button id="bfShareBtn" class="btn-secondary">Share link</button>
+          <button id="bfPrintBtn">Print / PDF</button>
+        </div>
+      </div>
+
+      <!-- Printable content -->
+      <div id="bfContent">
+
+        <!-- User notes / weather summary -->
+        <div class="panel bf-section">
+          <h2>Weather Summary</h2>
+          <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here…&#10;&#10;• Wind: …&#10;• Conditions: …&#10;• Outlook: …"></textarea>
+        </div>
+
+        <!-- Best model chart -->
+        <div class="panel bf-section" id="bfBestPanel" style="display:none">
+          <div class="fc-chart-title">Wind Forecast — <span id="bfBestTitle"></span></div>
+          <div id="bfBestChart"></div>
+        </div>
+
+        <!-- Ensemble chart -->
+        <div class="panel bf-section" id="bfEnsemblePanel" style="display:none">
+          <div class="fc-chart-title">Ensemble — All Models</div>
+          <div id="bfEnsembleChart"></div>
+        </div>
+
+        <!-- Hourly table -->
+        <div class="panel bf-section" id="bfTableWrap"></div>
+
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=4"></script>
-  <script src="/static/forecast.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
+  <script src="/static/forecast.js?v=5"></script>
+  <script src="/static/briefing.js?v=5"></script>
 </body>
 </html>
