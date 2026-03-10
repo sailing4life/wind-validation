@@ -749,10 +749,31 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 @media print {
   header, .bf-actions, #tab-validation, #tab-forecast { display: none !important; }
   #tab-briefing { display: block !important; }
-  .bf-page { padding: 0; gap: 16px; }
-  .panel { border: 1px solid #ccc; border-radius: 0; }
-  .bf-table-panel .fc-table-scroll { max-height: none; overflow: visible; }
-  body { background: #fff; font-size: 12px; }
+
+  body { background: #fff; font-size: 11px; margin: 0; }
+  .bf-page { padding: 0; gap: 10px; }
+  .panel { border: 1px solid #ccc; border-radius: 0; box-shadow: none; padding: 10px; }
+
+  /* Stack grid columns vertically for print so nothing overflows */
+  .bf-top-row,
+  .bf-ensemble-row { grid-template-columns: 1fr; gap: 10px; }
+
+  /* Collapse table scroll constraints */
+  .bf-table-panel .fc-table-scroll { max-height: none !important; overflow: visible !important; }
+
+  /* Force background colors on table cells to print */
+  .fc-num, td[style*="background"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Keep table on page, allow natural page breaks between rows */
+  .bf-wind-table { page-break-inside: auto; }
+  .bf-wind-table tr { page-break-inside: avoid; }
+
+  /* Page break before ensemble row so it starts fresh if needed */
+  .bf-ensemble-row { page-break-before: auto; }
+
   .bf-notes { border: 1px solid #ccc; background: #fff; min-height: 0; }
   .bf-title-input, .bf-subtitle-input { border-bottom-color: #ccc; }
 }
