@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=11" />
+  <link rel="stylesheet" href="/static/styles.css?v=12" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -172,7 +172,9 @@
           <span id="bfMetaText" class="bf-meta"></span>
         </div>
         <div class="bf-btn-group">
-          <button id="bfShareBtn" class="btn-secondary">Share link</button>
+          <input type="file" id="bfFileInput" accept=".json" style="display:none">
+          <button id="bfLoadBtn" class="btn-secondary">Load</button>
+          <button id="bfSaveBtn" class="btn-secondary">Save</button>
           <button id="bfPrintBtn">Print / PDF</button>
         </div>
       </div>
@@ -214,8 +216,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=11"></script>
-  <script src="/static/forecast.js?v=11"></script>
-  <script src="/static/briefing.js?v=11"></script>
+  <script src="/static/app.js?v=12"></script>
+  <script src="/static/forecast.js?v=12"></script>
+  <script src="/static/briefing.js?v=12"></script>
 </body>
 </html>

@@ -299,51 +299,123 @@ function renderBriefingTab() {
 document.querySelector('.tab[data-tab="briefing"]')
   ?.addEventListener('click', renderBriefingTab);
 
-// ── Print ─────────────────────────────────────────────────────────────────────
-document.getElementById('bfPrintBtn')
-  ?.addEventListener('click', () => window.print());
+// ── Print / PDF (convert Plotly charts to images before printing) ──────────────
+document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('bfPrintBtn');
+  btn.disabled = true;
+  btn.textContent = 'Preparing…';
 
-// ── Share link ────────────────────────────────────────────────────────────────
-document.getElementById('bfShareBtn')?.addEventListener('click', () => {
-  const pos = currentLatLon();
-  if (!pos) { alert('Set coordinates in Validation tab first.'); return; }
+  const chartIds = ['bfBestChart', 'bfEnsembleChart', 'bfEnsembleDirChart'];
+  const replacements = [];
 
-  const params = new URLSearchParams({
-    lat:   pos.lat,
-    lon:   pos.lon,
-    model: _winnerModelId || '',
-    bias:  (_biasWsMs || 0).toString(),
-    hours: document.getElementById('fcHoursAhead')?.value || '48',
-    tab:   'briefing',
-  });
-
-  const url = `${location.origin}${location.pathname}#${params.toString()}`;
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(url).then(() => {
-      const btn = document.getElementById('bfShareBtn');
-      if (!btn) return;
-      const orig = btn.textContent;
-      btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = orig; }, 2000);
-    });
-  } else {
-    prompt('Share this link:', url);
+  for (const id of chartIds) {
+    const el = document.getElementById(id);
+    if (!el || !el._fullLayout) continue;
+    try {
+      const imgUrl = await Plotly.toImage(el, {
+        format: 'png',
+        width:  el.offsetWidth  || 700,
+        height: el.offsetHeight || 300,
+      });
+      const img = document.createElement('img');
+      img.src = imgUrl;
+      img.style.cssText = 'width:100%;display:block';
+      el.parentNode.insertBefore(img, el);
+      el.style.display = 'none';
+      replacements.push({ el, img });
+    } catch (e) {
+      console.warn('Plotly.toImage failed for', id, e);
+    }
   }
+
+  window.print();
+
+  for (const { el, img } of replacements) {
+    el.style.display = '';
+    img.remove();
+  }
+  btn.disabled = false;
+  btn.textContent = 'Print / PDF';
 });
 
-// ── Share URL on load ─────────────────────────────────────────────────────────
-(function handleShareUrl() {
-  const hash = location.hash.slice(1);
-  if (!hash) return;
-  try {
-    const p = new URLSearchParams(hash);
-    if (p.get('lat'))   document.getElementById('lat').value = p.get('lat');
-    if (p.get('lon'))   document.getElementById('lon').value = p.get('lon');
-    if (p.get('hours')) { const el = document.getElementById('fcHoursAhead'); if (el) el.value = p.get('hours'); }
-    if (p.get('model')) _winnerModelId = p.get('model');
-    if (p.get('bias'))  _biasWsMs = parseFloat(p.get('bias'));
-    if (p.get('tab') === 'briefing') {
-      setTimeout(() => document.querySelector('.tab[data-tab="briefing"]')?.click(), 400);
+// ── Save briefing as JSON ──────────────────────────────────────────────────────
+document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
+  if (!forecastData) { alert('No forecast loaded.'); return; }
+
+  const pos = currentLatLon();
+  const payload = {
+    _version: 1,
+    lat: pos?.lat ?? null,
+    lon: pos?.lon ?? null,
+    winner_model_id: _winnerModelId,
+    bias_ws_ms: _biasWsMs,
+    hours_ahead: parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10),
+    range_start: document.getElementById('bfRangeStart')?.value ?? '0',
+    range_end:   document.getElementById('bfRangeEnd')?.value ?? '',
+    title:    document.getElementById('bfTitle')?.value ?? '',
+    subtitle: document.getElementById('bfSubtitle')?.value ?? '',
+    notes:    document.getElementById('bfNotes')?.value ?? '',
+    forecastData,
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const ts   = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+  a.href     = url;
+  a.download = `briefing_${ts}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ── Load briefing from JSON ────────────────────────────────────────────────────
+document.getElementById('bfLoadBtn')?.addEventListener('click', () => {
+  document.getElementById('bfFileInput')?.click();
+});
+
+document.getElementById('bfFileInput')?.addEventListener('change', e => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const payload = JSON.parse(ev.target.result);
+      if (!payload.forecastData) throw new Error('Invalid briefing file');
+
+      // Restore global forecast state (variables defined in forecast.js)
+      forecastData      = payload.forecastData;
+      _winnerModelId    = payload.winner_model_id ?? forecastData.winner_model_id;
+      _biasWsMs         = payload.bias_ws_ms      ?? forecastData.bias_ws_ms;
+      _selectedModels   = new Set(forecastData.models.map(m => m.model_id));
+
+      // Restore coordinates
+      if (payload.lat != null) document.getElementById('lat').value = payload.lat;
+      if (payload.lon != null) document.getElementById('lon').value = payload.lon;
+      if (payload.hours_ahead) {
+        const el = document.getElementById('fcHoursAhead');
+        if (el) el.value = payload.hours_ahead;
+      }
+
+      // Restore text fields
+      if (payload.title    != null) document.getElementById('bfTitle').value    = payload.title;
+      if (payload.subtitle != null) document.getElementById('bfSubtitle').value = payload.subtitle;
+      if (payload.notes    != null) document.getElementById('bfNotes').value    = payload.notes;
+
+      // Switch to briefing tab and render
+      document.querySelector('.tab[data-tab="briefing"]')?.click();
+
+      // Restore range selects after init (bfInitRange runs inside renderBriefingTab)
+      setTimeout(() => {
+        if (payload.range_start != null) document.getElementById('bfRangeStart').value = payload.range_start;
+        if (payload.range_end   != null) document.getElementById('bfRangeEnd').value   = payload.range_end;
+        bfRerender();
+      }, 50);
+
+    } catch (err) {
+      alert('Failed to load briefing file: ' + err.message);
     }
-  } catch (e) {}
-})();
+  };
+  reader.readAsText(file);
+  // Reset so same file can be re-loaded
+  e.target.value = '';
+});
