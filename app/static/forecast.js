@@ -433,11 +433,12 @@ function renderEnsembleDirChart(selected, winner_model_id) {
   Plotly.newPlot(chartDiv, traces, {
     ...LIGHT_LAYOUT,
     height: 370,
-    margin: { t: 20, b: 50, l: 55, r: 20 },
+    margin: { t: 20, b: 50, l: 70, r: 20 },
     showlegend: false,
     xaxis: { ...LIGHT_XAXIS },
     yaxis: {
-      title: 'TWD ( deg)',
+      title: { text: 'TWD (deg)', standoff: 16 },
+      automargin: true,
       range: [0, 360], dtick: 90,
       gridcolor: '#e2e8f0',
       tickfont: { color: '#64748b' },

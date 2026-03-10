@@ -203,11 +203,13 @@ function renderBriefingEnsembleCharts() {
     Plotly.newPlot(twdDiv, traces, {
       ...LIGHT_LAYOUT,
       height: 300,
-      margin: { t: 20, b: 30, l: 50, r: 20 },
+      margin: { t: 20, b: 30, l: 70, r: 20 },
       showlegend: false,
       xaxis: { ...LIGHT_XAXIS },
       yaxis: {
-        title: 'TWD ( deg)', range: [0, 360], dtick: 90,
+        title: { text: 'TWD (deg)', standoff: 16 },
+        automargin: true,
+        range: [0, 360], dtick: 90,
         gridcolor: '#e2e8f0', tickfont: { color: '#64748b' },
         tickvals: [0, 90, 180, 270, 360],
         ticktext: ['N (0 deg)', 'E (90 deg)', 'S (180 deg)', 'W (270 deg)', 'N (360 deg)'],
@@ -332,17 +334,17 @@ document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
   const notes = (document.getElementById('bfNotes')?.value || '').trim();
   const meta = document.getElementById('bfMetaText')?.textContent || '';
 
-  const win = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900');
-  const bestImg = await bfChartAsImg('bfBestChart', 340);
-  const ensTwsImg = await bfChartAsImg('bfEnsembleChart', 300);
-  const ensTwdImg = await bfChartAsImg('bfEnsembleDirChart', 300);
-  const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
+  const win = window.open('', '_blank', 'width=1200,height=900');
   if (!win) {
     btn.disabled = false;
     btn.textContent = 'Print / PDF';
     alert('Popup blocked. Allow popups to export PDF.');
     return;
   }
+  const bestImg = await bfChartAsImg('bfBestChart', 340);
+  const ensTwsImg = await bfChartAsImg('bfEnsembleChart', 300);
+  const ensTwdImg = await bfChartAsImg('bfEnsembleDirChart', 300);
+  const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
 
   const html = `<!doctype html>
 <html><head><meta charset="utf-8" />
