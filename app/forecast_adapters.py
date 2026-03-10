@@ -110,15 +110,6 @@ class OpenMeteoForecastAdapter:
         for i, (lat, lon) in enumerate(in_cov):
             if i >= len(payload):
                 break
-            # Parse model run_time from API response (present on previous-runs API)
-            api_run_time: datetime | None = None
-            run_time_raw = payload[i].get("run_time")
-            if run_time_raw:
-                try:
-                    api_run_time = datetime.fromisoformat(str(run_time_raw)).replace(tzinfo=UTC)
-                except (TypeError, ValueError):
-                    pass
-
             hourly = payload[i].get("hourly", {})
             gusts   = hourly.get("windgusts_10m", []) if include_extras else []
             temps   = hourly.get("temperature_2m", []) if include_extras else []
@@ -152,11 +143,10 @@ class OpenMeteoForecastAdapter:
                         precip_mm = float(precips[j]) if j < len(precips) and precips[j] is not None else None
                     except (TypeError, ValueError):
                         pass
-                # Use API-provided run_time when available; otherwise estimate capped to past
-                if api_run_time is not None:
-                    run_time = api_run_time
-                else:
-                    run_time = min(valid_time - timedelta(hours=6), now_utc)
+                # Estimate run_time as valid_time−6h, capped to never exceed now.
+                # This gives ≈now for future valid_times (regular forecast API)
+                # and a plausible past value for historical data.
+                run_time = min(valid_time - timedelta(hours=6), now_utc)
                 rows.append(ForecastValue(
                     model_id=model_id,
                     run_time_utc=run_time,
