@@ -504,6 +504,7 @@ function renderPrecipChart() {
   if (!precip.some(v => v != null && v > 0)) { panel.style.display = 'none'; return; }
   panel.style.display = '';
 
+
   const layout = {
     ...LIGHT_LAYOUT,
     height: 220,
@@ -529,6 +530,13 @@ function renderAllCharts() {
   renderEnsembleChart();
   renderTempChart();
   renderPrecipChart();
+  // Show temp+precip row if at least one panel is visible
+  const row = document.getElementById('fcTempPrecipRow');
+  if (row) {
+    const tempVis   = document.getElementById('fcTempPanel')?.style.display   !== 'none';
+    const precipVis = document.getElementById('fcPrecipPanel')?.style.display !== 'none';
+    row.style.display = (tempVis || precipVis) ? '' : 'none';
+  }
   renderForecastTable();
 }
 
