@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 import math
 from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
-_AMSTERDAM = ZoneInfo("Europe/Amsterdam")
+try:
+    _AMSTERDAM = ZoneInfo("Europe/Amsterdam")
+except ZoneInfoNotFoundError:
+    _AMSTERDAM = UTC
 
 from .config import Settings
 from .domain import Observation, Station

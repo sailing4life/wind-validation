@@ -1,11 +1,11 @@
-/* briefing.js — Weather Briefing tab
+﻿/* briefing.js â€” Weather Briefing tab
  * Reuses forecastData + helpers from forecast.js:
  *   MS_TO_KT, FC_COLORS, modelColor, computeEnsembleStats, windSpeedColor,
  *   LIGHT_LAYOUT, LIGHT_XAXIS, LIGHT_YAXIS, currentLatLon,
  *   _winnerModelId, _biasWsMs, _selectedModels, _correctedOnly
  */
 
-// ── Time formatting (local time) ──────────────────────────────────────────────
+// â”€â”€ Time formatting (local time) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BF_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function bfParseUtc(isoStr) {
@@ -26,7 +26,7 @@ function bfLocalISO(isoStr) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// ── Range selects ─────────────────────────────────────────────────────────────
+// â”€â”€ Range selects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function bfInitRange() {
   const hours = forecastData?.models?.[0]?.hours ?? [];
   const sel = ['bfRangeStart', 'bfRangeEnd'].map(id => document.getElementById(id));
@@ -56,12 +56,12 @@ function bfFilterHours(hours) {
   return hours.filter(h => h.time_utc >= startTime && h.time_utc <= endTime);
 }
 
-// ── Every-point labels ────────────────────────────────────────────────────────
+// â”€â”€ Every-point labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function allPointText(vals, fmt = v => String(v)) {
   return vals.map(v => v != null ? fmt(v) : '');
 }
 
-// ── Best model chart ──────────────────────────────────────────────────────────
+// â”€â”€ Best model chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderBriefingBestChart() {
   const panel   = document.getElementById('bfBestPanel');
   const chartDiv= document.getElementById('bfBestChart');
@@ -74,7 +74,7 @@ function renderBriefingBestChart() {
 
   const titleEl = document.getElementById('bfBestTitle');
   if (titleEl) titleEl.textContent =
-    winner_model_id + (bias_ws_ms ? ` · bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
+    winner_model_id + (bias_ws_ms ? ` Â· bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
 
   const fh      = bfFilterHours(winner.hours);
   const biasKt  = bias_ws_ms * MS_TO_KT;
@@ -112,7 +112,7 @@ function renderBriefingBestChart() {
   }
 
   traces.push({
-    x: times, y: wd, name: 'TWD (°)',
+    x: times, y: wd, name: 'TWD (Â°)',
     type: 'scatter', mode: 'lines+markers+text',
     line: { color: '#dc2626', width: 1.5 },
     marker: { color: '#dc2626', size: 4 },
@@ -131,7 +131,7 @@ function renderBriefingBestChart() {
     xaxis: { ...LIGHT_XAXIS },
     yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
     yaxis2: {
-      title: '°', overlaying: 'y', side: 'right',
+      title: 'Â°', overlaying: 'y', side: 'right',
       range: [0, 360], dtick: 90,
       gridcolor: 'transparent',
       tickfont: { color: '#dc2626' },
@@ -140,19 +140,20 @@ function renderBriefingBestChart() {
   }, { responsive: true, displayModeBar: false });
 }
 
-// ── Ensemble charts (TWS + TWD, share a row wrapper) ─────────────────────────
+// â”€â”€ Ensemble charts (TWS + TWD, share a row wrapper) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderBriefingEnsembleCharts() {
   const row = document.getElementById('bfEnsembleRow');
-  if (!row || !forecastData || _correctedOnly) { if (row) row.style.display = 'none'; return; }
+  if (!row || !forecastData) { if (row) row.style.display = 'none'; return; }
 
   const { winner_model_id, models } = forecastData;
-  const selected = models.filter(m => _selectedModels.has(m.model_id));
+  // Briefing should always show ensemble context from all available models.
+  const selected = models.filter(m => Array.isArray(m.hours) && m.hours.length > 0);
   if (selected.length < 2) { row.style.display = 'none'; return; }
   row.style.display = '';
 
   const filteredSelected = selected.map(s => ({ ...s, hours: bfFilterHours(s.hours) }));
 
-  // ── TWS ──
+  // â”€â”€ TWS â”€â”€
   const twsDiv = document.getElementById('bfEnsembleChart');
   if (twsDiv) {
     const traces = [];
@@ -172,7 +173,7 @@ function renderBriefingEnsembleCharts() {
     const upper = stats.means.map((m, i) => +(m + stats.stds[i]).toFixed(2));
     const lower = stats.means.map((m, i) => +(m - stats.stds[i]).toFixed(2));
     traces.push({ x: statTimes, y: upper, type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
-    traces.push({ x: statTimes, y: lower, name: '±1σ', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
+    traces.push({ x: statTimes, y: lower, name: 'Â±1Ïƒ', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
     traces.push({ x: statTimes, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
     Plotly.newPlot(twsDiv, traces, {
       ...LIGHT_LAYOUT,
@@ -184,7 +185,7 @@ function renderBriefingEnsembleCharts() {
     }, { responsive: true, displayModeBar: false });
   }
 
-  // ── TWD ──
+  // â”€â”€ TWD â”€â”€
   const twdDiv = document.getElementById('bfEnsembleDirChart');
   if (twdDiv) {
     const traces = [];
@@ -206,16 +207,16 @@ function renderBriefingEnsembleCharts() {
       showlegend: false,
       xaxis: { ...LIGHT_XAXIS },
       yaxis: {
-        title: 'TWD (°)', range: [0, 360], dtick: 90,
+        title: 'TWD (Â°)', range: [0, 360], dtick: 90,
         gridcolor: '#e2e8f0', tickfont: { color: '#64748b' },
         tickvals: [0, 90, 180, 270, 360],
-        ticktext: ['N (0°)', 'E (90°)', 'S (180°)', 'W (270°)', 'N (360°)'],
+        ticktext: ['N (0Â°)', 'E (90Â°)', 'S (180Â°)', 'W (270Â°)', 'N (360Â°)'],
       },
     }, { responsive: true, displayModeBar: false });
   }
 }
 
-// ── Hourly wind table ─────────────────────────────────────────────────────────
+// â”€â”€ Hourly wind table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderBriefingWindTable() {
   const wrap = document.getElementById('bfTableWrap');
   if (!wrap || !forecastData) return;
@@ -231,8 +232,8 @@ function renderBriefingWindTable() {
   let headerCols = '<th class="bfc-time">Time</th>'
     + '<th class="bfc-num" title="True wind speed (kt)">TWS</th>'
     + '<th class="bfc-num" title="Wind gust (kt)">Gust</th>'
-    + '<th class="bfc-num" title="True wind direction (°)">TWD</th>'
-    + '<th class="bfc-num" title="Temperature (°C)">Temp</th>';
+    + '<th class="bfc-num" title="True wind direction (Â°)">TWD</th>'
+    + '<th class="bfc-num" title="Temperature (Â°C)">Temp</th>';
   if (hasPrecip) headerCols += '<th class="bfc-rain" title="Precipitation (mm/h)">Rain</th>';
   headerCols += '<th class="bf-note-col">Notes</th>';
 
@@ -245,14 +246,14 @@ function renderBriefingWindTable() {
     const raw_kt  = hour.ws_ms   != null ? (hour.ws_ms   * MS_TO_KT) : null;
     const tws_kt  = raw_kt != null ? (raw_kt - biasKt).toFixed(1) : null;
     const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
-    const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)}°` : '—';
-    const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : '—';
-    const precip  = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : '—';
+    const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)}Â°` : 'â€”';
+    const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : 'â€”';
+    const precip  = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : 'â€”';
 
     const tr = document.createElement('tr');
     let cells = `<td class="bfc-time fc-time">${bfFmt(hour.time_utc)}</td>`;
-    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? '—'}</td>`;
-    cells += `<td class="bfc-num fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? '—'}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? 'â€”'}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? 'â€”'}</td>`;
     cells += `<td class="bfc-num fc-num">${wd}</td><td class="bfc-num fc-num">${temp}</td>`;
     if (hasPrecip) cells += `<td class="bfc-rain fc-num">${precip}</td>`;
     cells += `<td class="bf-note-cell" contenteditable="true"></td>`;
@@ -268,19 +269,19 @@ function renderBriefingWindTable() {
   wrap.innerHTML = '';
   const heading = document.createElement('div');
   heading.className = 'fc-chart-title';
-  heading.textContent = `Hourly Forecast — ${winner.model_id}`;
+  heading.textContent = `Hourly Forecast â€” ${winner.model_id}`;
   wrap.appendChild(heading);
   wrap.appendChild(scrollWrap);
 }
 
-// ── Re-render charts + table (called by range selects) ────────────────────────
+// â”€â”€ Re-render charts + table (called by range selects) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function bfRerender() {
   renderBriefingBestChart();
   renderBriefingEnsembleCharts();
   renderBriefingWindTable();
 }
 
-// ── Orchestrator ──────────────────────────────────────────────────────────────
+// â”€â”€ Orchestrator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderBriefingTab() {
   const meta = document.getElementById('bfMetaText');
   if (!forecastData) {
@@ -289,56 +290,91 @@ function renderBriefingTab() {
   }
   const pos = currentLatLon();
   const now = new Date().toUTCString().replace(' GMT', ' UTC');
-  if (meta) meta.textContent = `${pos ? `${pos.lat.toFixed(4)}°N, ${pos.lon.toFixed(4)}°E` : ''} · ${now}`;
+  if (meta) meta.textContent = `${pos ? `${pos.lat.toFixed(4)}Â°N, ${pos.lon.toFixed(4)}Â°E` : ''} Â· ${now}`;
 
   bfInitRange();
   bfRerender();
 }
 
-// ── Tab click ─────────────────────────────────────────────────────────────────
+// â”€â”€ Tab click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.querySelector('.tab[data-tab="briefing"]')
   ?.addEventListener('click', renderBriefingTab);
 
-// ── Print / PDF (convert Plotly charts to images before printing) ──────────────
+// â”€â”€ Print / PDF (convert Plotly charts to images before printing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function bfChartAsImg(id, fallbackHeight = 300) {
+  const el = document.getElementById(id);
+  if (!el || !el._fullLayout) return '';
+  return Plotly.toImage(el, {
+    format: 'png',
+    width: el.offsetWidth || 900,
+    height: el.offsetHeight || fallbackHeight,
+    scale: 2,
+  }).catch(err => {
+    console.warn('Plotly.toImage failed for', id, err);
+    return '';
+  });
+}
+
+function bfEscapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('bfPrintBtn');
   btn.disabled = true;
-  btn.textContent = 'Preparing…';
+  btn.textContent = 'Preparing...';
 
-  const chartIds = ['bfBestChart', 'bfEnsembleChart', 'bfEnsembleDirChart'];
-  const replacements = [];
+  const title = document.getElementById('bfTitle')?.value || 'Weather Briefing';
+  const subtitle = document.getElementById('bfSubtitle')?.value || '';
+  const notes = (document.getElementById('bfNotes')?.value || '').trim();
+  const meta = document.getElementById('bfMetaText')?.textContent || '';
 
-  for (const id of chartIds) {
-    const el = document.getElementById(id);
-    if (!el || !el._fullLayout) continue;
-    try {
-      const imgUrl = await Plotly.toImage(el, {
-        format: 'png',
-        width:  el.offsetWidth  || 700,
-        height: el.offsetHeight || 300,
-      });
-      const img = document.createElement('img');
-      img.src = imgUrl;
-      img.style.cssText = 'width:100%;display:block';
-      el.parentNode.insertBefore(img, el);
-      el.style.display = 'none';
-      replacements.push({ el, img });
-    } catch (e) {
-      console.warn('Plotly.toImage failed for', id, e);
-    }
+  const bestImg = await bfChartAsImg('bfBestChart', 340);
+  const ensTwsImg = await bfChartAsImg('bfEnsembleChart', 300);
+  const ensTwdImg = await bfChartAsImg('bfEnsembleDirChart', 300);
+  const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
+
+  const win = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900');
+  if (!win) {
+    btn.disabled = false;
+    btn.textContent = 'Print / PDF';
+    alert('Popup blocked. Allow popups to export PDF.');
+    return;
   }
 
-  window.print();
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8" />
+<title>${bfEscapeHtml(title)}</title>
+<style>
+@page{size:A4 portrait;margin:14mm;}body{font-family:"Segoe UI",Arial,sans-serif;color:#0f172a;margin:0}
+.doc{display:flex;flex-direction:column;gap:10px}.head{border-bottom:3px solid #1e3a8a;padding-bottom:8px}
+.title{font-size:22px;font-weight:700;color:#1e3a8a;margin:0}.sub{font-size:13px;color:#334155;margin-top:2px}
+.meta{font-size:11px;color:#475569;margin-top:4px;font-family:monospace}.notes{font-size:11px;line-height:1.6;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;white-space:pre-wrap}
+.grid{display:grid;grid-template-columns:58% 42%;gap:10px;align-items:start}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;page-break-inside:avoid}
+.card{border:1px solid #e2e8f0;border-radius:8px;padding:8px}.label{font-size:10px;letter-spacing:.05em;color:#475569;text-transform:uppercase;font-weight:600;margin-bottom:6px}
+img{width:100%;display:block}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border-bottom:1px solid #e2e8f0;padding:3px 4px;text-align:right}th:first-child,td:first-child{text-align:left}
+</style></head><body>
+<div class="doc">
+<div class="head"><h1 class="title">${bfEscapeHtml(title)}</h1><div class="sub">${bfEscapeHtml(subtitle)}</div><div class="meta">${bfEscapeHtml(meta)}</div></div>
+${notes ? `<div class="notes">${bfEscapeHtml(notes)}</div>` : ''}
+<div class="grid"><div class="card"><div class="label">Wind Forecast</div>${bestImg ? `<img src="${bestImg}" alt="Best forecast chart" />` : '<div>No chart</div>'}</div>
+<div class="card"><div class="label">Hourly Table</div>${tableHtml}</div></div>
+${(ensTwsImg || ensTwdImg) ? `<div class="row2"><div class="card"><div class="label">Ensemble TWS</div>${ensTwsImg ? `<img src="${ensTwsImg}" alt="Ensemble TWS" />` : '<div>No chart</div>'}</div><div class="card"><div class="label">Ensemble TWD</div>${ensTwdImg ? `<img src="${ensTwdImg}" alt="Ensemble TWD" />` : '<div>No chart</div>'}</div></div>` : ''}
+</div></body></html>`;
 
-  for (const { el, img } of replacements) {
-    el.style.display = '';
-    img.remove();
-  }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 250);
+
   btn.disabled = false;
   btn.textContent = 'Print / PDF';
 });
 
-// ── Save briefing as JSON ──────────────────────────────────────────────────────
+// â”€â”€ Save briefing as JSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
   if (!forecastData) { alert('No forecast loaded.'); return; }
 
@@ -368,7 +404,7 @@ document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-// ── Load briefing from JSON ────────────────────────────────────────────────────
+// â”€â”€ Load briefing from JSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.getElementById('bfLoadBtn')?.addEventListener('click', () => {
   document.getElementById('bfFileInput')?.click();
 });
@@ -419,3 +455,4 @@ document.getElementById('bfFileInput')?.addEventListener('change', e => {
   // Reset so same file can be re-loaded
   e.target.value = '';
 });
+

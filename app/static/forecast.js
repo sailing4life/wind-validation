@@ -338,7 +338,6 @@ function renderEnsembleChart() {
   const row = document.getElementById('fcEnsembleRow');
   const chartDiv = document.getElementById('fcEnsembleChart');
   if (!row || !chartDiv) return;
-  if (_correctedOnly) { row.style.display = 'none'; return; }
 
   const { winner_model_id, models } = forecastData;
   const selected = models.filter(m => _selectedModels.has(m.model_id));
