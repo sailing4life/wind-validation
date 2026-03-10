@@ -657,7 +657,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 }
 
 .bf-title-input {
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 700;
   color: var(--ink);
   border: none;
@@ -671,7 +671,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 .bf-title-input::placeholder { color: #cbd5e1; }
 
 .bf-subtitle-input {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--ink-muted);
   border: none;
   border-bottom: 1px solid var(--line);
@@ -689,7 +689,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   padding: 10px 12px;
   border-radius: 6px;
   border: 1px solid var(--line);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink);
   background: var(--bg);
   font-family: inherit;

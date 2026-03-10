@@ -324,17 +324,18 @@ function bfEscapeHtml(s) {
     .replace(/>/g, '&gt;');
 }
 
-function bfInsertIntoNotes(prefix) {
+function bfInsertIntoNotes(mode) {
   const notesEl = document.getElementById('bfNotes');
   if (!notesEl) return;
   const start = notesEl.selectionStart ?? notesEl.value.length;
   const end = notesEl.selectionEnd ?? notesEl.value.length;
   const value = notesEl.value || '';
   const selected = value.slice(start, end);
+  const linePrefix = mode === 'bullet' ? '• ' : mode === 'check' ? '☐ ' : '1. ';
 
   if (!selected) {
     const pad = start > 0 && value[start - 1] !== '\n' ? '\n' : '';
-    const insert = `${pad}${prefix}`;
+    const insert = `${pad}${linePrefix}`;
     notesEl.value = value.slice(0, start) + insert + value.slice(end);
     const caret = start + insert.length;
     notesEl.setSelectionRange(caret, caret);
@@ -342,7 +343,13 @@ function bfInsertIntoNotes(prefix) {
     return;
   }
 
-  const replaced = selected.split('\n').map(line => `${prefix}${line}`).join('\n');
+  const replaced = selected
+    .split('\n')
+    .map((line, idx) => {
+      if (mode === 'numbered') return `${idx + 1}. ${line}`;
+      return `${linePrefix}${line}`;
+    })
+    .join('\n');
   notesEl.value = value.slice(0, start) + replaced + value.slice(end);
   notesEl.setSelectionRange(start, start + replaced.length);
   notesEl.focus();
@@ -350,8 +357,8 @@ function bfInsertIntoNotes(prefix) {
 
 document.querySelectorAll('[data-note-insert]').forEach(btn => {
   btn.addEventListener('click', () => {
-    const prefix = btn.getAttribute('data-note-insert') || '- ';
-    bfInsertIntoNotes(prefix);
+    const mode = btn.getAttribute('data-note-insert') || 'bullet';
+    bfInsertIntoNotes(mode);
   });
 });
 
@@ -401,11 +408,11 @@ body{font-family:"Segoe UI",Arial,sans-serif;color:#0f172a}
   gap:9mm;
 }
 .head{border-bottom:3px solid #1e3a8a;padding-bottom:8px}
-.title{font-size:24px;font-weight:700;color:#1e3a8a;margin:0;line-height:1.1}
-.sub{font-size:13px;color:#334155;margin-top:3px}
+.title{font-size:28px;font-weight:700;color:#1e3a8a;margin:0;line-height:1.1}
+.sub{font-size:15px;color:#334155;margin-top:3px}
 .meta{font-size:11px;color:#475569;margin-top:4px;font-family:Consolas,"Courier New",monospace}
 .notes{
-  font-size:11px;line-height:1.65;background:transparent;border:none;
+  font-size:13px;line-height:1.65;background:transparent;border:none;
   border-radius:0;padding:0;white-space:pre-wrap
 }
 .section{

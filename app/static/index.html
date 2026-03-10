@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=18" />
+  <link rel="stylesheet" href="/static/styles.css?v=19" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -187,11 +187,11 @@
           <input  id="bfTitle"    class="bf-title-input"    type="text" placeholder="Weather Briefing" />
           <input  id="bfSubtitle" class="bf-subtitle-input" type="text" placeholder="Location  -  Date  -  Event" />
           <div class="bf-notes-tools">
-            <button type="button" class="btn-secondary bf-note-btn" data-note-insert="- ">Bullet</button>
-            <button type="button" class="btn-secondary bf-note-btn" data-note-insert="1. ">Numbered</button>
-            <button type="button" class="btn-secondary bf-note-btn" data-note-insert="[ ] ">Checklist</button>
+            <button type="button" class="btn-secondary bf-note-btn" data-note-insert="bullet">Bullet</button>
+            <button type="button" class="btn-secondary bf-note-btn" data-note-insert="numbered">Numbered</button>
+            <button type="button" class="btn-secondary bf-note-btn" data-note-insert="check">Checklist</button>
           </div>
-          <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here...&#10;&#10;- Wind: ...&#10;- Conditions: ...&#10;- Outlook: ..."></textarea>
+          <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here...&#10;&#10;• Wind: ...&#10;• Conditions: ...&#10;• Outlook: ..."></textarea>
         </div>
 
         <!-- Top row: forecast chart + hourly table -->
@@ -221,9 +221,9 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=18"></script>
-  <script src="/static/forecast.js?v=18"></script>
-  <script src="/static/briefing.js?v=18"></script>
+  <script src="/static/app.js?v=19"></script>
+  <script src="/static/forecast.js?v=19"></script>
+  <script src="/static/briefing.js?v=19"></script>
 </body>
 </html>
 
