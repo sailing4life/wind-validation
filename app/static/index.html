@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -51,11 +51,11 @@
           <div id="chart-status" class="chart-status"></div>
           <p id="speedLabel" class="chart-sublabel">Wind speed (kt)</p>
           <canvas id="timePlot"></canvas>
-          <p id="dirLabel" class="chart-sublabel" style="margin-top:10px">Wind direction (°)</p>
+          <p id="dirLabel" class="chart-sublabel" style="margin-top:10px">Wind direction ( deg)</p>
           <canvas id="dirPlot"></canvas>
           <div class="chart-footer">
             <span class="legend-swatch obs-swatch"></span> Observed &nbsp;
-            <span style="color:#94a3b8;font-size:11px">— model colors match toggles above</span>
+            <span style="color:#94a3b8;font-size:11px"> -  model colors match toggles above</span>
             <span class="chart-tz">UTC</span>
           </div>
         </section>
@@ -125,24 +125,24 @@
 
       <!-- Charts (full width, stacked) -->
       <div class="fc-chart-panel panel" id="fcBestPanel" style="display:none">
-        <div class="fc-chart-title">Best Forecast — <span id="fcBestTitle"></span></div>
+        <div class="fc-chart-title">Best Forecast  -  <span id="fcBestTitle"></span></div>
         <div id="fcBestChart"></div>
       </div>
 
       <div class="fc-ensemble-row" id="fcEnsembleRow" style="display:none">
         <div class="fc-chart-panel panel" id="fcEnsemblePanel">
-          <div class="fc-chart-title">Ensemble TWS — All Models</div>
+          <div class="fc-chart-title">Ensemble TWS  -  All Models</div>
           <div id="fcEnsembleChart"></div>
         </div>
         <div class="fc-chart-panel panel" id="fcEnsembleDirPanel">
-          <div class="fc-chart-title">Ensemble TWD — All Models</div>
+          <div class="fc-chart-title">Ensemble TWD  -  All Models</div>
           <div id="fcEnsembleDirChart"></div>
         </div>
       </div>
 
       <div class="fc-ensemble-row" id="fcTempPrecipRow" style="display:none">
         <div class="fc-chart-panel panel" id="fcTempPanel">
-          <div class="fc-chart-title">Temperature (°C)</div>
+          <div class="fc-chart-title">Temperature ( degC)</div>
           <div id="fcTempChart"></div>
         </div>
         <div class="fc-chart-panel panel" id="fcPrecipPanel">
@@ -156,7 +156,7 @@
     </div>
   </div>
 
-  <!-- ── Briefing tab ───────────────────────────────────────────────────── -->
+  <!-- â”€â”€ Briefing tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
   <div id="tab-briefing" class="tab-panel">
     <div class="bf-page">
 
@@ -185,14 +185,14 @@
         <!-- Title + subtitle + notes -->
         <div class="panel bf-section bf-header-section">
           <input  id="bfTitle"    class="bf-title-input"    type="text" placeholder="Weather Briefing" />
-          <input  id="bfSubtitle" class="bf-subtitle-input" type="text" placeholder="Location · Date · Event" />
-          <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here…&#10;&#10;• Wind: …&#10;• Conditions: …&#10;• Outlook: …"></textarea>
+          <input  id="bfSubtitle" class="bf-subtitle-input" type="text" placeholder="Location  -  Date  -  Event" />
+          <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here...&#10;&#10;- Wind: ...&#10;- Conditions: ...&#10;- Outlook: ..."></textarea>
         </div>
 
         <!-- Top row: forecast chart + hourly table -->
         <div class="bf-top-row">
           <div class="panel bf-section" id="bfBestPanel" style="display:none">
-            <div class="fc-chart-title">Wind Forecast — <span id="bfBestTitle"></span></div>
+            <div class="fc-chart-title">Wind Forecast  -  <span id="bfBestTitle"></span></div>
             <div id="bfBestChart"></div>
           </div>
           <div class="panel bf-section bf-table-panel" id="bfTableWrap"></div>
@@ -201,11 +201,11 @@
         <!-- Bottom row: ensemble TWS + TWD -->
         <div class="bf-ensemble-row" id="bfEnsembleRow" style="display:none">
           <div class="panel bf-section" id="bfEnsemblePanel">
-            <div class="fc-chart-title">Ensemble TWS — All Models</div>
+            <div class="fc-chart-title">Ensemble TWS  -  All Models</div>
             <div id="bfEnsembleChart"></div>
           </div>
           <div class="panel bf-section" id="bfEnsembleDirPanel">
-            <div class="fc-chart-title">Ensemble TWD — All Models</div>
+            <div class="fc-chart-title">Ensemble TWD  -  All Models</div>
             <div id="bfEnsembleDirChart"></div>
           </div>
         </div>
@@ -216,8 +216,10 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=13"></script>
-  <script src="/static/forecast.js?v=13"></script>
-  <script src="/static/briefing.js?v=13"></script>
+  <script src="/static/app.js?v=14"></script>
+  <script src="/static/forecast.js?v=14"></script>
+  <script src="/static/briefing.js?v=14"></script>
 </body>
 </html>
+
+

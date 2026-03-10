@@ -1,8 +1,8 @@
-/* forecast.js — Forecast tab: Windy iframe + Plotly charts + hourly table */
+﻿/* forecast.js  -  Forecast tab: Windy iframe + Plotly charts + hourly table */
 
 const MS_TO_KT = 1.94384;
 
-// ── State ──────────────────────────────────────────────────────────────────────
+// â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let forecastData = null;
 let _winnerModelId = '';
 let _biasWsMs = 0;
@@ -10,7 +10,7 @@ let _selectedModels = new Set();
 let _correctedOnly = false;
 let _relayoutHandler = null;   // for range-slider sync
 
-// ── Model color palette ────────────────────────────────────────────────────────
+// â”€â”€ Model color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FC_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d'];
 
 function modelColor(modelId) {
@@ -19,21 +19,21 @@ function modelColor(modelId) {
   return idx >= 0 ? FC_COLORS[idx % FC_COLORS.length] : '#94a3b8';
 }
 
-// ── Called by app.js after successful validation ───────────────────────────────
+// â”€â”€ Called by app.js after successful validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function setForecastParams(lat, lon, winnerModelId, biasWsMs) {
   _winnerModelId = winnerModelId || '';
   _biasWsMs = biasWsMs || 0;
   forecastData = null;
 }
 
-// ── Read current lat/lon from validation inputs ────────────────────────────────
+// â”€â”€ Read current lat/lon from validation inputs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function currentLatLon() {
   const lat = parseFloat(document.getElementById('lat').value);
   const lon = parseFloat(document.getElementById('lon').value);
   return (isNaN(lat) || isNaN(lon)) ? null : { lat, lon };
 }
 
-// ── Tab switching ──────────────────────────────────────────────────────────────
+// â”€â”€ Tab switching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -55,7 +55,7 @@ document.getElementById('fcCorrectedOnly').addEventListener('change', e => {
   if (forecastData) renderAllCharts();
 });
 
-// ── Windy map ──────────────────────────────────────────────────────────────────
+// â”€â”€ Windy map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function updateWindyMap(lat, lon) {
   const zoom = 7;
   document.getElementById('fcMap').src =
@@ -65,7 +65,7 @@ function updateWindyMap(lat, lon) {
     `&metricWind=kt&metricTemp=%C2%B0C&radarRange=-1`;
 }
 
-// ── API call ───────────────────────────────────────────────────────────────────
+// â”€â”€ API call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadForecast() {
   const pos = currentLatLon();
   const status = document.getElementById('fcStatus');
@@ -76,7 +76,7 @@ async function loadForecast() {
   }
 
   const hoursAhead = parseInt(document.getElementById('fcHoursAhead').value, 10) || 48;
-  status.textContent = 'Loading…';
+  status.textContent = 'Loading...';
   document.getElementById('fcRunBtn').disabled = true;
 
   try {
@@ -100,7 +100,7 @@ async function loadForecast() {
 
     const biasKt = (_biasWsMs * MS_TO_KT).toFixed(1);
     status.textContent = _winnerModelId
-      ? `Winner: ${_winnerModelId}  ·  bias ${biasKt} kt`
+      ? `Winner: ${_winnerModelId}   -   bias ${biasKt} kt`
       : 'Run Validation first for bias correction';
 
     updateWindyMap(pos.lat, pos.lon);
@@ -113,7 +113,7 @@ async function loadForecast() {
   }
 }
 
-// ── Model toggle pills ─────────────────────────────────────────────────────────
+// â”€â”€ Model toggle pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderModelToggles() {
   const container = document.getElementById('fcModelToggles');
   container.innerHTML = '';
@@ -127,7 +127,7 @@ function renderModelToggles() {
     const btn = document.createElement('button');
     btn.className = 'model-toggle' + (isActive ? ' active' : '');
     btn.style.setProperty('--mt-color', color);
-    const winnerTag = isWinner ? ' ★' : '';
+    const winnerTag = isWinner ? ' *' : '';
     btn.innerHTML = `<span class="mt-dot"></span>${series.model_id}${winnerTag}`;
     btn.title = isWinner ? 'Winner model from validation' : '';
 
@@ -144,7 +144,7 @@ function renderModelToggles() {
   });
 }
 
-// ── Shared chart config ────────────────────────────────────────────────────────
+// â”€â”€ Shared chart config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LIGHT_LAYOUT = {
   paper_bgcolor: '#ffffff',
   plot_bgcolor: '#f8fafc',
@@ -154,9 +154,9 @@ const LIGHT_LAYOUT = {
 const LIGHT_XAXIS = { gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, type: 'date' };
 const LIGHT_YAXIS = (title) => ({ title, gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, rangemode: 'tozero' });
 
-// ── Ensemble stats ─────────────────────────────────────────────────────────────
+// â”€â”€ Ensemble stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function computeEnsembleStats(selectedSeries) {
-  const timeMap = new Map(); // ISO string → number[]
+  const timeMap = new Map(); // ISO string â†’ number[]
   for (const series of selectedSeries) {
     for (const h of series.hours) {
       if (h.ws_ms == null) continue;
@@ -180,7 +180,7 @@ function computeEnsembleStats(selectedSeries) {
   return { times, means, stds };
 }
 
-// ── Value labels every 3h ─────────────────────────────────────────────────────
+// â”€â”€ Value labels every 3h â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function every3hText(times, vals, fmt = v => String(v)) {
   return vals.map((v, i) => {
     const t = new Date(times[i]);
@@ -188,14 +188,14 @@ function every3hText(times, vals, fmt = v => String(v)) {
   });
 }
 
-// ── Wind speed cell color ──────────────────────────────────────────────────────
+// â”€â”€ Wind speed cell color â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function windSpeedColor(kt) {
   const t = Math.min(1, Math.max(0, (kt - 5) / 20));
   const hue = Math.round(220 - t * 220);
   return `hsl(${hue}, 75%, 82%)`;
 }
 
-// ── Range sync: best-forecast slider → all other charts ───────────────────────
+// â”€â”€ Range sync: best-forecast slider â†’ all other charts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function syncChartRanges(range) {
   for (const id of ['fcEnsembleChart', 'fcEnsembleDirChart', 'fcTempChart', 'fcPrecipChart']) {
     const el = document.getElementById(id);
@@ -203,7 +203,7 @@ function syncChartRanges(range) {
   }
 }
 
-// ── Chart 1: Best Forecast (winner model, expedition style) ───────────────────
+// â”€â”€ Chart 1: Best Forecast (winner model, expedition style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderBestForecastChart() {
   const panel = document.getElementById('fcBestPanel');
   const chartDiv = document.getElementById('fcBestChart');
@@ -214,7 +214,7 @@ function renderBestForecastChart() {
 
   panel.style.display = '';
   document.getElementById('fcBestTitle').textContent =
-    winner_model_id + (bias_ws_ms ? ` · bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
+    winner_model_id + (bias_ws_ms ? `  -  bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
 
   const times = winner.hours.map(h => h.time_utc);
   const ws_kt = winner.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null);
@@ -228,7 +228,7 @@ function renderBestForecastChart() {
 
   const traces = [];
 
-  // TWS (or corrected) — blue solid line+markers+labels
+  // TWS (or corrected)  -  blue solid line+markers+labels
   traces.push({
     x: times, y: mainWs,
     name: mainLabel,
@@ -256,7 +256,7 @@ function renderBestForecastChart() {
     });
   }
 
-  // Gust — light blue dashed+X+labels
+  // Gust  -  light blue dashed+X+labels
   if (gust_kt.some(v => v != null)) {
     traces.push({
       x: times, y: gust_kt,
@@ -271,10 +271,10 @@ function renderBestForecastChart() {
     });
   }
 
-  // TWD — red line+markers+labels, right axis
+  // TWD  -  red line+markers+labels, right axis
   traces.push({
     x: times, y: wd,
-    name: 'TWD (°)',
+    name: 'TWD ( deg)',
     type: 'scatter', mode: 'lines+markers+text',
     line: { color: '#dc2626', width: 1.5 },
     marker: { color: '#dc2626', size: 5 },
@@ -308,7 +308,7 @@ function renderBestForecastChart() {
     },
     yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
     yaxis2: {
-      title: '°', overlaying: 'y', side: 'right',
+      title: ' deg', overlaying: 'y', side: 'right',
       range: [0, 360], dtick: 90,
       gridcolor: 'transparent',
       tickfont: { color: '#dc2626' },
@@ -333,7 +333,7 @@ function renderBestForecastChart() {
   chartDiv.on('plotly_relayout', _relayoutHandler);
 }
 
-// ── Chart 2: Ensemble (all selected models + mean ± 1σ) ──────────────────────
+// â”€â”€ Chart 2: Ensemble (all selected models + mean Â± 1Ïƒ) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderEnsembleChart() {
   const row = document.getElementById('fcEnsembleRow');
   const chartDiv = document.getElementById('fcEnsembleChart');
@@ -362,7 +362,7 @@ function renderEnsembleChart() {
     });
   });
 
-  // Ensemble mean + ±1σ band
+  // Ensemble mean + +/-1 sigma band
   if (selected.length > 1) {
     const stats = computeEnsembleStats(selected);
     const upper = stats.means.map((m, i) => +(m + stats.stds[i]).toFixed(2));
@@ -378,7 +378,7 @@ function renderEnsembleChart() {
     // Lower bound fills to previous trace
     traces.push({
       x: stats.times, y: lower,
-      name: '±1σ',
+      name: '+/-1 sigma',
       type: 'scatter', mode: 'lines',
       fill: 'tonexty',
       fillcolor: 'rgba(20,184,166,0.18)',
@@ -408,7 +408,7 @@ function renderEnsembleChart() {
   renderEnsembleDirChart(selected, winner_model_id);
 }
 
-// ── Chart 2b: Ensemble TWD ────────────────────────────────────────────────────
+// â”€â”€ Chart 2b: Ensemble TWD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderEnsembleDirChart(selected, winner_model_id) {
   const chartDiv = document.getElementById('fcEnsembleDirChart');
   if (!chartDiv) return;
@@ -437,17 +437,17 @@ function renderEnsembleDirChart(selected, winner_model_id) {
     showlegend: false,
     xaxis: { ...LIGHT_XAXIS },
     yaxis: {
-      title: 'TWD (°)',
+      title: 'TWD ( deg)',
       range: [0, 360], dtick: 90,
       gridcolor: '#e2e8f0',
       tickfont: { color: '#64748b' },
       tickvals: [0, 90, 180, 270, 360],
-      ticktext: ['N (0°)', 'E (90°)', 'S (180°)', 'W (270°)', 'N (360°)'],
+      ticktext: ['N (0 deg)', 'E (90 deg)', 'S (180 deg)', 'W (270 deg)', 'N (360 deg)'],
     },
   }, { responsive: true, displayModeBar: false });
 }
 
-// ── Chart 3: Temperature ───────────────────────────────────────────────────────
+// â”€â”€ Chart 3: Temperature â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderTempChart() {
   const panel = document.getElementById('fcTempPanel');
   const chartDiv = document.getElementById('fcTempChart');
@@ -480,13 +480,13 @@ function renderTempChart() {
     margin: { t: 15, b: 50, l: 55, r: 20 },
     showlegend: false,
     xaxis: { ...LIGHT_XAXIS },
-    yaxis: { title: 'Temp (°C)', gridcolor: '#e2e8f0', tickfont: { color: '#64748b' } },
+    yaxis: { title: 'Temp ( degC)', gridcolor: '#e2e8f0', tickfont: { color: '#64748b' } },
   };
 
   Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 }
 
-// ── Chart 4: Precipitation ────────────────────────────────────────────────────
+// â”€â”€ Chart 4: Precipitation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderPrecipChart() {
   const panel = document.getElementById('fcPrecipPanel');
   const chartDiv = document.getElementById('fcPrecipChart');
@@ -522,7 +522,7 @@ function renderPrecipChart() {
   }], layout, { responsive: true, displayModeBar: false });
 }
 
-// ── Render all charts ─────────────────────────────────────────────────────────
+// â”€â”€ Render all charts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderAllCharts() {
   if (!forecastData) return;
   renderBestForecastChart();
@@ -539,7 +539,7 @@ function renderAllCharts() {
   renderForecastTable();
 }
 
-// ── Hourly forecast table ──────────────────────────────────────────────────────
+// â”€â”€ Hourly forecast table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderForecastTable() {
   const wrap = document.getElementById('fcTableWrap');
   if (!wrap) return;
@@ -554,7 +554,7 @@ function renderForecastTable() {
 
   const heading = document.createElement('div');
   heading.className = 'fc-chart-title';
-  heading.textContent = `Hourly forecast — ${winner.model_id}`;
+  heading.textContent = `Hourly forecast  -  ${winner.model_id}`;
   wrap.appendChild(heading);
 
   const scrollWrap = document.createElement('div');
@@ -565,7 +565,7 @@ function renderForecastTable() {
 
   let colHtml = '<th>Time UTC</th><th>TWS (kt)</th>';
   if (hasCorr) colHtml += '<th>Corr (kt)</th>';
-  colHtml += '<th>Gust (kt)</th><th>TWD (°)</th><th>Temp (°C)</th>';
+  colHtml += '<th>Gust (kt)</th><th>TWD ( deg)</th><th>Temp ( degC)</th>';
   if (hasPrecip) colHtml += '<th>Rain</th>';
   colHtml += '<th class="note-col">Notes</th>';
 
@@ -580,9 +580,9 @@ function renderForecastTable() {
     const ws_kt = hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT).toFixed(1) : null;
     const corr_kt = ws_kt != null ? (parseFloat(ws_kt) - biasKt).toFixed(1) : null;
     const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
-    const wd = hour.wd_deg != null ? Math.round(hour.wd_deg) + '°' : '—';
-    const temp = hour.temp_c != null ? hour.temp_c.toFixed(1) : '—';
-    const precip = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : '—';
+    const wd = hour.wd_deg != null ? Math.round(hour.wd_deg) + ' deg' : ' - ';
+    const temp = hour.temp_c != null ? hour.temp_c.toFixed(1) : ' - ';
+    const precip = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';
 
     const t = new Date(hour.time_utc);
     const label = `${String(t.getUTCDate()).padStart(2,'0')} ${MONTHS[t.getUTCMonth()]} ${String(t.getUTCHours()).padStart(2,'0')}z`;
@@ -592,9 +592,9 @@ function renderForecastTable() {
 
     const tr = document.createElement('tr');
     let cells = `<td class="fc-time">${label}</td>`;
-    cells += `<td class="fc-num" style="background:${wsColor}">${ws_kt ?? '—'}</td>`;
-    if (hasCorr) cells += `<td class="fc-num" style="background:${corrColor}">${corr_kt ?? '—'}</td>`;
-    cells += `<td class="fc-num" style="background:${gustColor}">${gust_kt ?? '—'}</td>`;
+    cells += `<td class="fc-num" style="background:${wsColor}">${ws_kt ?? ' - '}</td>`;
+    if (hasCorr) cells += `<td class="fc-num" style="background:${corrColor}">${corr_kt ?? ' - '}</td>`;
+    cells += `<td class="fc-num" style="background:${gustColor}">${gust_kt ?? ' - '}</td>`;
     cells += `<td class="fc-num">${wd}</td>`;
     cells += `<td class="fc-num">${temp}</td>`;
     if (hasPrecip) cells += `<td class="fc-num">${precip}</td>`;
@@ -607,3 +607,4 @@ function renderForecastTable() {
   scrollWrap.appendChild(table);
   wrap.appendChild(scrollWrap);
 }
+

@@ -1,4 +1,4 @@
-﻿/* briefing.js â€” Weather Briefing tab
+﻿/* briefing.js  -  Weather Briefing tab
  * Reuses forecastData + helpers from forecast.js:
  *   MS_TO_KT, FC_COLORS, modelColor, computeEnsembleStats, windSpeedColor,
  *   LIGHT_LAYOUT, LIGHT_XAXIS, LIGHT_YAXIS, currentLatLon,
@@ -74,7 +74,7 @@ function renderBriefingBestChart() {
 
   const titleEl = document.getElementById('bfBestTitle');
   if (titleEl) titleEl.textContent =
-    winner_model_id + (bias_ws_ms ? ` Â· bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
+    winner_model_id + (bias_ws_ms ? `  -  bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
 
   const fh      = bfFilterHours(winner.hours);
   const biasKt  = bias_ws_ms * MS_TO_KT;
@@ -112,7 +112,7 @@ function renderBriefingBestChart() {
   }
 
   traces.push({
-    x: times, y: wd, name: 'TWD (Â°)',
+    x: times, y: wd, name: 'TWD ( deg)',
     type: 'scatter', mode: 'lines+markers+text',
     line: { color: '#dc2626', width: 1.5 },
     marker: { color: '#dc2626', size: 4 },
@@ -131,7 +131,7 @@ function renderBriefingBestChart() {
     xaxis: { ...LIGHT_XAXIS },
     yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
     yaxis2: {
-      title: 'Â°', overlaying: 'y', side: 'right',
+      title: ' deg', overlaying: 'y', side: 'right',
       range: [0, 360], dtick: 90,
       gridcolor: 'transparent',
       tickfont: { color: '#dc2626' },
@@ -173,7 +173,7 @@ function renderBriefingEnsembleCharts() {
     const upper = stats.means.map((m, i) => +(m + stats.stds[i]).toFixed(2));
     const lower = stats.means.map((m, i) => +(m - stats.stds[i]).toFixed(2));
     traces.push({ x: statTimes, y: upper, type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
-    traces.push({ x: statTimes, y: lower, name: 'Â±1Ïƒ', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
+    traces.push({ x: statTimes, y: lower, name: '+/-1 sigma', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(20,184,166,0.18)', line: { width: 0 }, hoverinfo: 'skip' });
     traces.push({ x: statTimes, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
     Plotly.newPlot(twsDiv, traces, {
       ...LIGHT_LAYOUT,
@@ -207,10 +207,10 @@ function renderBriefingEnsembleCharts() {
       showlegend: false,
       xaxis: { ...LIGHT_XAXIS },
       yaxis: {
-        title: 'TWD (Â°)', range: [0, 360], dtick: 90,
+        title: 'TWD ( deg)', range: [0, 360], dtick: 90,
         gridcolor: '#e2e8f0', tickfont: { color: '#64748b' },
         tickvals: [0, 90, 180, 270, 360],
-        ticktext: ['N (0Â°)', 'E (90Â°)', 'S (180Â°)', 'W (270Â°)', 'N (360Â°)'],
+        ticktext: ['N (0 deg)', 'E (90 deg)', 'S (180 deg)', 'W (270 deg)', 'N (360 deg)'],
       },
     }, { responsive: true, displayModeBar: false });
   }
@@ -232,8 +232,8 @@ function renderBriefingWindTable() {
   let headerCols = '<th class="bfc-time">Time</th>'
     + '<th class="bfc-num" title="True wind speed (kt)">TWS</th>'
     + '<th class="bfc-num" title="Wind gust (kt)">Gust</th>'
-    + '<th class="bfc-num" title="True wind direction (Â°)">TWD</th>'
-    + '<th class="bfc-num" title="Temperature (Â°C)">Temp</th>';
+    + '<th class="bfc-num" title="True wind direction ( deg)">TWD</th>'
+    + '<th class="bfc-num" title="Temperature ( degC)">Temp</th>';
   if (hasPrecip) headerCols += '<th class="bfc-rain" title="Precipitation (mm/h)">Rain</th>';
   headerCols += '<th class="bf-note-col">Notes</th>';
 
@@ -246,14 +246,14 @@ function renderBriefingWindTable() {
     const raw_kt  = hour.ws_ms   != null ? (hour.ws_ms   * MS_TO_KT) : null;
     const tws_kt  = raw_kt != null ? (raw_kt - biasKt).toFixed(1) : null;
     const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
-    const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)}Â°` : 'â€”';
-    const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : 'â€”';
-    const precip  = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : 'â€”';
+    const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)} deg` : ' - ';
+    const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : ' - ';
+    const precip  = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';
 
     const tr = document.createElement('tr');
     let cells = `<td class="bfc-time fc-time">${bfFmt(hour.time_utc)}</td>`;
-    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? 'â€”'}</td>`;
-    cells += `<td class="bfc-num fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? 'â€”'}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? ' - '}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? ' - '}</td>`;
     cells += `<td class="bfc-num fc-num">${wd}</td><td class="bfc-num fc-num">${temp}</td>`;
     if (hasPrecip) cells += `<td class="bfc-rain fc-num">${precip}</td>`;
     cells += `<td class="bf-note-cell" contenteditable="true"></td>`;
@@ -269,7 +269,7 @@ function renderBriefingWindTable() {
   wrap.innerHTML = '';
   const heading = document.createElement('div');
   heading.className = 'fc-chart-title';
-  heading.textContent = `Hourly Forecast â€” ${winner.model_id}`;
+  heading.textContent = `Hourly Forecast  -  ${winner.model_id}`;
   wrap.appendChild(heading);
   wrap.appendChild(scrollWrap);
 }
@@ -290,7 +290,7 @@ function renderBriefingTab() {
   }
   const pos = currentLatLon();
   const now = new Date().toUTCString().replace(' GMT', ' UTC');
-  if (meta) meta.textContent = `${pos ? `${pos.lat.toFixed(4)}Â°N, ${pos.lon.toFixed(4)}Â°E` : ''} Â· ${now}`;
+  if (meta) meta.textContent = `${pos ? `${pos.lat.toFixed(4)} degN, ${pos.lon.toFixed(4)} degE` : ''}  -  ${now}`;
 
   bfInitRange();
   bfRerender();
@@ -332,12 +332,11 @@ document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
   const notes = (document.getElementById('bfNotes')?.value || '').trim();
   const meta = document.getElementById('bfMetaText')?.textContent || '';
 
+  const win = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900');
   const bestImg = await bfChartAsImg('bfBestChart', 340);
   const ensTwsImg = await bfChartAsImg('bfEnsembleChart', 300);
   const ensTwdImg = await bfChartAsImg('bfEnsembleDirChart', 300);
   const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
-
-  const win = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900');
   if (!win) {
     btn.disabled = false;
     btn.textContent = 'Print / PDF';
@@ -455,4 +454,6 @@ document.getElementById('bfFileInput')?.addEventListener('change', e => {
   // Reset so same file can be re-loaded
   e.target.value = '';
 });
+
+
 

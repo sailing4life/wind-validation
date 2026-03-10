@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #f1f5f9;
   --panel: #ffffff;
   --ink: #1e293b;
@@ -304,7 +304,7 @@ tr.winner-row td { background: var(--winner-bg); }
 td.winner-cell { color: var(--good); font-weight: 700; }
 td.model-cell { font-family: monospace; font-size: 11px; }
 
-/* ranking table — fixed layout so it stays within the 290px panel */
+/* ranking table  -  fixed layout so it stays within the 290px panel */
 #ranking {
   table-layout: fixed;
 }
@@ -384,7 +384,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 .source-brightsky   { background: #ede9fe; color: #5b21b6; }
 .source-other       { background: #f1f5f9; color: #475569; }
 
-/* ── Tab navigation ─────────────────────────────────────────────────────────── */
+/* â”€â”€ Tab navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .tab-nav {
   display: flex;
   gap: 4px;
@@ -414,7 +414,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 .tab-panel { display: none !important; }
 .tab-panel.active { display: block !important; }
 
-/* ── Forecast layout — stacked ──────────────────────────────────────────────── */
+/* â”€â”€ Forecast layout  -  stacked â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #tab-forecast.active {
   display: flex !important;
   flex-direction: column;
@@ -583,7 +583,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   #map { height: 55vw; min-height: 320px; }
 }
 
-/* ── Briefing tab ────────────────────────────────────────────────────────────── */
+/* â”€â”€ Briefing tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #tab-briefing.active {
   display: flex !important;
   flex-direction: column;
@@ -702,7 +702,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   border-color: transparent;
 }
 
-/* Briefing table — class-based column widths so optional Rain col doesn't break layout */
+/* Briefing table  -  class-based column widths so optional Rain col doesn't break layout */
 .bf-wind-table { table-layout: fixed; width: 100%; }
 .bf-wind-table th,
 .bf-wind-table td { padding: 4px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
@@ -745,27 +745,27 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   gap: 12px;
 }
 
-/* ── Print / PDF ─────────────────────────────────────────────────────────────── */
+/* â”€â”€ Print / PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @page {
   size: A4 portrait;
   margin: 18mm 18mm 15mm;
 }
 
 @media print {
-  /* ── Visibility ── */
+  /* â”€â”€ Visibility â”€â”€ */
   header, .bf-actions, #tab-validation, #tab-forecast { display: none !important; }
   #tab-briefing { display: block !important; }
 
-  /* ── Base ── */
+  /* â”€â”€ Base â”€â”€ */
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { background: #fff; font-size: 11px; margin: 0; color: #1e293b; }
 
-  /* ── Strip card styling — use document sections instead ── */
+  /* â”€â”€ Strip card styling  -  use document sections instead â”€â”€ */
   .bf-page  { padding: 0; gap: 0; display: block; }
   .panel    { border: none; border-radius: 0; box-shadow: none; padding: 0; background: transparent; }
   .bf-section { padding: 0; }
 
-  /* ── Document header: title in navy, subtitle in slate, rule below ── */
+  /* â”€â”€ Document header: title in navy, subtitle in slate, rule below â”€â”€ */
   .bf-header-section {
     display: flex; flex-direction: column; gap: 4px;
     border-bottom: 3px solid #1e3a8a;
@@ -791,14 +791,14 @@ td.model-cell { font-family: monospace; font-size: 11px; }
     color: #1e293b !important;
   }
 
-  /* ── Section labels ── */
+  /* â”€â”€ Section labels â”€â”€ */
   .fc-chart-title {
     font-size: 9px; font-weight: 600; color: #64748b;
     text-transform: uppercase; letter-spacing: 0.6px;
     border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px;
   }
 
-  /* ── Top row: keep chart + table side by side ── */
+  /* â”€â”€ Top row: keep chart + table side by side â”€â”€ */
   .bf-top-row {
     display: grid !important;
     grid-template-columns: 55% 43% !important;
@@ -807,7 +807,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
     margin-bottom: 14px;
   }
 
-  /* ── Ensemble row: side by side with a rule above ── */
+  /* â”€â”€ Ensemble row: side by side with a rule above â”€â”€ */
   .bf-ensemble-row {
     display: grid !important;
     grid-template-columns: 1fr 1fr !important;
@@ -817,7 +817,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
     margin-top: 4px;
   }
 
-  /* ── Table ── */
+  /* â”€â”€ Table â”€â”€ */
   .bf-table-panel .fc-table-scroll { max-height: none !important; overflow: visible !important; }
   .bf-wind-table { page-break-inside: auto; }
   .bf-wind-table tr { page-break-inside: avoid; }
@@ -833,3 +833,4 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 @media (max-width: 860px) {
   .bf-top-row, .bf-ensemble-row { grid-template-columns: 1fr; }
 }
+
