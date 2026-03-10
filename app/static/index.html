@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=5" />
+  <link rel="stylesheet" href="/static/styles.css?v=6" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -153,9 +153,17 @@
   <div id="tab-briefing" class="tab-panel">
     <div class="bf-page">
 
-      <!-- Action bar -->
+      <!-- Action bar (not printed) -->
       <div class="bf-actions panel">
-        <span id="bfMetaText" class="bf-meta">Run Validation + load Forecast first.</span>
+        <div class="bf-range">
+          <label class="bf-range-label">From
+            <select id="bfRangeStart"></select>
+          </label>
+          <label class="bf-range-label">To
+            <select id="bfRangeEnd"></select>
+          </label>
+          <span id="bfMetaText" class="bf-meta"></span>
+        </div>
         <div class="bf-btn-group">
           <button id="bfShareBtn" class="btn-secondary">Share link</button>
           <button id="bfPrintBtn">Print / PDF</button>
@@ -165,22 +173,23 @@
       <!-- Printable content -->
       <div id="bfContent">
 
-        <!-- User notes / weather summary -->
-        <div class="panel bf-section">
-          <h2>Weather Summary</h2>
+        <!-- Title + subtitle + notes -->
+        <div class="panel bf-section bf-header-section">
+          <input  id="bfTitle"    class="bf-title-input"    type="text" placeholder="Weather Briefing" />
+          <input  id="bfSubtitle" class="bf-subtitle-input" type="text" placeholder="Location · Date · Event" />
           <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here…&#10;&#10;• Wind: …&#10;• Conditions: …&#10;• Outlook: …"></textarea>
         </div>
 
-        <!-- Best model chart -->
-        <div class="panel bf-section" id="bfBestPanel" style="display:none">
-          <div class="fc-chart-title">Wind Forecast — <span id="bfBestTitle"></span></div>
-          <div id="bfBestChart"></div>
-        </div>
-
-        <!-- Ensemble chart -->
-        <div class="panel bf-section" id="bfEnsemblePanel" style="display:none">
-          <div class="fc-chart-title">Ensemble — All Models</div>
-          <div id="bfEnsembleChart"></div>
+        <!-- Charts side-by-side -->
+        <div class="bf-charts-row">
+          <div class="panel bf-section" id="bfBestPanel" style="display:none">
+            <div class="fc-chart-title">Wind Forecast — <span id="bfBestTitle"></span></div>
+            <div id="bfBestChart"></div>
+          </div>
+          <div class="panel bf-section" id="bfEnsemblePanel" style="display:none">
+            <div class="fc-chart-title">Ensemble — All Models</div>
+            <div id="bfEnsembleChart"></div>
+          </div>
         </div>
 
         <!-- Hourly table -->
@@ -192,8 +201,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=5"></script>
-  <script src="/static/forecast.js?v=5"></script>
-  <script src="/static/briefing.js?v=5"></script>
+  <script src="/static/app.js?v=6"></script>
+  <script src="/static/forecast.js?v=6"></script>
+  <script src="/static/briefing.js?v=6"></script>
 </body>
 </html>
