@@ -50,6 +50,7 @@ class ForecastValue:
     v10: float
     gust_ms: float | None = None
     temp_c: float | None = None
+    precip_mm: float | None = None
 
 
 @dataclass(slots=True)

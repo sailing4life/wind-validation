@@ -71,10 +71,10 @@ class OpenMeteoForecastAdapter:
         include_extras: bool = False,
     ) -> list[ForecastValue]:
         """Single HTTP fetch for a list of coordinates.
-        Set include_extras=True to also fetch windgusts_10m and temperature_2m."""
+        Set include_extras=True to also fetch windgusts_10m, temperature_2m, precipitation."""
         hourly_vars = "wind_speed_10m,wind_direction_10m"
         if include_extras:
-            hourly_vars += ",windgusts_10m,temperature_2m"
+            hourly_vars += ",windgusts_10m,temperature_2m,precipitation"
         params: dict = {
             "latitude":        ",".join(str(lat) for lat, _ in in_cov),
             "longitude":       ",".join(str(lon) for _, lon in in_cov),
@@ -110,8 +110,9 @@ class OpenMeteoForecastAdapter:
             if i >= len(payload):
                 break
             hourly = payload[i].get("hourly", {})
-            gusts = hourly.get("windgusts_10m", []) if include_extras else []
-            temps = hourly.get("temperature_2m", []) if include_extras else []
+            gusts   = hourly.get("windgusts_10m", []) if include_extras else []
+            temps   = hourly.get("temperature_2m", []) if include_extras else []
+            precips = hourly.get("precipitation",  []) if include_extras else []
             for j, (t_raw, ws, wd) in enumerate(zip(
                 hourly.get("time", []),
                 hourly.get("wind_speed_10m", []),
@@ -127,6 +128,7 @@ class OpenMeteoForecastAdapter:
                 u10, v10 = speed_dir_to_uv(ws_ms, wd_deg)
                 gust_ms: float | None = None
                 temp_c: float | None = None
+                precip_mm: float | None = None
                 if include_extras:
                     try:
                         gust_ms = float(gusts[j]) if j < len(gusts) and gusts[j] is not None else None
@@ -136,12 +138,16 @@ class OpenMeteoForecastAdapter:
                         temp_c = float(temps[j]) if j < len(temps) and temps[j] is not None else None
                     except (TypeError, ValueError):
                         pass
+                    try:
+                        precip_mm = float(precips[j]) if j < len(precips) and precips[j] is not None else None
+                    except (TypeError, ValueError):
+                        pass
                 rows.append(ForecastValue(
                     model_id=model_id,
                     run_time_utc=valid_time - timedelta(hours=6),
                     valid_time_utc=valid_time,
                     lat=lat, lon=lon, u10=u10, v10=v10,
-                    gust_ms=gust_ms, temp_c=temp_c,
+                    gust_ms=gust_ms, temp_c=temp_c, precip_mm=precip_mm,
                 ))
         return rows
 

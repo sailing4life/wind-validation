@@ -97,21 +97,54 @@
   </div>
 
   <div id="tab-forecast" class="tab-panel">
-    <div class="fc-layout">
-      <div class="fc-map-section">
-        <iframe id="fcMap" allowfullscreen title="Wind map"></iframe>
-      </div>
-      <div class="fc-right">
-        <div class="fc-controls panel">
+    <div class="fc-page">
+      <!-- Top row: map + controls sidebar -->
+      <div class="fc-top">
+        <div class="fc-map-wrap">
+          <iframe id="fcMap" allowfullscreen title="Wind map"></iframe>
+        </div>
+        <div class="fc-sidebar panel">
+          <h2>Forecast</h2>
           <label>Hours ahead
             <input id="fcHoursAhead" type="number" value="48" min="6" max="168" step="6">
+          </label>
+          <label class="mode-pill" style="flex-direction:row;align-items:center;cursor:pointer;width:fit-content">
+            <input type="checkbox" id="fcCorrectedOnly">
+            <span>Corrected only</span>
           </label>
           <button id="fcRunBtn">Load Forecast</button>
           <span id="fcStatus" class="fc-status"></span>
         </div>
-        <div id="fcCharts"></div>
-        <div id="fcTableWrap"></div>
       </div>
+
+      <!-- Model toggles -->
+      <div class="fc-toggles-bar panel">
+        <div id="fcModelToggles" class="model-toggles"></div>
+      </div>
+
+      <!-- Charts (full width, stacked) -->
+      <div class="fc-chart-panel panel" id="fcBestPanel" style="display:none">
+        <div class="fc-chart-title">Best Forecast — <span id="fcBestTitle"></span></div>
+        <div id="fcBestChart"></div>
+      </div>
+
+      <div class="fc-chart-panel panel" id="fcEnsemblePanel" style="display:none">
+        <div class="fc-chart-title">Ensemble — All Models</div>
+        <div id="fcEnsembleChart"></div>
+      </div>
+
+      <div class="fc-chart-panel panel" id="fcTempPanel" style="display:none">
+        <div class="fc-chart-title">Temperature (°C)</div>
+        <div id="fcTempChart"></div>
+      </div>
+
+      <div class="fc-chart-panel panel" id="fcPrecipPanel" style="display:none">
+        <div class="fc-chart-title">Precipitation (mm/h)</div>
+        <div id="fcPrecipChart"></div>
+      </div>
+
+      <!-- Hourly table -->
+      <div id="fcTableWrap" class="fc-chart-panel panel" style="display:none"></div>
     </div>
   </div>
 

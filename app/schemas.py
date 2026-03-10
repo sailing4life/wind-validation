@@ -129,6 +129,7 @@ class ForecastHour(BaseModel):
     gust_ms: float | None = None
     wd_deg: float | None = None
     temp_c: float | None = None
+    precip_mm: float | None = None
 
 
 class ForecastModelSeries(BaseModel):

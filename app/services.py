@@ -409,6 +409,7 @@ class ValidationService:
                     "gust_ms": fv.gust_ms,
                     "wd_deg": wd,
                     "temp_c": fv.temp_c,
+                    "precip_mm": fv.precip_mm,
                 })
             if hours_list:
                 models_series.append({"model_id": model.model_id, "hours": hours_list})
