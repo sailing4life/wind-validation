@@ -8,6 +8,7 @@ let _winnerModelId = '';
 let _biasWsMs = 0;
 let _selectedModels = new Set();
 let _correctedOnly = false;
+let _relayoutHandler = null;   // for range-slider sync
 
 // ── Model color palette ────────────────────────────────────────────────────────
 const FC_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d'];
@@ -194,6 +195,14 @@ function windSpeedColor(kt) {
   return `hsl(${hue}, 75%, 82%)`;
 }
 
+// ── Range sync: best-forecast slider → all other charts ───────────────────────
+function syncChartRanges(range) {
+  for (const id of ['fcEnsembleChart', 'fcTempChart', 'fcPrecipChart']) {
+    const el = document.getElementById(id);
+    if (el && el._fullLayout) Plotly.relayout(el, { 'xaxis.range': range });
+  }
+}
+
 // ── Chart 1: Best Forecast (winner model, expedition style) ───────────────────
 function renderBestForecastChart() {
   const panel = document.getElementById('fcBestPanel');
@@ -278,10 +287,25 @@ function renderBestForecastChart() {
 
   const layout = {
     ...LIGHT_LAYOUT,
-    height: 420,
-    margin: { t: 50, b: 50, l: 55, r: 65 },
-    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 11 } },
-    xaxis: { ...LIGHT_XAXIS },
+    height: 480,
+    margin: { t: 70, b: 30, l: 55, r: 65 },
+    legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 11 } },
+    xaxis: {
+      ...LIGHT_XAXIS,
+      rangeselector: {
+        buttons: [
+          { count: 12, label: '12h', step: 'hour', stepmode: 'backward' },
+          { count: 24, label: '24h', step: 'hour', stepmode: 'backward' },
+          { count: 48, label: '48h', step: 'hour', stepmode: 'backward' },
+          { step: 'all', label: 'All' },
+        ],
+        bgcolor: '#f1f5f9',
+        activecolor: '#0369a1',
+        bordercolor: '#e2e8f0',
+        font: { size: 10 },
+      },
+      rangeslider: { visible: true, thickness: 0.06 },
+    },
     yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
     yaxis2: {
       title: '°', overlaying: 'y', side: 'right',
@@ -293,6 +317,20 @@ function renderBestForecastChart() {
   };
 
   Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+
+  // Re-attach range-sync listener (replaces previous one on re-render)
+  if (_relayoutHandler) chartDiv.removeListener('plotly_relayout', _relayoutHandler);
+  _relayoutHandler = (ev) => {
+    if (ev['xaxis.range[0]'] != null) {
+      syncChartRanges([ev['xaxis.range[0]'], ev['xaxis.range[1]']]);
+    } else if (ev['xaxis.autorange']) {
+      for (const id of ['fcEnsembleChart', 'fcTempChart', 'fcPrecipChart']) {
+        const el = document.getElementById(id);
+        if (el && el._fullLayout) Plotly.relayout(el, { 'xaxis.autorange': true });
+      }
+    }
+  };
+  chartDiv.on('plotly_relayout', _relayoutHandler);
 }
 
 // ── Chart 2: Ensemble (all selected models + mean ± 1σ) ──────────────────────
