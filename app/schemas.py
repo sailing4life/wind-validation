@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class ValidatePointRequest(BaseModel):
     lat: float = Field(ge=-90.0, le=90.0)
     lon: float = Field(ge=-180.0, le=180.0)
-    hours_back: int = Field(default=48, ge=1, le=168)
+    hours_back: int = Field(default=24, ge=1, le=168)
     radius_km: float = Field(default=50.0, gt=0.0, le=150.0)
 
 

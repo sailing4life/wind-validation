@@ -132,7 +132,7 @@ class ValidationService:
             missing_threshold=0.25,
         )
 
-        forecast_end = window_end + timedelta(hours=12)
+        forecast_end = window_end
 
         # Fast forecast index: (model_id, valid_time) → list[ForecastValue]
         fc_index: dict[tuple[str, datetime], list] = defaultdict(list)
@@ -287,7 +287,7 @@ class ValidationService:
             obs_ws_by_hour[hour].append(obs.ws_ms)
             obs_wd_by_hour[hour].append(obs.wd_deg)
 
-        axis = self._build_time_axis(window_start, forecast_end)
+        axis = self._build_time_axis(window_start, window_end)
         time_series = []
         for model in candidates:
             points = []

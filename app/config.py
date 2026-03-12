@@ -51,7 +51,7 @@ def _env_float(name: str, default: float) -> float:
 @dataclass(slots=True)
 class Settings:
     app_name: str = "Wind Validation"
-    default_hours_back: int = 48
+    default_hours_back: int = 24
     default_radius_km: float = 50.0
     max_radius_km: float = 150.0
     min_samples: int = 30
