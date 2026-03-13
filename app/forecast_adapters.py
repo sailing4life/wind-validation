@@ -288,7 +288,15 @@ class OpenMeteoForecastAdapter:
                 except Exception as exc:
                     logger.warning("Forecast fetch failed for %s station %s", model.model_id, station.station_id, exc_info=exc)
                     continue
-                payload = resp.json().get("hourly", {})
+                data = resp.json()
+                api_run_time: datetime | None = None
+                run_time_raw = data.get("run_time")
+                if run_time_raw:
+                    try:
+                        api_run_time = datetime.fromisoformat(str(run_time_raw)).replace(tzinfo=UTC)
+                    except (TypeError, ValueError):
+                        pass
+                payload = data.get("hourly", {})
                 times = payload.get("time", [])
                 ws_values = payload.get("wind_speed_10m", [])
                 wd_values = payload.get("wind_direction_10m", [])
@@ -302,10 +310,11 @@ class OpenMeteoForecastAdapter:
                     if valid_time < request.start or valid_time > request.end:
                         continue
                     u10, v10 = speed_dir_to_uv(ws_ms, wd_deg)
+                    run_time = api_run_time if api_run_time is not None else valid_time - timedelta(hours=6)
                     rows.append(
                         ForecastValue(
                             model_id=model.model_id,
-                            run_time_utc=valid_time - timedelta(hours=6),
+                            run_time_utc=run_time,
                             valid_time_utc=valid_time,
                             lat=station.lat,
                             lon=station.lon,
