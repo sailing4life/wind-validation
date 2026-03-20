@@ -15,6 +15,29 @@ from .scoring import speed_dir_to_uv
 
 logger = logging.getLogger("wind_validation.forecast_adapters")
 
+CORE_HOURLY_VARS = ["wind_speed_10m", "wind_direction_10m"]
+EXTRA_BASE_HOURLY_VARS = ["windgusts_10m", "temperature_2m", "precipitation"]
+EXTRA_DIAG_HOURLY_VARS = [
+    "cloud_cover",
+    "pressure_msl",
+    "shortwave_radiation",
+    "cape",
+    "boundary_layer_height",
+]
+EXTRA_SAFE_HOURLY_VARS = ["cloud_cover", "pressure_msl", "shortwave_radiation"]
+
+
+def _parse_optional_float(values: list, index: int) -> float | None:
+    if index >= len(values):
+        return None
+    value = values[index]
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 
 @dataclass(slots=True)
 class ForecastFetchRequest:
@@ -71,37 +94,61 @@ class OpenMeteoForecastAdapter:
         include_extras: bool = False,
     ) -> list[ForecastValue]:
         """Single HTTP fetch for a list of coordinates.
-        Set include_extras=True to also fetch windgusts_10m, temperature_2m, precipitation."""
-        hourly_vars = "wind_speed_10m,wind_direction_10m"
+
+        include_extras=True asks Open-Meteo for the richer diagnostic fields used by
+        the Weather tab. Some models do not expose every diagnostic variable, so we
+        retry with a narrower variable set before giving up.
+        """
+        hourly_var_sets = [CORE_HOURLY_VARS]
         if include_extras:
-            hourly_vars += ",windgusts_10m,temperature_2m,precipitation"
-        params: dict = {
-            "latitude":        ",".join(str(lat) for lat, _ in in_cov),
-            "longitude":       ",".join(str(lon) for _, lon in in_cov),
-            "hourly":          hourly_vars,
-            "wind_speed_unit": "ms",
-            "timezone":        "UTC",
-        }
-        if past_days > 0:
-            params["past_days"] = past_days
-        if forecast_days > 0:
-            params["forecast_days"] = forecast_days
-        if model_param:
-            params["models"] = model_param
+            hourly_var_sets = [
+                CORE_HOURLY_VARS + EXTRA_BASE_HOURLY_VARS + EXTRA_DIAG_HOURLY_VARS,
+                CORE_HOURLY_VARS + EXTRA_BASE_HOURLY_VARS + EXTRA_SAFE_HOURLY_VARS,
+                CORE_HOURLY_VARS + EXTRA_BASE_HOURLY_VARS,
+            ]
 
-        try:
-            with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
-                resp = client.get(url, params=params)
-                if resp.status_code == 429:
-                    logger.debug("429 from %s, retrying after 5s", url)
-                    time.sleep(5)
+        payload = None
+        with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
+            for hourly_vars in hourly_var_sets:
+                params: dict = {
+                    "latitude": ",".join(str(lat) for lat, _ in in_cov),
+                    "longitude": ",".join(str(lon) for _, lon in in_cov),
+                    "hourly": ",".join(hourly_vars),
+                    "wind_speed_unit": "ms",
+                    "timezone": "UTC",
+                }
+                if past_days > 0:
+                    params["past_days"] = past_days
+                if forecast_days > 0:
+                    params["forecast_days"] = forecast_days
+                if model_param:
+                    params["models"] = model_param
+
+                try:
                     resp = client.get(url, params=params)
-                resp.raise_for_status()
-        except Exception as exc:
-            logger.warning("Batch fetch failed from %s: %s", url, exc)
-            return []
+                    if resp.status_code == 429:
+                        logger.debug("429 from %s, retrying after 5s", url)
+                        time.sleep(5)
+                        resp = client.get(url, params=params)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    can_fallback = include_extras and exc.response.status_code == 400 and hourly_vars is not hourly_var_sets[-1]
+                    if can_fallback:
+                        logger.info(
+                            "Retrying %s forecast fetch with fewer diagnostics after HTTP 400",
+                            model_id,
+                        )
+                        continue
+                    logger.warning("Batch fetch failed from %s: %s", url, exc)
+                    return []
+                except Exception as exc:
+                    logger.warning("Batch fetch failed from %s: %s", url, exc)
+                    return []
 
-        payload = resp.json()
+        if payload is None:
+            return []
         if not isinstance(payload, list):
             payload = [payload]
 
@@ -121,9 +168,14 @@ class OpenMeteoForecastAdapter:
                     pass
 
             hourly = payload[i].get("hourly", {})
-            gusts   = hourly.get("windgusts_10m", []) if include_extras else []
-            temps   = hourly.get("temperature_2m", []) if include_extras else []
-            precips = hourly.get("precipitation",  []) if include_extras else []
+            gusts = hourly.get("windgusts_10m", []) if include_extras else []
+            temps = hourly.get("temperature_2m", []) if include_extras else []
+            precips = hourly.get("precipitation", []) if include_extras else []
+            clouds = hourly.get("cloud_cover", []) if include_extras else []
+            pressures = hourly.get("pressure_msl", []) if include_extras else []
+            radiations = hourly.get("shortwave_radiation", []) if include_extras else []
+            capes = hourly.get("cape", []) if include_extras else []
+            blh_values = hourly.get("boundary_layer_height", []) if include_extras else []
             for j, (t_raw, ws, wd) in enumerate(zip(
                 hourly.get("time", []),
                 hourly.get("wind_speed_10m", []),
@@ -140,19 +192,20 @@ class OpenMeteoForecastAdapter:
                 gust_ms: float | None = None
                 temp_c: float | None = None
                 precip_mm: float | None = None
+                cloud_cover_pct: float | None = None
+                pressure_msl_hpa: float | None = None
+                shortwave_wm2: float | None = None
+                cape_jkg: float | None = None
+                boundary_layer_height_m: float | None = None
                 if include_extras:
-                    try:
-                        gust_ms = float(gusts[j]) if j < len(gusts) and gusts[j] is not None else None
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        temp_c = float(temps[j]) if j < len(temps) and temps[j] is not None else None
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        precip_mm = float(precips[j]) if j < len(precips) and precips[j] is not None else None
-                    except (TypeError, ValueError):
-                        pass
+                    gust_ms = _parse_optional_float(gusts, j)
+                    temp_c = _parse_optional_float(temps, j)
+                    precip_mm = _parse_optional_float(precips, j)
+                    cloud_cover_pct = _parse_optional_float(clouds, j)
+                    pressure_msl_hpa = _parse_optional_float(pressures, j)
+                    shortwave_wm2 = _parse_optional_float(radiations, j)
+                    cape_jkg = _parse_optional_float(capes, j)
+                    boundary_layer_height_m = _parse_optional_float(blh_values, j)
                 # Use authoritative run_time from previous-runs API when available.
                 # For regular forecast API (no run_time field), cap estimate to past.
                 if api_run_time is not None:
@@ -164,7 +217,14 @@ class OpenMeteoForecastAdapter:
                     run_time_utc=run_time,
                     valid_time_utc=valid_time,
                     lat=lat, lon=lon, u10=u10, v10=v10,
-                    gust_ms=gust_ms, temp_c=temp_c, precip_mm=precip_mm,
+                    gust_ms=gust_ms,
+                    temp_c=temp_c,
+                    precip_mm=precip_mm,
+                    cloud_cover_pct=cloud_cover_pct,
+                    pressure_msl_hpa=pressure_msl_hpa,
+                    shortwave_wm2=shortwave_wm2,
+                    cape_jkg=cape_jkg,
+                    boundary_layer_height_m=boundary_layer_height_m,
                 ))
         return rows
 

@@ -51,6 +51,11 @@ class ForecastValue:
     gust_ms: float | None = None
     temp_c: float | None = None
     precip_mm: float | None = None
+    cloud_cover_pct: float | None = None
+    pressure_msl_hpa: float | None = None
+    shortwave_wm2: float | None = None
+    cape_jkg: float | None = None
+    boundary_layer_height_m: float | None = None
 
 
 @dataclass(slots=True)

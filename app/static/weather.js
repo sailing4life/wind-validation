@@ -1,9 +1,17 @@
-/* weather.js  -  Weather tab: consensus report + weather charts */
+/* weather.js - Weather tab: structured regime detection + tactical report */
 
 let wxRangeState = {
   total: 0,
   start: 0,
   end: 0,
+};
+
+const WX_REGIMES = {
+  gradient: { label: 'Gradient / persistent', color: '#2563eb' },
+  thermal: { label: 'Thermal / sea-breeze style', color: '#f59e0b' },
+  frontal: { label: 'Frontal / showery', color: '#dc2626' },
+  local: { label: 'Locally driven / terrain style', color: '#0f766e' },
+  mixed_transition: { label: 'Mixed transition', color: '#64748b' },
 };
 
 function wxParseUtc(isoStr) {
@@ -48,6 +56,28 @@ function wxCircularSpread(values, meanDeg) {
   return diffs.reduce((acc, value) => acc + value, 0) / diffs.length;
 }
 
+function wxCircularStd(values) {
+  const valid = values.filter(v => v != null);
+  if (valid.length < 2) return 0;
+  const s = valid.reduce((acc, value) => acc + Math.sin((value * Math.PI) / 180), 0);
+  const c = valid.reduce((acc, value) => acc + Math.cos((value * Math.PI) / 180), 0);
+  const r = Math.sqrt(s * s + c * c) / valid.length;
+  if (r <= 0) return 180;
+  return Math.sqrt(-2 * Math.log(r)) * (180 / Math.PI);
+}
+
+function wxDirectionRange(values) {
+  const valid = values.filter(v => v != null).map(v => ((v % 360) + 360) % 360);
+  if (valid.length < 2) return 0;
+  let maxGap = 0;
+  const sorted = [...valid].sort((a, b) => a - b);
+  for (let i = 1; i < sorted.length; i += 1) {
+    maxGap = Math.max(maxGap, sorted[i] - sorted[i - 1]);
+  }
+  maxGap = Math.max(maxGap, sorted[0] + 360 - sorted[sorted.length - 1]);
+  return 360 - maxGap;
+}
+
 function wxStd(values) {
   const valid = values.filter(v => v != null);
   if (valid.length < 2) return 0;
@@ -60,6 +90,89 @@ function wxMean(values) {
   const valid = values.filter(v => v != null);
   if (!valid.length) return null;
   return valid.reduce((acc, value) => acc + value, 0) / valid.length;
+}
+
+function wxSum(values) {
+  return values.filter(v => v != null).reduce((acc, value) => acc + value, 0);
+}
+
+function wxMin(values) {
+  const valid = values.filter(v => v != null);
+  return valid.length ? Math.min(...valid) : null;
+}
+
+function wxMax(values) {
+  const valid = values.filter(v => v != null);
+  return valid.length ? Math.max(...valid) : null;
+}
+
+function wxClamp(value, low, high) {
+  return Math.max(low, Math.min(high, value));
+}
+
+function wxRise(x, a, b) {
+  if (x == null) return null;
+  if (x <= a) return 0;
+  if (x >= b) return 1;
+  return (x - a) / (b - a);
+}
+
+function wxFall(x, a, b) {
+  const rise = wxRise(x, a, b);
+  return rise == null ? null : 1 - rise;
+}
+
+function wxTri(x, a, b, c) {
+  if (x == null) return null;
+  if (x <= a || x >= c) return 0;
+  if (x === b) return 1;
+  if (x < b) return (x - a) / (b - a);
+  return (c - x) / (c - b);
+}
+
+function wxWeightedScore(parts) {
+  const usable = parts.filter(part => part.value != null);
+  if (!usable.length) return 50;
+  const totalWeight = usable.reduce((acc, part) => acc + part.weight, 0);
+  if (!totalWeight) return 50;
+  return 100 * usable.reduce((acc, part) => acc + part.value * part.weight, 0) / totalWeight;
+}
+
+function wxUnwrapDirections(values) {
+  const out = [];
+  let last = null;
+  values.forEach(value => {
+    if (value == null) {
+      out.push(null);
+      return;
+    }
+    if (last == null) {
+      out.push(value);
+      last = value;
+      return;
+    }
+    const delta = ((value - last + 540) % 360) - 180;
+    const next = last + delta;
+    out.push(next);
+    last = next;
+  });
+  return out;
+}
+
+function wxFirstValid(values) {
+  return values.find(value => value != null) ?? null;
+}
+
+function wxLastValid(values) {
+  for (let i = values.length - 1; i >= 0; i -= 1) {
+    if (values[i] != null) return values[i];
+  }
+  return null;
+}
+
+function wxSeriesCoverage(rows, key) {
+  if (!rows.length) return 0;
+  return rows.filter(row => row[key] != null).length / rows.length;
 }
 
 function wxBaseHours() {
@@ -83,7 +196,7 @@ function wxSetWindowSummary() {
   if (startLabel) startLabel.textContent = wxFmtHour(startHour.time_utc);
   if (endLabel) endLabel.textContent = wxFmtHour(endHour.time_utc);
   if (summary) {
-    summary.textContent = `${wxFmtHour(startHour.time_utc)} to ${wxFmtHour(endHour.time_utc)}  •  ${wxRangeState.end - wxRangeState.start + 1}h window`;
+    summary.textContent = `${wxFmtHour(startHour.time_utc)} to ${wxFmtHour(endHour.time_utc)}  -  ${wxRangeState.end - wxRangeState.start + 1}h window`;
   }
 }
 
@@ -134,6 +247,7 @@ function wxInitRangeControls(forceReset = false) {
     });
     startInput.dataset.bound = '1';
   }
+
   if (!endInput.dataset.bound) {
     endInput.addEventListener('input', () => {
       wxApplyRangeInputs('end');
@@ -179,19 +293,21 @@ function wxBuildConsensus(models) {
 
   return times.map(time_utc => {
     const rows = modelMaps.map(model => model.hours.get(time_utc)).filter(Boolean);
-    const wsMean = wxMean(rows.map(row => row.ws_ms));
-    const gustMean = wxMean(rows.map(row => row.gust_ms));
-    const tempMean = wxMean(rows.map(row => row.temp_c));
-    const precipMean = wxMean(rows.map(row => row.precip_mm));
+    const wsMeanMs = wxMean(rows.map(row => row.ws_ms));
+    const gustMeanMs = wxMean(rows.map(row => row.gust_ms));
     const wdMean = wxCircularMean(rows.map(row => row.wd_deg));
-
     return {
       time_utc,
-      ws_kt: wsMean != null ? wsMean * MS_TO_KT : null,
-      gust_kt: gustMean != null ? gustMean * MS_TO_KT : null,
+      ws_kt: wsMeanMs != null ? wsMeanMs * MS_TO_KT : null,
+      gust_kt: gustMeanMs != null ? gustMeanMs * MS_TO_KT : null,
       wd_deg: wdMean,
-      temp_c: tempMean,
-      precip_mm: precipMean,
+      temp_c: wxMean(rows.map(row => row.temp_c)),
+      precip_mm: wxMean(rows.map(row => row.precip_mm)),
+      cloud_cover_pct: wxMean(rows.map(row => row.cloud_cover_pct)),
+      pressure_msl_hpa: wxMean(rows.map(row => row.pressure_msl_hpa)),
+      shortwave_wm2: wxMean(rows.map(row => row.shortwave_wm2)),
+      cape_jkg: wxMean(rows.map(row => row.cape_jkg)),
+      boundary_layer_height_m: wxMean(rows.map(row => row.boundary_layer_height_m)),
       ws_spread_kt: wxStd(rows.map(row => row.ws_ms)) * MS_TO_KT,
       dir_spread_deg: wxCircularSpread(rows.map(row => row.wd_deg), wdMean),
       model_count: rows.length,
@@ -199,46 +315,357 @@ function wxBuildConsensus(models) {
   });
 }
 
-function wxConfidenceSummary(consensus) {
-  const meanWsSpread = wxMean(consensus.map(row => row.ws_spread_kt)) ?? 0;
-  const meanDirSpread = wxMean(consensus.map(row => row.dir_spread_deg)) ?? 0;
-  const modelCounts = consensus.map(row => row.model_count).filter(Boolean);
-  const minModelCount = modelCounts.length ? Math.min(...modelCounts) : 0;
+function wxWindowMetrics(rows) {
+  if (!rows.length) return null;
+  const wsVals = rows.map(row => row.ws_kt).filter(v => v != null);
+  const gustVals = rows.map(row => row.gust_kt).filter(v => v != null);
+  const dirVals = rows.map(row => row.wd_deg).filter(v => v != null);
+  const tempVals = rows.map(row => row.temp_c).filter(v => v != null);
+  const precipVals = rows.map(row => row.precip_mm).filter(v => v != null);
+  const cloudVals = rows.map(row => row.cloud_cover_pct).filter(v => v != null);
+  const pressureVals = rows.map(row => row.pressure_msl_hpa);
+  const shortwaveVals = rows.map(row => row.shortwave_wm2).filter(v => v != null);
+  const capeVals = rows.map(row => row.cape_jkg).filter(v => v != null);
+  const blhVals = rows.map(row => row.boundary_layer_height_m).filter(v => v != null);
+  const wsSpreadVals = rows.map(row => row.ws_spread_kt).filter(v => v != null);
+  const dirSpreadVals = rows.map(row => row.dir_spread_deg).filter(v => v != null);
 
-  let score = 100 - meanWsSpread * 14 - meanDirSpread * 1.1;
-  if (minModelCount < 2) score -= 20;
-  score = Math.max(12, Math.min(96, score));
+  const unwrapped = wxUnwrapDirections(rows.map(row => row.wd_deg));
+  const dirTurns = [];
+  for (let i = 1; i < unwrapped.length; i += 1) {
+    if (unwrapped[i] == null || unwrapped[i - 1] == null) continue;
+    dirTurns.push(Math.abs(unwrapped[i] - unwrapped[i - 1]));
+  }
+
+  const firstDir = wxFirstValid(rows.map(row => row.wd_deg));
+  const lastDir = wxLastValid(rows.map(row => row.wd_deg));
+  const firstPressure = wxFirstValid(pressureVals);
+  const lastPressure = wxLastValid(pressureVals);
+
+  let maxPressureSwing = null;
+  if (pressureVals.filter(v => v != null).length >= 2) {
+    maxPressureSwing = 0;
+    for (let i = 1; i < pressureVals.length; i += 1) {
+      if (pressureVals[i] == null || pressureVals[i - 1] == null) continue;
+      maxPressureSwing = Math.max(maxPressureSwing, Math.abs(pressureVals[i] - pressureVals[i - 1]));
+    }
+  }
+
+  return {
+    windMeanKt: wxMean(wsVals),
+    windAmpKt: wsVals.length ? Math.max(...wsVals) - Math.min(...wsVals) : null,
+    gustMaxKt: wxMax(gustVals),
+    gustExcessMeanKt: wxMean(rows.map(row => (
+      row.gust_kt != null && row.ws_kt != null ? Math.max(row.gust_kt - row.ws_kt, 0) : null
+    ))),
+    dirMeanDeg: wxCircularMean(dirVals),
+    dirStdDeg: wxCircularStd(dirVals),
+    dirRangeDeg: wxDirectionRange(dirVals),
+    dirTurnMeanDeg: wxMean(dirTurns),
+    dirShiftAbsDeg: firstDir != null && lastDir != null ? Math.abs(wxCircularDiff(firstDir, lastDir)) : null,
+    dirShiftSignedDeg: firstDir != null && lastDir != null ? wxCircularDiff(firstDir, lastDir) : null,
+    tempLowC: wxMin(tempVals),
+    tempHighC: wxMax(tempVals),
+    precipTotalMm: wxSum(precipVals),
+    precipPeakMm: wxMax(precipVals),
+    cloudMeanPct: wxMean(cloudVals),
+    cloudMaxPct: wxMax(cloudVals),
+    pressureTrendHpa: firstPressure != null && lastPressure != null ? lastPressure - firstPressure : null,
+    pressureSwingHpa: maxPressureSwing,
+    shortwaveMeanWm2: wxMean(shortwaveVals),
+    shortwaveMaxWm2: wxMax(shortwaveVals),
+    heatingHours: shortwaveVals.filter(v => v >= 120).length,
+    capeMeanJkg: wxMean(capeVals),
+    capeMaxJkg: wxMax(capeVals),
+    blhMeanM: wxMean(blhVals),
+    blhMaxM: wxMax(blhVals),
+    wsSpreadMeanKt: wxMean(wsSpreadVals),
+    dirSpreadMeanDeg: wxMean(dirSpreadVals),
+    minModelCount: rows.length ? Math.min(...rows.map(row => row.model_count || 0)) : 0,
+    maxModelCount: rows.length ? Math.max(...rows.map(row => row.model_count || 0)) : 0,
+  };
+}
+
+function wxCoverageSummary(rows) {
+  const fields = [
+    { key: 'cloud_cover_pct', label: 'cloud' },
+    { key: 'pressure_msl_hpa', label: 'pressure' },
+    { key: 'shortwave_wm2', label: 'radiation' },
+    { key: 'cape_jkg', label: 'cape' },
+    { key: 'boundary_layer_height_m', label: 'blh' },
+  ];
+  const byField = {};
+  fields.forEach(field => {
+    byField[field.label] = wxSeriesCoverage(rows, field.key);
+  });
+  const overall = wxMean(Object.values(byField).map(value => value * 100)) ?? 0;
+  let sentence = `Diagnostic field coverage ${overall.toFixed(0)}%.`;
+  if (overall >= 80) {
+    sentence = `Diagnostic field coverage is strong at ${overall.toFixed(0)}%, so the regime call is using the fuller signal set.`;
+  } else if (overall >= 50) {
+    sentence = `Diagnostic field coverage is usable at ${overall.toFixed(0)}%, but some models are thinner on the advanced fields.`;
+  } else {
+    sentence = `Diagnostic field coverage is limited at ${overall.toFixed(0)}%, so the call leans more on wind, rain, and spread than on boundary-layer diagnostics.`;
+  }
+  return { byField, overall, sentence };
+}
+
+function wxScoreRegimes(metrics) {
+  const gradient = wxWeightedScore([
+    { value: wxRise(metrics.windMeanKt, 7, 18), weight: 0.18 },
+    { value: wxFall(metrics.dirStdDeg, 14, 35), weight: 0.18 },
+    { value: wxFall(metrics.dirTurnMeanDeg, 8, 26), weight: 0.14 },
+    { value: wxFall(metrics.wsSpreadMeanKt, 1.2, 4.5), weight: 0.16 },
+    { value: wxFall(metrics.dirSpreadMeanDeg, 12, 40), weight: 0.12 },
+    { value: wxFall(metrics.precipTotalMm, 0.2, 4.0), weight: 0.10 },
+    { value: wxFall(Math.abs(metrics.pressureTrendHpa ?? 0), 0.8, 5.0), weight: 0.12 },
+  ]);
+
+  const thermal = wxWeightedScore([
+    { value: wxRise(metrics.shortwaveMaxWm2, 160, 550), weight: 0.18 },
+    { value: wxFall(metrics.cloudMeanPct, 45, 90), weight: 0.16 },
+    { value: wxTri(metrics.blhMeanM, 350, 1100, 2200), weight: 0.14 },
+    { value: wxTri(metrics.dirShiftAbsDeg, 12, 38, 95), weight: 0.14 },
+    { value: wxRise(metrics.windAmpKt, 2.0, 8.0), weight: 0.12 },
+    { value: wxFall(metrics.precipTotalMm, 0.2, 3.0), weight: 0.10 },
+    { value: wxFall(Math.abs(metrics.pressureTrendHpa ?? 0), 0.5, 3.5), weight: 0.08 },
+    { value: wxFall(metrics.wsSpreadMeanKt, 1.4, 5.0), weight: 0.08 },
+  ]);
+
+  const frontal = wxWeightedScore([
+    { value: wxRise(metrics.precipTotalMm, 0.4, 6.0), weight: 0.18 },
+    { value: wxRise(metrics.cloudMeanPct, 55, 95), weight: 0.12 },
+    { value: wxRise(Math.abs(metrics.pressureTrendHpa ?? 0), 1.0, 6.0), weight: 0.16 },
+    { value: wxRise(metrics.dirShiftAbsDeg, 18, 100), weight: 0.16 },
+    { value: wxRise(metrics.gustExcessMeanKt, 2.5, 10.0), weight: 0.10 },
+    { value: wxRise(metrics.wsSpreadMeanKt, 1.4, 5.0), weight: 0.10 },
+    { value: wxRise(metrics.dirSpreadMeanDeg, 15, 55), weight: 0.08 },
+    { value: wxRise(metrics.capeMaxJkg, 80, 1000), weight: 0.10 },
+  ]);
+
+  const local = wxWeightedScore([
+    { value: wxFall(Math.abs(metrics.pressureTrendHpa ?? 0), 0.5, 3.0), weight: 0.16 },
+    { value: wxFall(metrics.precipTotalMm, 0.1, 3.0), weight: 0.10 },
+    { value: wxFall(metrics.wsSpreadMeanKt, 1.0, 4.0), weight: 0.12 },
+    { value: wxTri(metrics.windMeanKt, 5.0, 11.0, 20.0), weight: 0.12 },
+    { value: wxFall(metrics.dirStdDeg, 10, 26), weight: 0.18 },
+    { value: wxTri(metrics.blhMeanM, 250, 900, 1700), weight: 0.12 },
+    { value: wxRise(metrics.shortwaveMeanWm2, 80, 320), weight: 0.10 },
+    { value: wxTri(metrics.windAmpKt, 1.0, 5.0, 10.0), weight: 0.10 },
+  ]);
+
+  const scores = {
+    gradient: wxClamp(gradient + (metrics.windAmpKt != null && metrics.windAmpKt < 3 ? 4 : 0), 0, 100),
+    thermal: wxClamp(thermal + (
+      metrics.heatingHours >= 3 && (metrics.dirShiftAbsDeg ?? 0) >= 18 && (metrics.precipTotalMm ?? 0) < 1.5 ? 6 : 0
+    ), 0, 100),
+    frontal: wxClamp(frontal + (
+      (metrics.precipTotalMm ?? 0) >= 1.0 && ((metrics.capeMaxJkg ?? 0) >= 250 || (metrics.gustExcessMeanKt ?? 0) >= 5) ? 6 : 0
+    ), 0, 100),
+    local: wxClamp(local + (
+      (metrics.windAmpKt ?? 0) >= 3 && (metrics.windAmpKt ?? 0) <= 8 && (metrics.dirShiftAbsDeg ?? 0) < 25 ? 4 : 0
+    ), 0, 100),
+  };
+
+  const ordered = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topKey, topScore] = ordered[0];
+  const secondScore = ordered[1]?.[1] ?? 0;
+  const separation = topScore - secondScore;
+  const selectedKey = topScore < 46 || separation < 7 ? 'mixed_transition' : topKey;
+  return { scores, ordered, topKey, topScore, secondScore, separation, selectedKey };
+}
+
+function wxBuildDrivers(regimeKey, metrics, coverage, scoreInfo) {
+  const drivers = [];
+  if (regimeKey === 'gradient') {
+    drivers.push(`Directional variability stays limited at ${metrics.dirStdDeg.toFixed(0)} deg with mean model spread near ${(metrics.wsSpreadMeanKt ?? 0).toFixed(1)} kt.`);
+    drivers.push(`Pressure trend is ${metrics.pressureTrendHpa != null ? metrics.pressureTrendHpa.toFixed(1) : '0.0'} hPa across the window and precipitation stays light, which supports a cleaner synoptic signal.`);
+  } else if (regimeKey === 'thermal') {
+    drivers.push(`Heating peaks near ${metrics.shortwaveMaxWm2 != null ? metrics.shortwaveMaxWm2.toFixed(0) : '-'} W/m2 with BLH around ${metrics.blhMeanM != null ? metrics.blhMeanM.toFixed(0) : '-'} m, which is the right shape for thermal forcing.`);
+    drivers.push(`The wind turns about ${metrics.dirShiftAbsDeg != null ? metrics.dirShiftAbsDeg.toFixed(0) : '-'} deg through the window while cloud and rain stay limited enough for a thermal response to show through.`);
+  } else if (regimeKey === 'frontal') {
+    drivers.push(`Pressure trend of ${metrics.pressureTrendHpa != null ? metrics.pressureTrendHpa.toFixed(1) : '-'} hPa and a direction change near ${metrics.dirShiftAbsDeg != null ? metrics.dirShiftAbsDeg.toFixed(0) : '-'} deg line up with a boundary or disturbed pattern.`);
+    drivers.push(`Rain totals near ${(metrics.precipTotalMm ?? 0).toFixed(1)} mm, gust excess near ${(metrics.gustExcessMeanKt ?? 0).toFixed(1)} kt, and CAPE up to ${metrics.capeMaxJkg != null ? metrics.capeMaxJkg.toFixed(0) : '-'} J/kg all push the signal away from a clean steady flow.`);
+  } else if (regimeKey === 'local') {
+    drivers.push(`Pressure is relatively flat while direction stays constrained at ${metrics.dirStdDeg.toFixed(0)} deg, which points toward local forcing rather than a strong synoptic transition.`);
+    drivers.push(`Heating and BLH growth are present, but the turn signal is weaker and less clean than a textbook thermal or frontal regime.`);
+  } else {
+    const second = scoreInfo.ordered[1];
+    drivers.push(`The top regime scores sit too close together to call one cleanly. ${WX_REGIMES[scoreInfo.topKey].label} leads, but only by ${scoreInfo.separation.toFixed(0)} points.`);
+    if (second) {
+      drivers.push(`The competing signal is ${WX_REGIMES[second[0]].label}, so timing and hazards matter more than the headline label.`);
+    }
+  }
+
+  if (coverage.overall < 55) {
+    drivers.push(`Advanced diagnostic coverage is only ${coverage.overall.toFixed(0)}%, so this call leans more heavily on wind, rain, and pressure than on CAPE or boundary-layer structure.`);
+  }
+
+  return drivers.slice(0, 3);
+}
+
+function wxEstimateConfidence(metrics, coverage, scoreInfo, dominantShare) {
+  const meanWsSpread = metrics.wsSpreadMeanKt ?? 0;
+  const meanDirSpread = metrics.dirSpreadMeanDeg ?? 0;
+  const coveragePct = coverage.overall;
+  const separation = scoreInfo.separation ?? 0;
+
+  let score = 0.45 * (scoreInfo.topScore ?? 50)
+    + 0.25 * separation
+    + 0.20 * (dominantShare * 100)
+    + 0.10 * coveragePct
+    - meanWsSpread * 6
+    - meanDirSpread * 0.28;
+
+  if ((metrics.minModelCount ?? 0) < 2) score -= 18;
+  score = wxClamp(score, 18, 96);
 
   let label = 'High';
-  let sentence = 'Model agreement is tight enough to lean on the consensus signal.';
-  if (score < 75) {
+  let sentence = 'The models are aligned tightly enough that the regime call should carry well through the window.';
+  if (score < 78) {
     label = 'Medium';
-    sentence = 'There is some spread in the timing and detail, so keep room for adjustment.';
+    sentence = 'The regime call is usable, but the timing details can still wobble because the spread is not fully locked down.';
   }
-  if (score < 52) {
+  if (score < 56) {
     label = 'Low';
-    sentence = 'Model spread is meaningful, so treat the timing and exact values with caution.';
+    sentence = 'The regime label is only a loose guide here; treat the report as a set of risks and tendencies rather than a precise scenario.';
   }
 
-  return { score, label, meanWsSpread, meanDirSpread, sentence };
+  return { score, label, sentence, meanWsSpread, meanDirSpread };
+}
+
+function wxClassifyTimeline(consensus) {
+  const raw = [];
+  for (let i = 0; i < consensus.length; i += 1) {
+    const start = Math.max(0, i - 2);
+    const end = Math.min(consensus.length, i + 3);
+    const slice = consensus.slice(start, end);
+    const metrics = wxWindowMetrics(slice);
+    const scoreInfo = wxScoreRegimes(metrics);
+    raw.push({
+      time_utc: consensus[i].time_utc,
+      key: scoreInfo.selectedKey,
+      topKey: scoreInfo.topKey,
+      topScore: scoreInfo.topScore,
+      separation: scoreInfo.separation,
+      scores: scoreInfo.scores,
+    });
+  }
+
+  for (let i = 1; i < raw.length - 1; i += 1) {
+    const prev = raw[i - 1];
+    const cur = raw[i];
+    const next = raw[i + 1];
+    if (prev.key === next.key && cur.key !== prev.key && cur.topScore < 72) {
+      cur.key = prev.key;
+    }
+  }
+
+  for (let i = 1; i < raw.length; i += 1) {
+    const prev = raw[i - 1];
+    const cur = raw[i];
+    if (cur.key !== prev.key && cur.topScore < 60 && cur.separation < 10) {
+      cur.key = prev.key;
+    }
+  }
+
+  return raw;
+}
+
+function wxTimelineSummary(timeline) {
+  const counts = {};
+  timeline.forEach(point => {
+    counts[point.key] = (counts[point.key] || 0) + 1;
+  });
+
+  const ordered = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const dominantKey = ordered[0]?.[0] ?? 'mixed_transition';
+  const dominantShare = timeline.length ? (ordered[0]?.[1] ?? 0) / timeline.length : 0;
+  const transitions = [];
+  for (let i = 1; i < timeline.length; i += 1) {
+    if (timeline[i].key !== timeline[i - 1].key) {
+      transitions.push({
+        time_utc: timeline[i].time_utc,
+        from: timeline[i - 1].key,
+        to: timeline[i].key,
+      });
+    }
+  }
+
+  return { dominantKey, dominantShare, counts, transitions };
+}
+
+function wxAggregateScores(timeline) {
+  const totals = { gradient: 0, thermal: 0, frontal: 0, local: 0 };
+  const count = timeline.length || 1;
+  timeline.forEach(point => {
+    Object.entries(point.scores).forEach(([key, value]) => {
+      totals[key] += value;
+    });
+  });
+
+  Object.keys(totals).forEach(key => {
+    totals[key] /= count;
+  });
+  return totals;
+}
+
+function wxFindPeakRow(rows, key, threshold = null) {
+  let best = null;
+  rows.forEach(row => {
+    const value = row[key];
+    if (value == null) return;
+    if (threshold != null && value < threshold) return;
+    if (!best || value > best[key]) best = row;
+  });
+  return best;
+}
+
+function wxFindBiggestTurn(rows) {
+  let best = null;
+  for (let i = 1; i < rows.length; i += 1) {
+    if (rows[i - 1].wd_deg == null || rows[i].wd_deg == null) continue;
+    const delta = Math.abs(wxCircularDiff(rows[i - 1].wd_deg, rows[i].wd_deg));
+    if (!best || delta > best.delta_deg) {
+      best = {
+        start: rows[i - 1].time_utc,
+        end: rows[i].time_utc,
+        delta_deg: delta,
+      };
+    }
+  }
+  return best;
+}
+
+function wxFindBiggestPressureMove(rows) {
+  let best = null;
+  for (let i = 1; i < rows.length; i += 1) {
+    if (rows[i - 1].pressure_msl_hpa == null || rows[i].pressure_msl_hpa == null) continue;
+    const delta = rows[i].pressure_msl_hpa - rows[i - 1].pressure_msl_hpa;
+    if (!best || Math.abs(delta) > Math.abs(best.delta_hpa)) {
+      best = {
+        start: rows[i - 1].time_utc,
+        end: rows[i].time_utc,
+        delta_hpa: delta,
+      };
+    }
+  }
+  return best;
 }
 
 function wxSegmentStats(rows) {
   if (!rows.length) return null;
-  const windRows = rows.filter(row => row.ws_kt != null);
-  const tempRows = rows.filter(row => row.temp_c != null);
-  const precipRows = rows.filter(row => row.precip_mm != null);
-  const gustRows = rows.filter(row => row.gust_kt != null);
+  const metrics = wxWindowMetrics(rows);
   return {
     start: rows[0].time_utc,
     end: rows[rows.length - 1].time_utc,
-    meanDir: wxCircularMean(rows.map(row => row.wd_deg)),
-    minWind: windRows.length ? Math.min(...windRows.map(row => row.ws_kt)) : null,
-    maxWind: windRows.length ? Math.max(...windRows.map(row => row.ws_kt)) : null,
-    maxGust: gustRows.length ? Math.max(...gustRows.map(row => row.gust_kt)) : null,
-    tempLow: tempRows.length ? Math.min(...tempRows.map(row => row.temp_c)) : null,
-    tempHigh: tempRows.length ? Math.max(...tempRows.map(row => row.temp_c)) : null,
-    precipTotal: precipRows.reduce((acc, row) => acc + (row.precip_mm || 0), 0),
+    meanDir: metrics.dirMeanDeg,
+    minWind: wxMin(rows.map(row => row.ws_kt)),
+    maxWind: wxMax(rows.map(row => row.ws_kt)),
+    maxGust: wxMax(rows.map(row => row.gust_kt)),
+    tempLow: metrics.tempLowC,
+    tempHigh: metrics.tempHighC,
+    precipTotal: metrics.precipTotalMm,
   };
 }
 
@@ -256,89 +683,133 @@ function wxWindowSegments(consensus) {
 function wxTimingLine(segment) {
   if (!segment?.stats) return '';
   const stats = segment.stats;
-  const rainText = stats.precipTotal >= 0.2 ? `, rain signal ${stats.precipTotal.toFixed(1)} mm` : ', mainly dry';
+  const rainText = (stats.precipTotal ?? 0) >= 0.2
+    ? `, rain signal ${stats.precipTotal.toFixed(1)} mm`
+    : ', mainly dry';
   return `- ${segment.label} (${wxFmtHour(stats.start)} to ${wxFmtHour(stats.end)}): ${stats.minWind != null ? stats.minWind.toFixed(0) : '-'}-${stats.maxWind != null ? stats.maxWind.toFixed(0) : '-'} kt from ${wxCardinal(stats.meanDir)}${stats.maxGust != null ? `, gusts ${stats.maxGust.toFixed(0)} kt` : ''}${rainText}.`;
+}
+
+function wxBuildHazards(metrics, confidence, events, timelineSummary) {
+  const hazards = [];
+  if ((metrics.gustMaxKt ?? 0) >= 22) {
+    hazards.push(`Gusts reach ${metrics.gustMaxKt.toFixed(0)} kt${events.windPeak ? ` near ${wxFmtHour(events.windPeak.time_utc)}` : ''}.`);
+  }
+  if ((metrics.dirShiftAbsDeg ?? 0) >= 25 && events.turn) {
+    hazards.push(`The cleanest direction shift is about ${events.turn.delta_deg.toFixed(0)} deg between ${wxFmtHour(events.turn.start)} and ${wxFmtHour(events.turn.end)}.`);
+  }
+  if ((metrics.precipTotalMm ?? 0) >= 0.5) {
+    hazards.push(`Rain signal totals about ${(metrics.precipTotalMm ?? 0).toFixed(1)} mm${events.wetPeak ? ` with the wettest hour near ${wxFmtHour(events.wetPeak.time_utc)}` : ''}.`);
+  }
+  if ((metrics.capeMaxJkg ?? 0) >= 300) {
+    hazards.push(`CAPE rises to about ${metrics.capeMaxJkg.toFixed(0)} J/kg, so short convective bursts could distort the cleaner wind story.`);
+  }
+  if (confidence.label === 'Low') {
+    hazards.push(`Model spread remains meaningful at ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg, so timing should stay flexible.`);
+  }
+  if (timelineSummary.transitions.length >= 2) {
+    hazards.push(`The timeline flips regime ${timelineSummary.transitions.length} times, so the window is probably transitional rather than cleanly single-pattern.`);
+  }
+  if (!hazards.length) {
+    hazards.push('No single hazard dominates the window beyond normal hour-to-hour variability.');
+  }
+  return hazards;
 }
 
 function wxBuildWeatherSummary(models, consensus) {
   if (!consensus.length) return null;
 
-  const wsRows = consensus.filter(row => row.ws_kt != null);
-  const gustRows = consensus.filter(row => row.gust_kt != null);
-  const wdRows = consensus.filter(row => row.wd_deg != null);
-  const tempRows = consensus.filter(row => row.temp_c != null);
-  const precipRows = consensus.filter(row => row.precip_mm != null);
-  const confidence = wxConfidenceSummary(consensus);
+  const windowMetrics = wxWindowMetrics(consensus);
+  const coverage = wxCoverageSummary(consensus);
+  const fullWindowScores = wxScoreRegimes(windowMetrics);
+  const timeline = wxClassifyTimeline(consensus);
+  const timelineSummary = wxTimelineSummary(timeline);
+  const aggregateScores = wxAggregateScores(timeline);
+  const scoreRows = Object.entries(aggregateScores)
+    .map(([key, value]) => ({ key, label: WX_REGIMES[key].label, color: WX_REGIMES[key].color, value }))
+    .sort((a, b) => b.value - a.value);
+
+  let dominantKey = timelineSummary.dominantKey;
+  if (timelineSummary.dominantShare < 0.45 || dominantKey === 'mixed_transition') {
+    dominantKey = fullWindowScores.selectedKey;
+  }
+
+  const dominantScores = {
+    topScore: scoreRows[0]?.value ?? 50,
+    separation: (scoreRows[0]?.value ?? 50) - (scoreRows[1]?.value ?? 45),
+    topKey: scoreRows[0]?.key ?? dominantKey,
+    ordered: scoreRows.map(row => [row.key, row.value]),
+  };
+  const confidence = wxEstimateConfidence(windowMetrics, coverage, dominantScores, timelineSummary.dominantShare);
+  const dominantMeta = WX_REGIMES[dominantKey] || WX_REGIMES.mixed_transition;
+  const drivers = wxBuildDrivers(dominantKey, windowMetrics, coverage, dominantScores);
   const segments = wxWindowSegments(consensus);
+  const strongest = wxFindPeakRow(consensus, 'ws_kt');
+  const wetPeak = wxFindPeakRow(consensus, 'precip_mm', 0.1);
+  const windPeak = wxFindPeakRow(consensus, 'gust_kt');
+  const heatingPeak = wxFindPeakRow(consensus, 'shortwave_wm2', 150);
+  const turn = wxFindBiggestTurn(consensus);
+  const pressureMove = wxFindBiggestPressureMove(consensus);
+  const hazards = wxBuildHazards(windowMetrics, confidence, { strongest, wetPeak, windPeak, heatingPeak, turn, pressureMove }, timelineSummary);
 
-  const prevailingDir = wxCircularMean(wdRows.map(row => row.wd_deg));
-  const earlyDir = segments[0]?.stats?.meanDir ?? wxCircularMean(wdRows.slice(0, Math.max(2, Math.floor(wdRows.length / 3))).map(row => row.wd_deg));
-  const lateDir = segments[segments.length - 1]?.stats?.meanDir ?? wxCircularMean(wdRows.slice(-Math.max(2, Math.floor(wdRows.length / 3))).map(row => row.wd_deg));
-  const shiftDelta = earlyDir != null && lateDir != null ? wxCircularDiff(earlyDir, lateDir) : 0;
-  const shiftAbs = Math.abs(shiftDelta);
+  const prevailingDir = windowMetrics.dirMeanDeg;
+  const windMin = wxMin(consensus.map(row => row.ws_kt));
+  const windMax = wxMax(consensus.map(row => row.ws_kt));
+  const gustMax = windowMetrics.gustMaxKt;
+  const tempMin = windowMetrics.tempLowC;
+  const tempMax = windowMetrics.tempHighC;
+  const totalPrecip = windowMetrics.precipTotalMm ?? 0;
+  const secondary = scoreRows[1];
 
-  let shiftLabel = 'Little change';
-  let shiftNote = 'Direction stays fairly steady through the selected window.';
-  if (shiftAbs >= 15) {
-    shiftLabel = shiftDelta > 0 ? `Veering ${shiftAbs.toFixed(0)} deg` : `Backing ${shiftAbs.toFixed(0)} deg`;
-    shiftNote = shiftDelta > 0
-      ? 'Direction trends clockwise through the window.'
-      : 'Direction trends counter-clockwise through the window.';
+  let transitionLine = 'No major regime handoff stands out inside the selected window.';
+  if (timelineSummary.transitions.length) {
+    const firstTransition = timelineSummary.transitions[0];
+    transitionLine = `The first regime handoff is near ${wxFmtHour(firstTransition.time_utc)} from ${WX_REGIMES[firstTransition.from].label} toward ${WX_REGIMES[firstTransition.to].label}.`;
+  } else if (turn && turn.delta_deg >= 20) {
+    transitionLine = `The main directional change is ${turn.delta_deg.toFixed(0)} deg between ${wxFmtHour(turn.start)} and ${wxFmtHour(turn.end)}.`;
   }
 
-  const strongest = wsRows.reduce((best, row) => (best == null || row.ws_kt > best.ws_kt ? row : best), null);
-  const wettest = precipRows.reduce((best, row) => (best == null || row.precip_mm > best.precip_mm ? row : best), null);
-  const windMin = wsRows.length ? Math.min(...wsRows.map(row => row.ws_kt)) : null;
-  const windMax = wsRows.length ? Math.max(...wsRows.map(row => row.ws_kt)) : null;
-  const gustMax = gustRows.length ? Math.max(...gustRows.map(row => row.gust_kt)) : null;
-  const tempMin = tempRows.length ? Math.min(...tempRows.map(row => row.temp_c)) : null;
-  const tempMax = tempRows.length ? Math.max(...tempRows.map(row => row.temp_c)) : null;
-  const totalPrecip = precipRows.reduce((acc, row) => acc + (row.precip_mm || 0), 0);
-
-  let weatherLabel = 'Dry';
-  let weatherNote = 'No meaningful precipitation signal in the selected window.';
-  if (totalPrecip >= 0.2) {
-    weatherLabel = totalPrecip >= 3 ? 'Showery' : 'Light rain risk';
-    weatherNote = wettest
-      ? `Wettest period looks near ${wxFmtHour(wettest.time_utc)} with around ${wettest.precip_mm.toFixed(1)} mm/h.`
-      : 'Some precipitation is present in the selected window.';
-  }
-
-  const risks = [];
-  if (confidence.score < 75) risks.push(`Model confidence is ${confidence.label.toLowerCase()} because average spread is ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg.`);
-  if (shiftAbs >= 15) risks.push(`${shiftLabel}. ${shiftNote}`);
-  if (gustMax != null && gustMax >= 22) risks.push(`Gust risk rises to about ${gustMax.toFixed(0)} kt${strongest ? ` near ${wxFmtHour(strongest.time_utc)}` : ''}.`);
-  if (totalPrecip >= 0.2) risks.push(weatherNote);
-  if (!risks.length) risks.push('No obvious hazard signal stands out in the selected window beyond normal short-term variability.');
-
-  const timingLines = segments.map(wxTimingLine).filter(Boolean);
   const reportLines = [
     'HEADLINE',
-    `${wxCardinal(prevailingDir)} flow, mostly ${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt, with ${confidence.label.toLowerCase()} confidence. Gusts top out near ${gustMax != null ? gustMax.toFixed(0) : '-'} kt${strongest ? ` around ${wxFmtHour(strongest.time_utc)}` : ''}.`,
+    `${dominantMeta.label} dominates the selected window with ${confidence.label.toLowerCase()} confidence. Expect mostly ${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt from ${wxCardinal(prevailingDir)}, with gusts up to ${gustMax != null ? gustMax.toFixed(0) : '-'} kt${strongest ? ` and the strongest push near ${wxFmtHour(strongest.time_utc)}` : ''}.`,
+    '',
+    'REGIME CALL',
+    `- Primary regime: ${dominantMeta.label}.`,
+    `- Confidence: ${confidence.score.toFixed(0)}/100. ${confidence.sentence}`,
+    ...drivers.map(line => `- ${line}`),
+    ...(secondary ? [`- Secondary signal: ${WX_REGIMES[secondary.key].label} at ${secondary.value.toFixed(0)}/100, so keep that alternative in mind if the timing slips.`] : []),
     '',
     'TIMING',
-    ...timingLines,
+    ...segments.map(wxTimingLine).filter(Boolean),
+    `- ${transitionLine}`,
+    ...(pressureMove ? [`- Strongest pressure move is ${pressureMove.delta_hpa >= 0 ? '+' : ''}${pressureMove.delta_hpa.toFixed(1)} hPa between ${wxFmtHour(pressureMove.start)} and ${wxFmtHour(pressureMove.end)}.`] : []),
+    ...(heatingPeak ? [`- Thermal forcing peaks near ${wxFmtHour(heatingPeak.time_utc)} with about ${heatingPeak.shortwave_wm2.toFixed(0)} W/m2.`] : []),
     '',
     'MODEL SIGNAL',
-    `- Confidence score ${confidence.score.toFixed(0)}/100. ${confidence.sentence}`,
-    `- Consensus mean direction is ${wxCardinal(prevailingDir)}${prevailingDir != null ? ` (${prevailingDir.toFixed(0)} deg)` : ''}. Winner model from validation: ${forecastData?.winner_model_id ?? 'none'}.`,
+    `- Built from ${models.length} active model${models.length === 1 ? '' : 's'}. Mean spread is ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg.`,
+    `- Validation anchor model: ${forecastData?.winner_model_id ?? 'none'}. Use that as the tie-breaker, but let the consensus and spread define confidence.`,
+    `- ${coverage.sentence}`,
     '',
     'RISKS',
-    ...risks.map(line => `- ${line}`),
+    ...hazards.map(line => `- ${line}`),
     '',
     'TACTICAL TAKE',
-    `- Use ${forecastData?.winner_model_id ?? 'the consensus'} as the anchor model, but watch the consensus spread more than the exact hour-to-hour value.`,
-    `- Expect ${weatherLabel.toLowerCase()} conditions with temperatures around ${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC and total precipitation near ${totalPrecip.toFixed(1)} mm.`,
-  ];
+    `- Use ${dominantMeta.label.toLowerCase()} as the base scenario, not a promise. The best edge comes from watching whether the transition timing and spread evolve the way this window suggests.`,
+    `- Expect temperatures around ${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC with total precipitation near ${totalPrecip.toFixed(1)} mm.`,
+  ].filter(Boolean);
 
   return {
     confidence,
     report: reportLines.join('\n'),
     cards: [
       {
-        label: 'Consensus Wind',
+        label: 'Dominant Regime',
+        value: dominantMeta.label,
+        note: secondary ? `Secondary signal: ${WX_REGIMES[secondary.key].label}.` : 'No serious competing regime signal.',
+      },
+      {
+        label: 'Wind Envelope',
         value: `${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt`,
-        note: `${wxCardinal(prevailingDir)} ${prevailingDir != null ? prevailingDir.toFixed(0) : '-'} deg mean, gusts ${gustMax != null ? gustMax.toFixed(0) : '-'} kt`,
+        note: `${wxCardinal(prevailingDir)} mean flow, gusts ${gustMax != null ? gustMax.toFixed(0) : '-'} kt.`,
       },
       {
         label: 'Confidence',
@@ -346,16 +817,15 @@ function wxBuildWeatherSummary(models, consensus) {
         note: `Spread averages ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg.`,
       },
       {
-        label: 'Shift Signal',
-        value: shiftLabel,
-        note: strongest ? `Strongest wind near ${wxFmtHour(strongest.time_utc)}.` : shiftNote,
-      },
-      {
-        label: 'Weather',
-        value: weatherLabel,
-        note: `${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC, total precip ${totalPrecip.toFixed(1)} mm.`,
+        label: 'Key Risk Window',
+        value: turn && turn.delta_deg >= 20 ? wxFmtHour(turn.end) : (wetPeak ? wxFmtHour(wetPeak.time_utc) : 'No sharp spike'),
+        note: hazards[0],
       },
     ],
+    dominantMeta,
+    scoreRows,
+    drivers,
+    qualityNote: coverage.sentence,
   };
 }
 
@@ -369,6 +839,24 @@ function wxRenderCards(summary) {
       <div class="wx-card-note">${card.note}</div>
     </article>
   `).join('');
+}
+
+function wxRenderSignals(summary) {
+  const scoreRows = document.getElementById('wxScoreRows');
+  const driverList = document.getElementById('wxDriverList');
+  const qualityNote = document.getElementById('wxQualityNote');
+  if (qualityNote) qualityNote.textContent = summary?.qualityNote ?? 'Awaiting forecast data';
+  if (!scoreRows || !driverList || !summary) return;
+
+  scoreRows.innerHTML = summary.scoreRows.map(row => `
+    <div class="wx-score-row">
+      <div class="wx-score-label">${row.label}</div>
+      <div class="wx-score-bar"><div class="wx-score-fill" style="width:${row.value.toFixed(0)}%;background:${row.color}"></div></div>
+      <div class="wx-score-value">${row.value.toFixed(0)}</div>
+    </div>
+  `).join('');
+
+  driverList.innerHTML = summary.drivers.map(line => `<li>${line}</li>`).join('');
 }
 
 function wxRenderReport(summary, modelCount) {
@@ -401,7 +889,7 @@ function wxRenderWindChart(models, consensus) {
     });
   });
 
-  const consensusWind = consensus.map(row => row.ws_kt);
+  const consensusWind = consensus.map(row => row.ws_kt != null ? +row.ws_kt.toFixed(1) : null);
   if (consensusWind.some(value => value != null)) {
     traces.push({
       x: consensus.map(row => wxLocalISO(row.time_utc)),
@@ -413,7 +901,7 @@ function wxRenderWindChart(models, consensus) {
     });
   }
 
-  const consensusGust = consensus.map(row => row.gust_kt);
+  const consensusGust = consensus.map(row => row.gust_kt != null ? +row.gust_kt.toFixed(1) : null);
   if (consensusGust.some(value => value != null)) {
     traces.push({
       x: consensus.map(row => wxLocalISO(row.time_utc)),
@@ -461,7 +949,7 @@ function wxRenderDirChart(models, consensus) {
     });
   });
 
-  const consensusDir = consensus.map(row => row.wd_deg);
+  const consensusDir = consensus.map(row => row.wd_deg != null ? +row.wd_deg.toFixed(0) : null);
   if (consensusDir.some(value => value != null)) {
     traces.push({
       x: consensus.map(row => wxLocalISO(row.time_utc)),
@@ -518,7 +1006,7 @@ function wxRenderTempChart(models, consensus) {
     });
   });
 
-  const consensusTemps = consensus.map(row => row.temp_c);
+  const consensusTemps = consensus.map(row => row.temp_c != null ? +row.temp_c.toFixed(1) : null);
   if (consensusTemps.some(value => value != null)) {
     traces.push({
       x: consensus.map(row => wxLocalISO(row.time_utc)),
@@ -551,7 +1039,7 @@ function wxRenderPrecipChart(models, consensus) {
   const chartDiv = document.getElementById('wxPrecipChart');
   if (!panel || !chartDiv) return;
 
-  const consensusPrecip = consensus.map(row => row.precip_mm);
+  const consensusPrecip = consensus.map(row => row.precip_mm != null ? +row.precip_mm.toFixed(2) : null);
   const hasConsensus = consensusPrecip.some(value => value != null && value > 0);
   const traces = [];
 
@@ -566,7 +1054,7 @@ function wxRenderPrecipChart(models, consensus) {
   }
 
   models.forEach(series => {
-    const precip = series.hours.map(hour => hour.precip_mm);
+    const precip = series.hours.map(hour => hour.precip_mm != null ? +hour.precip_mm.toFixed(2) : null);
     if (!precip.some(value => value != null && value > 0)) return;
     traces.push({
       x: series.hours.map(hour => wxLocalISO(hour.time_utc)),
@@ -603,6 +1091,15 @@ function wxHidePanels() {
   });
 }
 
+function wxResetSignalPanels(message) {
+  const qualityNote = document.getElementById('wxQualityNote');
+  const scoreRows = document.getElementById('wxScoreRows');
+  const driverList = document.getElementById('wxDriverList');
+  if (qualityNote) qualityNote.textContent = message;
+  if (scoreRows) scoreRows.innerHTML = '';
+  if (driverList) driverList.innerHTML = `<li>${message}</li>`;
+}
+
 function renderWeatherTab(forceResetRange = false) {
   const reportEl = document.getElementById('wxReportText');
   const statusEl = document.getElementById('wxStatus');
@@ -614,12 +1111,13 @@ function renderWeatherTab(forceResetRange = false) {
     if (factsEl) {
       factsEl.innerHTML = `
         <article class="panel wx-card">
-          <div class="wx-card-label">Consensus Wind</div>
+          <div class="wx-card-label">Dominant Regime</div>
           <div class="wx-card-value">-</div>
           <div class="wx-card-note">Awaiting forecast data</div>
         </article>
       `;
     }
+    wxResetSignalPanels('Load forecast data to inspect the regime drivers.');
     wxHidePanels();
     wxSetWindowSummary();
     return;
@@ -630,11 +1128,13 @@ function renderWeatherTab(forceResetRange = false) {
   const consensus = wxBuildConsensus(models);
   const summary = wxBuildWeatherSummary(models, consensus);
   if (!summary) {
+    wxResetSignalPanels('Not enough forecast data in the selected window.');
     wxHidePanels();
     return;
   }
 
   wxRenderCards(summary);
+  wxRenderSignals(summary);
   wxRenderReport(summary, models.length);
   wxRenderWindChart(models, consensus);
   wxRenderDirChart(models, consensus);

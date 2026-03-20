@@ -410,6 +410,11 @@ class ValidationService:
                     "wd_deg": wd,
                     "temp_c": fv.temp_c,
                     "precip_mm": fv.precip_mm,
+                    "cloud_cover_pct": fv.cloud_cover_pct,
+                    "pressure_msl_hpa": fv.pressure_msl_hpa,
+                    "shortwave_wm2": fv.shortwave_wm2,
+                    "cape_jkg": fv.cape_jkg,
+                    "boundary_layer_height_m": fv.boundary_layer_height_m,
                 })
             if hours_list:
                 models_series.append({"model_id": model.model_id, "hours": hours_list})

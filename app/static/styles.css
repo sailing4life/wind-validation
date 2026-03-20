@@ -446,6 +446,12 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   align-items: start;
 }
 
+.wx-side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .wx-hero {
   background:
     radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 38%),
@@ -593,6 +599,108 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.wx-signal-panel {
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+  border-color: #dbe7f1;
+}
+
+.wx-signal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wx-signal-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0369a1;
+  margin-bottom: 4px;
+}
+
+.wx-signal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.wx-quality-note {
+  max-width: 240px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.wx-score-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.wx-score-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 36px;
+  gap: 10px;
+  align-items: center;
+}
+
+.wx-score-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.wx-score-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.wx-score-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.wx-score-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-driver-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wx-driver-list li {
+  position: relative;
+  padding-left: 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.wx-driver-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #0284c7;
 }
 
 /* Top row: map (left) + sidebar (right) */
@@ -750,6 +858,19 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   }
   .wx-slider-grid {
     grid-template-columns: 1fr;
+  }
+  .wx-signal-head {
+    flex-direction: column;
+  }
+  .wx-quality-note {
+    max-width: none;
+  }
+  .wx-score-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .wx-score-value {
+    text-align: left;
   }
 }
 
