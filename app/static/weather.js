@@ -781,46 +781,53 @@ function wxEstimateOscillation(metrics, dominantKey, confidence, timelineSummary
   if (timelineSummary.transitions.length >= 2) score -= 0.06;
   score = wxClamp(score, 0.05, 0.95);
 
-  let amplitudeDeg = 3 + 4 * score;
-  let periodMin = 7;
-  let periodMax = 14;
-  let label = 'Limited repeatable oscillation signal';
+  let amplitudeDeg = 2.5 + 3.5 * score;
+  let periodMin = 12;
+  let periodMax = 24;
+  let label = 'No reliable repeatable oscillation signal';
   let tradable = false;
 
   if (dominantKey === 'thermal') {
-    amplitudeDeg = 4 + 5 * score;
-    periodMin = score >= 0.72 ? 4 : 6;
-    periodMax = score >= 0.72 ? 8 : 11;
-    label = score >= 0.56 ? 'Fast thermal oscillations likely' : 'Some thermal pulses possible';
+    amplitudeDeg = 3 + 4.5 * score;
+    periodMin = score >= 0.70 ? 8 : 10;
+    periodMax = score >= 0.70 ? 14 : 18;
+    label = score >= 0.58 ? 'Thermal oscillations possible' : 'Small thermal pulses possible';
   } else if (dominantKey === 'local') {
-    amplitudeDeg = 4 + 4.5 * score;
-    periodMin = score >= 0.68 ? 5 : 7;
-    periodMax = score >= 0.68 ? 9 : 13;
-    label = score >= 0.56 ? 'Local oscillations likely' : 'Small local pulses possible';
+    amplitudeDeg = 3 + 4.0 * score;
+    periodMin = score >= 0.68 ? 10 : 12;
+    periodMax = score >= 0.68 ? 16 : 20;
+    label = score >= 0.58 ? 'Local oscillations possible' : 'Small local pulses possible';
   } else if (dominantKey === 'gradient') {
-    amplitudeDeg = 3 + 4 * score;
-    periodMin = score >= 0.70 ? 6 : 8;
-    periodMax = score >= 0.70 ? 11 : 15;
-    label = score >= 0.56 ? 'Small gradient oscillations likely' : 'Mostly steady with small wiggles';
+    amplitudeDeg = 2 + 3.0 * score;
+    periodMin = 14;
+    periodMax = 28;
+    label = score >= 0.62 ? 'Mostly steady with small wiggles' : 'Steady mean, little repeatable oscillation';
   } else if (dominantKey === 'frontal') {
-    amplitudeDeg = 5 + 7 * score;
-    periodMin = 2;
-    periodMax = 8;
+    amplitudeDeg = 4 + 5.0 * score;
+    periodMin = 6;
+    periodMax = 16;
     label = 'Erratic bursts, not clean oscillations';
   } else {
-    amplitudeDeg = 3 + 5 * score;
-    periodMin = score >= 0.60 ? 5 : 7;
-    periodMax = score >= 0.60 ? 10 : 14;
-    label = score >= 0.56 ? 'Mixed oscillation signal' : 'Low-confidence oscillation signal';
+    amplitudeDeg = 2.5 + 3.5 * score;
+    periodMin = 12;
+    periodMax = 24;
+    label = score >= 0.60 ? 'Mixed small oscillation signal' : 'No reliable repeatable oscillation signal';
   }
 
-  tradable = score >= 0.56 && dominantKey !== 'frontal' && confidence.score >= 50;
+  tradable = (
+    score >= 0.60
+    && confidence.score >= 60
+    && (metrics.wsSpreadMeanKt ?? 99) <= 2.5
+    && (metrics.dirSpreadMeanDeg ?? 99) <= 22
+    && timelineSummary.transitions.length <= 1
+    && ['thermal', 'local'].includes(dominantKey)
+  );
   const bandLow = Math.max(2, Math.round(amplitudeDeg - 1));
   const bandHigh = Math.max(bandLow + 1, Math.round(amplitudeDeg + 1));
   const swingLow = bandLow * 2;
   const swingHigh = bandHigh * 2;
 
-  let note = `Expect roughly +/-${bandLow}-${bandHigh} deg around the mean with repeat cycles around ${periodMin}-${periodMax} min.`;
+  let note = `Heuristic only: expect roughly +/-${bandLow}-${bandHigh} deg around the mean with cycles around ${periodMin}-${periodMax} min if the local regime sets up cleanly.`;
   if (!tradable && dominantKey === 'frontal') {
     note = `Direction can flick ${swingLow}-${swingHigh} deg in short bursts, but it is more likely noise or boundary-driven than a repeatable race oscillation.`;
   } else if (!tradable) {
@@ -859,31 +866,174 @@ function wxEstimateShiftWindow(consensus, shiftAbsDeg) {
   return { onset, mature: mature ?? consensus[consensus.length - 1].time_utc };
 }
 
-function wxEstimateShiftProfile(metrics, dominantKey, timelineSummary, oscillation, consensus, fingerprint = null) {
+function wxEstimateBend(metrics, dominantKey, consensus, fingerprint = null) {
+  const coast = fingerprint?.coast ?? {};
+  const terrain = fingerprint?.terrain ?? {};
+  const firstDir = wxFirstValid(consensus.map(row => row.wd_deg));
+  const lastDir = wxLastValid(consensus.map(row => row.wd_deg));
+  const meanDir = metrics.dirMeanDeg;
+  const coastalInfluence = wxClamp(Math.max(
+    coast.exposure_score ?? 0,
+    wxFall(coast.nearest_open_water_km, 6, 40) ?? 0,
+  ), 0, 1);
+  const terrainInfluence = wxClamp(Math.max(
+    terrain.topo_potential ?? 0,
+    terrain.channel_strength ?? 0,
+  ), 0, 1);
+  const heatingSupport = wxWeightedScore([
+    { value: wxRise(metrics.shortwaveMaxWm2, 160, 550), weight: 0.40 },
+    { value: wxTri(metrics.blhMeanM, 350, 1100, 2200), weight: 0.35 },
+    { value: wxFall(metrics.cloudMeanPct, 45, 90), weight: 0.25 },
+  ]) / 100;
+  const stableSupport = wxWeightedScore([
+    { value: wxFall(metrics.precipTotalMm, 0.1, 2.5), weight: 0.28 },
+    { value: wxFall(Math.abs(metrics.pressureTrendHpa ?? 0), 0.8, 4.0), weight: 0.24 },
+    { value: wxFall(metrics.wsSpreadMeanKt, 1.2, 4.2), weight: 0.24 },
+    { value: wxFall(metrics.dirSpreadMeanDeg, 12, 34), weight: 0.24 },
+  ]) / 100;
+
+  const coastScore = wxWeightedScore([
+    { value: coast.coastal ? coastalInfluence : 0, weight: 0.32 },
+    { value: heatingSupport, weight: 0.24 },
+    { value: stableSupport, weight: 0.16 },
+    { value: dominantKey === 'thermal' ? 1 : (dominantKey === 'local' ? 0.55 : 0.20), weight: 0.18 },
+    { value: coast.dominant_sea_bearing_deg != null && firstDir != null ? wxRise(Math.abs(wxCircularDiff(firstDir, coast.dominant_sea_bearing_deg)), 6, 38) : null, weight: 0.10 },
+  ]) / 100;
+  const terrainScore = wxWeightedScore([
+    { value: terrainInfluence, weight: 0.30 },
+    { value: terrain.channel_strength ?? 0, weight: 0.20 },
+    { value: stableSupport, weight: 0.18 },
+    { value: dominantKey === 'local' ? 1 : (dominantKey === 'gradient' ? 0.55 : 0.20), weight: 0.18 },
+    { value: terrain.terrain_axis_deg != null && firstDir != null ? wxRise(Math.abs(wxCircularDiff(firstDir, terrain.terrain_axis_deg)), 6, 32) : null, weight: 0.14 },
+  ]) / 100;
+
+  let source = null;
+  let sourceScore = 0;
+  let targetDir = null;
+  if (coastScore >= terrainScore && coastScore >= 0.38 && coast.dominant_sea_bearing_deg != null) {
+    source = 'coast';
+    sourceScore = coastScore;
+    targetDir = coast.dominant_sea_bearing_deg;
+  } else if (terrainScore >= 0.35 && terrain.terrain_axis_deg != null) {
+    source = 'terrain';
+    sourceScore = terrainScore;
+    targetDir = terrain.terrain_axis_deg;
+  }
+
+  if (!source || targetDir == null) {
+    return {
+      label: 'Little local bend',
+      note: 'No strong coastline or terrain bend stands out above the broader flow.',
+      source: null,
+      sourceScore: 0,
+      targetDir: null,
+      active: false,
+      holding: false,
+      shiftWord: null,
+      absBendDeg: 0,
+    };
+  }
+
+  const startDiff = firstDir != null ? Math.abs(wxCircularDiff(firstDir, targetDir)) : null;
+  const endDiff = lastDir != null ? Math.abs(wxCircularDiff(lastDir, targetDir)) : null;
+  const meanDiff = meanDir != null ? Math.abs(wxCircularDiff(meanDir, targetDir)) : null;
+  const alignmentGain = startDiff != null && endDiff != null ? startDiff - endDiff : null;
+  const signedShift = metrics.dirShiftSignedDeg ?? 0;
+  const absShift = Math.abs(signedShift);
+  const bendPotentialDeg = Math.round(4 + 16 * sourceScore);
+  const towardTarget = firstDir != null ? wxCircularDiff(firstDir, targetDir) : 0;
+  const towardWord = towardTarget >= 0 ? 'Right' : 'Left';
+  const targetLabel = source === 'coast'
+    ? `${wxCardinal(targetDir)} off the water`
+    : `${Math.round(targetDir)} deg terrain axis`;
+  const sourceLabel = source === 'coast' ? 'Coastline' : 'Terrain';
+
+  if (alignmentGain != null && alignmentGain >= 5 && absShift >= 6) {
+    const bendDeg = Math.round(wxClamp(Math.min(absShift, bendPotentialDeg, alignmentGain + 3), 4, 22));
+    const bendWord = signedShift >= 0 ? 'Right' : 'Left';
+    return {
+      label: `${bendWord} bend`,
+      note: `${sourceLabel} likely bends the flow ${bendWord.toLowerCase()} about ${bendDeg} deg toward ${targetLabel}.`,
+      source,
+      sourceScore: Math.round(sourceScore * 100),
+      targetDir,
+      active: true,
+      holding: false,
+      shiftWord: bendWord,
+      absBendDeg: bendDeg,
+    };
+  }
+
+  if (meanDiff != null && meanDiff <= (source === 'coast' ? 18 : 16)) {
+    return {
+      label: source === 'coast' ? 'Coastal bend holding' : 'Terrain bend holding',
+      note: `${sourceLabel} likely keeps the mean wind biased toward ${targetLabel} even without a fresh one-sided move.`,
+      source,
+      sourceScore: Math.round(sourceScore * 100),
+      targetDir,
+      active: false,
+      holding: true,
+      shiftWord: null,
+      absBendDeg: 0,
+    };
+  }
+
+  if (absShift >= 8 && sourceScore >= 0.48) {
+    const bendDeg = Math.round(wxClamp(Math.min(absShift * 0.7, bendPotentialDeg), 4, 18));
+    return {
+      label: `${towardWord} bend possible`,
+      note: `Part of the broader ${signedShift >= 0 ? 'right' : 'left'} trend is likely geographic, with local forcing nudging the flow toward ${targetLabel}.`,
+      source,
+      sourceScore: Math.round(sourceScore * 100),
+      targetDir,
+      active: false,
+      holding: false,
+      shiftWord: towardWord,
+      absBendDeg: bendDeg,
+    };
+  }
+
+  return {
+    label: source === 'coast' ? 'Coastal bias' : 'Terrain bias',
+    note: `${sourceLabel} likely adds a mild bias toward ${targetLabel}, but not enough to call a clean active bend.`,
+    source,
+    sourceScore: Math.round(sourceScore * 100),
+    targetDir,
+    active: false,
+    holding: false,
+    shiftWord: null,
+    absBendDeg: 0,
+  };
+}
+
+function wxEstimateTrendProfile(metrics, dominantKey, timelineSummary, oscillation, consensus) {
   const signedShift = metrics.dirShiftSignedDeg ?? 0;
   const absShift = Math.abs(signedShift);
   const rangeDeg = Math.round(metrics.dirRangeDeg ?? 0);
   const shiftWord = signedShift >= 0 ? 'Right' : 'Left';
   const shiftWindow = wxEstimateShiftWindow(consensus, absShift);
 
-  let label = 'Mostly steady mean';
+  let label = 'Mostly steady';
   let note = 'No strong one-sided directional trend stands out.';
   let tradable = oscillation.tradable;
 
   if (dominantKey === 'frontal') {
-    label = absShift >= 18 ? `${shiftWord} shift with frontal volatility` : 'Erratic / unstable';
+    label = absShift >= 18 ? `${shiftWord} trend in unstable air` : 'Erratic / unstable';
     note = absShift >= 18
-      ? `${shiftWord} shift roughly ${Math.round(absShift)} deg through the window, but expect the actual moves to come in irregular bursts.`
+      ? `${shiftWord} trend roughly ${Math.round(absShift)} deg through the window, but expect the actual moves to come in irregular bursts.`
       : `Direction can flick through a ${Math.max(rangeDeg, oscillation.swingHighDeg)} deg envelope without a clean repeatable rhythm.`;
     tradable = false;
   } else if (absShift >= 20 && oscillation.tradable) {
-    label = `${shiftWord} trend with oscillations`;
+    label = `${shiftWord} trend`;
     note = `${shiftWord} trend roughly ${Math.round(absShift)} deg through the window, with smaller tradable oscillations riding on top of the one-sided move.`;
   } else if (absShift >= 20) {
     label = `${shiftWord} trend`;
     note = `${shiftWord} trend roughly ${Math.round(absShift)} deg through the window. The one-sided move matters more than trying to pick tiny oscillations.`;
+  } else if (absShift >= 10) {
+    label = `${shiftWord} bias`;
+    note = `${shiftWord} trend is present, but it is modest enough that the mean line still matters more than hunting a full structural shift.`;
   } else if (oscillation.tradable) {
-    label = 'Oscillating around the mean';
+    label = 'Mostly steady';
     note = `The main race feature is a repeatable oscillation band rather than a large structural shift.`;
   } else if (rangeDeg >= 20 || timelineSummary.transitions.length >= 2) {
     label = 'Phasey / intermittent shifts';
@@ -893,9 +1043,9 @@ function wxEstimateShiftProfile(metrics, dominantKey, timelineSummary, oscillati
 
   const timing = shiftWindow
     ? (shiftWindow.mature && shiftWindow.mature !== shiftWindow.onset
-      ? `First meaningful shift near ${wxFmtHour(shiftWindow.onset)}, maturing around ${wxFmtHour(shiftWindow.mature)}.`
-      : `First meaningful shift near ${wxFmtHour(shiftWindow.onset)}.`)
-    : 'No clear onset time for a larger one-sided shift.';
+      ? `First meaningful trend move near ${wxFmtHour(shiftWindow.onset)}, maturing around ${wxFmtHour(shiftWindow.mature)}.`
+      : `First meaningful trend move near ${wxFmtHour(shiftWindow.onset)}.`)
+    : 'No clear onset time for a larger one-sided trend.';
 
   return {
     label,
@@ -910,26 +1060,31 @@ function wxEstimateShiftProfile(metrics, dominantKey, timelineSummary, oscillati
 
 function wxBuildRaceCall(metrics, dominantKey, confidence, timelineSummary, consensus, fingerprint = null) {
   const oscillation = wxEstimateOscillation(metrics, dominantKey, confidence, timelineSummary, fingerprint);
-  const shift = wxEstimateShiftProfile(metrics, dominantKey, timelineSummary, oscillation, consensus, fingerprint);
+  const trend = wxEstimateTrendProfile(metrics, dominantKey, timelineSummary, oscillation, consensus);
+  const bend = wxEstimateBend(metrics, dominantKey, consensus, fingerprint);
 
   let tactic = 'Lean on the mean and keep the plan simple.';
-  if (shift.tradable && oscillation.tradable && shift.absShiftDeg >= 18) {
-    tactic = `Treat it as a one-sided ${shift.shiftWord.toLowerCase()} with tradable ${oscillation.swingLowDeg}-${oscillation.swingHighDeg} deg oscillations on top.`;
+  if (trend.tradable && oscillation.tradable && trend.absShiftDeg >= 18) {
+    tactic = `Treat it as a one-sided ${trend.shiftWord.toLowerCase()} trend with tradable ${oscillation.swingLowDeg}-${oscillation.swingHighDeg} deg oscillations on top.`;
   } else if (oscillation.tradable) {
-    tactic = `Best playable feature is the oscillation band: about ${oscillation.swingLowDeg}-${oscillation.swingHighDeg} deg peak-to-peak every ${oscillation.periodMin}-${oscillation.periodMax} min.`;
-  } else if (dominantKey === 'frontal' || !shift.tradable) {
+    tactic = `Best playable feature is the oscillation band around the bent mean: about ${oscillation.swingLowDeg}-${oscillation.swingHighDeg} deg peak-to-peak every ${oscillation.periodMin}-${oscillation.periodMax} min.`;
+  } else if (bend.active) {
+    tactic = `Respect the ${bend.shiftWord?.toLowerCase() ?? ''} bend first. Most of the usable move is probably local geography, not a clean basin-wide shift.`.replace(/\s+/g, ' ').trim();
+  } else if (dominantKey === 'frontal' || !trend.tradable) {
     tactic = 'Do not overtrade small flicks. The bigger edge is avoiding bad timing in unstable or transition phases.';
-  } else if (shift.absShiftDeg >= 18) {
-    tactic = `Respect the one-sided ${shift.shiftWord.toLowerCase()} more than any tiny counter-moves.`;
+  } else if (trend.absShiftDeg >= 18) {
+    tactic = `Respect the one-sided ${trend.shiftWord.toLowerCase()} more than any tiny counter-moves.`;
   }
 
   return {
-    shift,
+    trend,
+    bend,
     oscillation,
     tactic,
     bullets: [
-      `Shift call: ${shift.label}. ${shift.note}`,
-      `Oscillation call: ${oscillation.label}. ${oscillation.note}`,
+      `Trend: ${trend.label}. ${trend.note}`,
+      `Bend: ${bend.label}. ${bend.note}`,
+      `Oscillation: ${oscillation.label}. ${oscillation.note}`,
       `Race use: ${tactic}`,
     ],
   };
@@ -989,52 +1144,35 @@ function wxBuildWeatherSummary(models, consensus) {
   } else if (turn && turn.delta_deg >= 20) {
     transitionLine = `The main directional change is ${turn.delta_deg.toFixed(0)} deg between ${wxFmtHour(turn.start)} and ${wxFmtHour(turn.end)}.`;
   }
+  const weatherLabel = totalPrecip >= 2 ? 'showery/wet' : totalPrecip >= 0.2 ? 'some rain risk' : 'mainly dry';
+  const localDriver = fingerprint?.coast?.coastal && dominantKey === 'thermal'
+    ? `Open water lies ${fingerprint.coast.nearest_open_water_km?.toFixed(0) ?? '-'} km away toward ${wxCardinal(fingerprint.coast.dominant_sea_bearing_deg)}.`
+    : ((fingerprint?.terrain?.topo_potential ?? 0) > 0.1 && dominantKey === 'local'
+      ? `Terrain relief is about ${fingerprint.terrain.relief_m?.toFixed(0) ?? '-'} m with a preferred axis near ${Math.round(fingerprint.terrain.terrain_axis_deg ?? 0)} deg.`
+      : null);
 
-  const reportLines = [
-    'HEADLINE',
-    `${dominantMeta.label} dominates the selected window with ${confidence.label.toLowerCase()} confidence. Expect mostly ${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt from ${wxCardinal(prevailingDir)}, with gusts up to ${gustMax != null ? gustMax.toFixed(0) : '-'} kt${strongest ? ` and the strongest push near ${wxFmtHour(strongest.time_utc)}` : ''}.`,
-    '',
-    'REGIME CALL',
-    `- Primary regime: ${dominantMeta.label}.`,
-    `- Confidence: ${confidence.score.toFixed(0)}/100. ${confidence.sentence}`,
-    ...drivers.map(line => `- ${line}`),
-    ...(secondary ? [`- Secondary signal: ${WX_REGIMES[secondary.key].label} at ${secondary.value.toFixed(0)}/100, so keep that alternative in mind if the timing slips.`] : []),
-    '',
-    'RACE CALL',
-    ...raceCall.bullets.map(line => `- ${line}`),
-    `- ${raceCall.shift.timing}`,
-    '',
-    'TIMING',
-    ...segments.map(wxTimingLine).filter(Boolean),
-    `- ${transitionLine}`,
-    ...(pressureMove ? [`- Strongest pressure move is ${pressureMove.delta_hpa >= 0 ? '+' : ''}${pressureMove.delta_hpa.toFixed(1)} hPa between ${wxFmtHour(pressureMove.start)} and ${wxFmtHour(pressureMove.end)}.`] : []),
-    ...(heatingPeak ? [`- Thermal forcing peaks near ${wxFmtHour(heatingPeak.time_utc)} with about ${heatingPeak.shortwave_wm2.toFixed(0)} W/m2.`] : []),
-    '',
-    'MODEL SIGNAL',
-    `- Built from ${models.length} active model${models.length === 1 ? '' : 's'}. Mean spread is ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg.`,
-    `- Validation anchor model: ${forecastData?.winner_model_id ?? 'none'}. Use that as the tie-breaker, but let the consensus and spread define confidence.`,
-    `- ${coverage.sentence}`,
-    ...(fingerprint?.coast?.status === 'ok' && fingerprint?.coast?.dominant_sea_bearing_deg != null
-      ? [`- Open water influence: ${fingerprint.coast.nearest_open_water_km?.toFixed(0) ?? '-'} km away toward ${wxCardinal(fingerprint.coast.dominant_sea_bearing_deg)}.`]
-      : []),
-    ...(fingerprint?.terrain?.status === 'ok' && fingerprint?.terrain?.terrain_axis_deg != null
-      ? [`- Terrain fingerprint: relief ${fingerprint.terrain.relief_m?.toFixed(0) ?? '-'} m, preferred axis ${Math.round(fingerprint.terrain.terrain_axis_deg)} deg, topo potential ${(fingerprint.terrain.topo_potential ?? 0).toFixed(2)}.`]
-      : []),
-    '',
-    'RISKS',
-    ...hazards.map(line => `- ${line}`),
-    '',
-    'TACTICAL TAKE',
-    `- Use ${dominantMeta.label.toLowerCase()} as the base scenario, not a promise. The best edge comes from watching whether the transition timing and spread evolve the way this window suggests.`,
-    `- Expect temperatures around ${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC with total precipitation near ${totalPrecip.toFixed(1)} mm.`,
-  ].filter(Boolean);
+  const briefingBullets = [
+    `${dominantMeta.label} day with ${confidence.label.toLowerCase()} confidence (${confidence.score.toFixed(0)}/100).`,
+    `Base flow: ${wxCardinal(prevailingDir)} ${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt, gusts ${gustMax != null ? gustMax.toFixed(0) : '-'} kt${strongest ? ` strongest near ${wxFmtHour(strongest.time_utc)}` : ''}.`,
+    `Trend: ${raceCall.trend.label}. ${raceCall.trend.note} ${raceCall.trend.timing}`,
+    `Bend: ${raceCall.bend.label}. ${raceCall.bend.note}`,
+    `Oscillation: ${raceCall.oscillation.label}. ${raceCall.oscillation.note}`,
+    `Race use: ${raceCall.tactic}`,
+    `Weather/risk: ${weatherLabel}, temperatures ${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC, with ${hazards[0].charAt(0).toLowerCase()}${hazards[0].slice(1)}`,
+    secondary ? `Alternative scenario: ${WX_REGIMES[secondary.key].label} still scores ${secondary.value.toFixed(0)}/100, so timing can still wobble.` : null,
+    localDriver && !raceCall.bend.active ? `Local driver: ${localDriver}` : null,
+    confidence.score < 60 || coverage.overall < 60 ? `Confidence watch: model spread averages ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg. ${coverage.sentence}` : null,
+  ].filter(Boolean).slice(0, 7);
+
+  const reportLines = briefingBullets.map(line => `- ${line}`);
 
   return {
     confidence,
     report: reportLines.join('\n'),
+    briefingBullets,
     cards: [
       {
-        label: 'Dominant Regime',
+        label: 'Day Type',
         value: dominantMeta.label,
         note: secondary ? `Secondary signal: ${WX_REGIMES[secondary.key].label}.` : 'No serious competing regime signal.',
       },
@@ -1044,9 +1182,16 @@ function wxBuildWeatherSummary(models, consensus) {
         note: `${wxCardinal(prevailingDir)} mean flow, gusts ${gustMax != null ? gustMax.toFixed(0) : '-'} kt.`,
       },
       {
-        label: 'Mean Shift',
-        value: raceCall.shift.label,
-        note: `${raceCall.shift.absShiftDeg ? `${raceCall.shift.shiftWord} ${raceCall.shift.absShiftDeg} deg` : 'No major one-sided move'}${raceCall.shift.tradable ? ', potentially playable.' : ', handle with care.'}`,
+        label: 'Trend',
+        value: raceCall.trend.label,
+        note: `${raceCall.trend.absShiftDeg ? `${raceCall.trend.shiftWord} ${raceCall.trend.absShiftDeg} deg` : 'No major one-sided move'}${raceCall.trend.tradable ? ', potentially playable.' : ', handle with care.'}`,
+      },
+      {
+        label: 'Bend',
+        value: raceCall.bend.label,
+        note: raceCall.bend.active
+          ? `${raceCall.bend.source === 'coast' ? 'Coastline' : 'Terrain'} likely adds about ${raceCall.bend.absBendDeg} deg.`
+          : raceCall.bend.note,
       },
       {
         label: 'Oscillation',
@@ -1062,17 +1207,14 @@ function wxBuildWeatherSummary(models, consensus) {
         value: `${confidence.label} ${confidence.score.toFixed(0)}/100`,
         note: `Spread averages ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg.`,
       },
-      {
-        label: 'Key Risk Window',
-        value: turn && turn.delta_deg >= 20 ? wxFmtHour(turn.end) : (wetPeak ? wxFmtHour(wetPeak.time_utc) : 'No sharp spike'),
-        note: hazards[0],
-      },
     ],
     dominantMeta,
     raceCall,
     scoreRows,
     drivers,
     qualityNote: coverage.sentence,
+    transitionLine,
+    localDriver,
   };
 }
 
@@ -1103,7 +1245,10 @@ function wxRenderSignals(summary) {
     </div>
   `).join('');
 
-  const lines = [...(summary.raceCall?.bullets ?? []), ...(summary.drivers ?? [])];
+  const lines = [
+    ...(summary.raceCall?.bullets ?? []).slice(0, 4),
+    ...(summary.localDriver && !summary.raceCall?.bend?.active ? [summary.localDriver] : []),
+  ].slice(0, 4);
   driverList.innerHTML = lines.map(line => `<li>${line}</li>`).join('');
 }
 
