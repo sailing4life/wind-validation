@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20" />
+  <link rel="stylesheet" href="/static/styles.css?v=21" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -14,6 +14,7 @@
       <div class="tab-nav">
         <button class="tab active" data-tab="validation">Validation</button>
         <button class="tab" data-tab="forecast">Forecast</button>
+        <button class="tab" data-tab="weather">Weather</button>
         <button class="tab" data-tab="briefing">Briefing</button>
       </div>
       <div id="window-info" class="window-info">no data loaded yet</div>
@@ -153,6 +154,48 @@
     </div>
   </div>
 
+  <div id="tab-weather" class="tab-panel">
+    <div class="wx-page">
+      <div class="wx-top">
+        <section class="panel wx-hero">
+          <div class="wx-hero-head">
+            <div>
+              <div class="wx-kicker">Auto Weather Report</div>
+              <h2 class="wx-title">Model Consensus Outlook</h2>
+              <p id="wxStatus" class="wx-status">Load forecast data to build the report.</p>
+            </div>
+            <div class="wx-actions">
+              <button id="wxRefreshBtn" class="btn-secondary" type="button">Refresh</button>
+              <button id="wxCopyBtn" type="button">Copy Report</button>
+            </div>
+          </div>
+          <div id="wxReportText" class="wx-report-text">
+            Run validation, then load forecast data to generate a weather report from the active models.
+          </div>
+        </section>
+
+        <section class="wx-facts" id="wxFactsGrid">
+          <article class="panel wx-card">
+            <div class="wx-card-label">Consensus Wind</div>
+            <div class="wx-card-value">-</div>
+            <div class="wx-card-note">Awaiting forecast data</div>
+          </article>
+        </section>
+      </div>
+
+      <div class="wx-charts">
+        <section class="panel" id="wxTempPanel">
+          <div class="fc-chart-title">Temperature Outlook</div>
+          <div id="wxTempChart"></div>
+        </section>
+        <section class="panel" id="wxPrecipPanel">
+          <div class="fc-chart-title">Precipitation Outlook</div>
+          <div id="wxPrecipChart"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- â”€â”€ Briefing tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
   <div id="tab-briefing" class="tab-panel">
     <div class="bf-page">
@@ -218,9 +261,10 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=20"></script>
-  <script src="/static/forecast.js?v=20"></script>
-  <script src="/static/briefing.js?v=20"></script>
+  <script src="/static/app.js?v=21"></script>
+  <script src="/static/forecast.js?v=21"></script>
+  <script src="/static/weather.js?v=21"></script>
+  <script src="/static/briefing.js?v=21"></script>
 </body>
 </html>
 

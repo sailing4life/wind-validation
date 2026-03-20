@@ -420,11 +420,120 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   flex-direction: column;
 }
 
+#tab-weather.active {
+  display: flex !important;
+  flex-direction: column;
+}
+
 .fc-page {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 12px;
+}
+
+.wx-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.wx-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.wx-hero {
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #f7fbfe 100%);
+  border-color: #d9e8f3;
+}
+
+.wx-hero-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.wx-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0369a1;
+  margin-bottom: 4px;
+}
+
+.wx-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.wx-status {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.wx-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wx-report-text {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.wx-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.wx-card {
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-color: #dbe6ef;
+  min-height: 138px;
+}
+
+.wx-card-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.wx-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 10px;
+}
+
+.wx-card-note {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #475569;
+  margin-top: 8px;
+}
+
+.wx-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 /* Top row: map (left) + sidebar (right) */
@@ -576,11 +685,16 @@ td.model-cell { font-family: monospace; font-size: 11px; }
     grid-template-columns: 1fr;
   }
   .fc-map-wrap #fcMap { height: 55vw; min-height: 300px; }
+  .wx-top,
+  .wx-charts {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 860px) {
   main { grid-template-columns: 1fr; }
   #map { height: 55vw; min-height: 320px; }
+  .wx-facts { grid-template-columns: 1fr; }
 }
 
 /* â”€â”€ Briefing tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
