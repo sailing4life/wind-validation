@@ -14,6 +14,7 @@ from .config import Settings
 from .domain import Observation, ScoreRow
 from .forecast_adapters import OpenMeteoForecastAdapter
 from .geo import haversine_km
+from .location_fingerprint import LocationFingerprintService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
 from .scoring import compute_metrics, speed_dir_to_uv, uv_to_speed_dir
@@ -28,11 +29,13 @@ class ValidationService:
         broker: ObservationBroker,
         forecast_adapter: OpenMeteoForecastAdapter,
         settings: Settings,
+        fingerprint_service: LocationFingerprintService | None = None,
     ) -> None:
         self.repo = repo
         self.broker = broker
         self.forecast_adapter = forecast_adapter
         self.settings = settings
+        self.fingerprint_service = fingerprint_service
         self.cache: TTLCache[dict] = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
 
     def _cache_key(
@@ -424,6 +427,7 @@ class ValidationService:
             "bias_ws_ms": bias_ws_ms,
             "hours_ahead": hours_ahead,
             "models": models_series,
+            "location_fingerprint": self.fingerprint_service.fingerprint(lat, lon) if self.fingerprint_service else None,
         }
 
 

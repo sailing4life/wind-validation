@@ -62,6 +62,7 @@ class Settings:
     live_observations_enabled: bool = _env_bool("LIVE_OBSERVATIONS_ENABLED", True)
     live_forecasts_enabled: bool = _env_bool("LIVE_FORECASTS_ENABLED", True)
     request_timeout_seconds: float = _env_float("REQUEST_TIMEOUT_SECONDS", 8.0)
+    fingerprint_cache_ttl_seconds: int = _env_int("FINGERPRINT_CACHE_TTL_SECONDS", 21600)
     knmi_api_key: str | None = os.getenv("KNMI_API_KEY")
     knmi_api_base_url: str = os.getenv("KNMI_API_BASE_URL", "https://api.dataplatform.knmi.nl/open-data/v1")
     knmi_dataset_name: str = os.getenv("KNMI_DATASET_NAME", "10-minute-in-situ-meteorological-observations")
@@ -83,6 +84,8 @@ class Settings:
     openmeteo_icon_eu_model: str = os.getenv("OPENMETEO_ICON_EU_MODEL", "icon_eu")
     openmeteo_arpege_url: str = os.getenv("OPENMETEO_ARPEGE_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_arpege_model: str = os.getenv("OPENMETEO_ARPEGE_MODEL", "meteofrance_arpege_europe")
+    openmeteo_elevation_url: str = os.getenv("OPENMETEO_ELEVATION_URL", "https://api.open-meteo.com/v1/elevation")
+    openmeteo_marine_url: str = os.getenv("OPENMETEO_MARINE_URL", "https://marine-api.open-meteo.com/v1/marine")
     # Previous runs API — returns actual archived forecast runs (true forecast skill)
     openmeteo_previous_runs_url: str = os.getenv(
         "OPENMETEO_PREVIOUS_RUNS_URL", "https://previous-runs-api.open-meteo.com/v1/forecast"

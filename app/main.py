@@ -12,6 +12,7 @@ from .catalog import catalog_as_dict
 from .config import SETTINGS
 from .forecast_broker import ForecastBroker
 from .ingestion import IngestionService
+from .location_fingerprint import LocationFingerprintService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
 from .schemas import ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
@@ -24,7 +25,8 @@ repo = InMemoryRepository()
 forecast_broker = ForecastBroker(repo, SETTINGS)
 ingestion_service = IngestionService(repo, forecast_broker)
 broker = ObservationBroker(repo, SETTINGS)
-validation_service = ValidationService(repo, broker, forecast_broker.openmeteo, SETTINGS)
+fingerprint_service = LocationFingerprintService(SETTINGS)
+validation_service = ValidationService(repo, broker, forecast_broker.openmeteo, SETTINGS, fingerprint_service=fingerprint_service)
 
 _stop_event = asyncio.Event()
 _refresh_task: asyncio.Task | None = None

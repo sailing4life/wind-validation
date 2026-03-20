@@ -142,8 +142,34 @@ class ForecastModelSeries(BaseModel):
     hours: list[ForecastHour]
 
 
+class CoastFingerprintDTO(BaseModel):
+    status: str
+    coastal: bool
+    nearest_open_water_km: float | None = None
+    dominant_sea_bearing_deg: float | None = None
+    shoreline_axis_deg: float | None = None
+    sea_sector_width_deg: float | None = None
+    exposure_score: float = 0.0
+    sea_bearings_deg: list[int] = Field(default_factory=list)
+
+
+class TerrainFingerprintDTO(BaseModel):
+    status: str
+    center_elevation_m: float | None = None
+    relief_m: float | None = None
+    terrain_axis_deg: float | None = None
+    channel_strength: float = 0.0
+    topo_potential: float = 0.0
+
+
+class LocationFingerprintDTO(BaseModel):
+    coast: CoastFingerprintDTO
+    terrain: TerrainFingerprintDTO
+
+
 class ForecastResponse(BaseModel):
     winner_model_id: str
     bias_ws_ms: float
     hours_ahead: int
     models: list[ForecastModelSeries]
+    location_fingerprint: LocationFingerprintDTO | None = None
