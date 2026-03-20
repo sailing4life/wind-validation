@@ -1,5 +1,11 @@
 /* weather.js  -  Weather tab: consensus report + weather charts */
 
+let wxRangeState = {
+  total: 0,
+  start: 0,
+  end: 0,
+};
+
 function wxParseUtc(isoStr) {
   return new Date(isoStr.endsWith('Z') ? isoStr : `${isoStr}Z`);
 }
@@ -56,12 +62,112 @@ function wxMean(values) {
   return valid.reduce((acc, value) => acc + value, 0) / valid.length;
 }
 
+function wxBaseHours() {
+  return forecastData?.models?.[0]?.hours ?? [];
+}
+
+function wxSetWindowSummary() {
+  const startLabel = document.getElementById('wxStartLabel');
+  const endLabel = document.getElementById('wxEndLabel');
+  const summary = document.getElementById('wxRangeSummary');
+  const hours = wxBaseHours();
+  if (!hours.length) {
+    if (startLabel) startLabel.textContent = '-';
+    if (endLabel) endLabel.textContent = '-';
+    if (summary) summary.textContent = 'Full loaded forecast window';
+    return;
+  }
+
+  const startHour = hours[wxRangeState.start];
+  const endHour = hours[wxRangeState.end];
+  if (startLabel) startLabel.textContent = wxFmtHour(startHour.time_utc);
+  if (endLabel) endLabel.textContent = wxFmtHour(endHour.time_utc);
+  if (summary) {
+    summary.textContent = `${wxFmtHour(startHour.time_utc)} to ${wxFmtHour(endHour.time_utc)}  •  ${wxRangeState.end - wxRangeState.start + 1}h window`;
+  }
+}
+
+function wxApplyRangeInputs(changed) {
+  const startInput = document.getElementById('wxStartRange');
+  const endInput = document.getElementById('wxEndRange');
+  if (!startInput || !endInput) return;
+
+  let start = parseInt(startInput.value, 10) || 0;
+  let end = parseInt(endInput.value, 10) || 0;
+  if (changed === 'start' && start > end) end = start;
+  if (changed === 'end' && end < start) start = end;
+
+  wxRangeState.start = start;
+  wxRangeState.end = end;
+  startInput.value = String(start);
+  endInput.value = String(end);
+  wxSetWindowSummary();
+}
+
+function wxInitRangeControls(forceReset = false) {
+  const startInput = document.getElementById('wxStartRange');
+  const endInput = document.getElementById('wxEndRange');
+  const hours = wxBaseHours();
+  if (!startInput || !endInput || !hours.length) {
+    wxSetWindowSummary();
+    return;
+  }
+
+  const max = hours.length - 1;
+  startInput.min = '0';
+  endInput.min = '0';
+  startInput.max = String(max);
+  endInput.max = String(max);
+
+  const shouldReset = forceReset || wxRangeState.total !== hours.length || wxRangeState.end > max;
+  if (shouldReset) {
+    wxRangeState = { total: hours.length, start: 0, end: max };
+  }
+
+  startInput.value = String(wxRangeState.start);
+  endInput.value = String(wxRangeState.end);
+
+  if (!startInput.dataset.bound) {
+    startInput.addEventListener('input', () => {
+      wxApplyRangeInputs('start');
+      renderWeatherTab();
+    });
+    startInput.dataset.bound = '1';
+  }
+  if (!endInput.dataset.bound) {
+    endInput.addEventListener('input', () => {
+      wxApplyRangeInputs('end');
+      renderWeatherTab();
+    });
+    endInput.dataset.bound = '1';
+  }
+
+  wxApplyRangeInputs();
+}
+
+function wxWindowBounds() {
+  const hours = wxBaseHours();
+  if (!hours.length) return { startTime: null, endTime: null };
+  return {
+    startTime: hours[wxRangeState.start]?.time_utc ?? null,
+    endTime: hours[wxRangeState.end]?.time_utc ?? null,
+  };
+}
+
+function wxFilterHours(hours) {
+  const { startTime, endTime } = wxWindowBounds();
+  if (!startTime || !endTime) return hours;
+  return hours.filter(hour => hour.time_utc >= startTime && hour.time_utc <= endTime);
+}
+
 function wxSelectedModels() {
   if (!forecastData?.models?.length) return [];
   const active = _selectedModels && _selectedModels.size
     ? forecastData.models.filter(model => _selectedModels.has(model.model_id))
     : forecastData.models;
-  return active.filter(model => Array.isArray(model.hours) && model.hours.length > 0);
+  return active
+    .map(model => ({ ...model, hours: wxFilterHours(model.hours || []) }))
+    .filter(model => Array.isArray(model.hours) && model.hours.length > 0);
 }
 
 function wxBuildConsensus(models) {
@@ -73,22 +179,21 @@ function wxBuildConsensus(models) {
 
   return times.map(time_utc => {
     const rows = modelMaps.map(model => model.hours.get(time_utc)).filter(Boolean);
-    const wsVals = rows.map(row => row.ws_ms);
-    const gustVals = rows.map(row => row.gust_ms);
-    const wdVals = rows.map(row => row.wd_deg);
-    const tempVals = rows.map(row => row.temp_c);
-    const precipVals = rows.map(row => row.precip_mm);
-    const wdMean = wxCircularMean(wdVals);
+    const wsMean = wxMean(rows.map(row => row.ws_ms));
+    const gustMean = wxMean(rows.map(row => row.gust_ms));
+    const tempMean = wxMean(rows.map(row => row.temp_c));
+    const precipMean = wxMean(rows.map(row => row.precip_mm));
+    const wdMean = wxCircularMean(rows.map(row => row.wd_deg));
 
     return {
       time_utc,
-      ws_kt: wxMean(wsVals) != null ? wxMean(wsVals) * MS_TO_KT : null,
-      gust_kt: wxMean(gustVals) != null ? wxMean(gustVals) * MS_TO_KT : null,
+      ws_kt: wsMean != null ? wsMean * MS_TO_KT : null,
+      gust_kt: gustMean != null ? gustMean * MS_TO_KT : null,
       wd_deg: wdMean,
-      temp_c: wxMean(tempVals),
-      precip_mm: wxMean(precipVals),
-      ws_spread_kt: wxStd(wsVals) * MS_TO_KT,
-      dir_spread_deg: wxCircularSpread(wdVals, wdMean),
+      temp_c: tempMean,
+      precip_mm: precipMean,
+      ws_spread_kt: wxStd(rows.map(row => row.ws_ms)) * MS_TO_KT,
+      dir_spread_deg: wxCircularSpread(rows.map(row => row.wd_deg), wdMean),
       model_count: rows.length,
     };
   });
@@ -97,7 +202,9 @@ function wxBuildConsensus(models) {
 function wxConfidenceSummary(consensus) {
   const meanWsSpread = wxMean(consensus.map(row => row.ws_spread_kt)) ?? 0;
   const meanDirSpread = wxMean(consensus.map(row => row.dir_spread_deg)) ?? 0;
-  const minModelCount = Math.min(...consensus.map(row => row.model_count).filter(Boolean));
+  const modelCounts = consensus.map(row => row.model_count).filter(Boolean);
+  const minModelCount = modelCounts.length ? Math.min(...modelCounts) : 0;
+
   let score = 100 - meanWsSpread * 14 - meanDirSpread * 1.1;
   if (minModelCount < 2) score -= 20;
   score = Math.max(12, Math.min(96, score));
@@ -113,13 +220,44 @@ function wxConfidenceSummary(consensus) {
     sentence = 'Model spread is meaningful, so treat the timing and exact values with caution.';
   }
 
+  return { score, label, meanWsSpread, meanDirSpread, sentence };
+}
+
+function wxSegmentStats(rows) {
+  if (!rows.length) return null;
+  const windRows = rows.filter(row => row.ws_kt != null);
+  const tempRows = rows.filter(row => row.temp_c != null);
+  const precipRows = rows.filter(row => row.precip_mm != null);
+  const gustRows = rows.filter(row => row.gust_kt != null);
   return {
-    score,
-    label,
-    meanWsSpread,
-    meanDirSpread,
-    sentence,
+    start: rows[0].time_utc,
+    end: rows[rows.length - 1].time_utc,
+    meanDir: wxCircularMean(rows.map(row => row.wd_deg)),
+    minWind: windRows.length ? Math.min(...windRows.map(row => row.ws_kt)) : null,
+    maxWind: windRows.length ? Math.max(...windRows.map(row => row.ws_kt)) : null,
+    maxGust: gustRows.length ? Math.max(...gustRows.map(row => row.gust_kt)) : null,
+    tempLow: tempRows.length ? Math.min(...tempRows.map(row => row.temp_c)) : null,
+    tempHigh: tempRows.length ? Math.max(...tempRows.map(row => row.temp_c)) : null,
+    precipTotal: precipRows.reduce((acc, row) => acc + (row.precip_mm || 0), 0),
   };
+}
+
+function wxWindowSegments(consensus) {
+  if (!consensus.length) return [];
+  const size = Math.max(1, Math.ceil(consensus.length / 3));
+  const labels = ['Early', 'Mid', 'Late'];
+  return labels.map((label, idx) => {
+    const rows = consensus.slice(idx * size, (idx + 1) * size);
+    if (!rows.length) return null;
+    return { label, stats: wxSegmentStats(rows) };
+  }).filter(Boolean);
+}
+
+function wxTimingLine(segment) {
+  if (!segment?.stats) return '';
+  const stats = segment.stats;
+  const rainText = stats.precipTotal >= 0.2 ? `, rain signal ${stats.precipTotal.toFixed(1)} mm` : ', mainly dry';
+  return `- ${segment.label} (${wxFmtHour(stats.start)} to ${wxFmtHour(stats.end)}): ${stats.minWind != null ? stats.minWind.toFixed(0) : '-'}-${stats.maxWind != null ? stats.maxWind.toFixed(0) : '-'} kt from ${wxCardinal(stats.meanDir)}${stats.maxGust != null ? `, gusts ${stats.maxGust.toFixed(0)} kt` : ''}${rainText}.`;
 }
 
 function wxBuildWeatherSummary(models, consensus) {
@@ -131,19 +269,21 @@ function wxBuildWeatherSummary(models, consensus) {
   const tempRows = consensus.filter(row => row.temp_c != null);
   const precipRows = consensus.filter(row => row.precip_mm != null);
   const confidence = wxConfidenceSummary(consensus);
+  const segments = wxWindowSegments(consensus);
 
   const prevailingDir = wxCircularMean(wdRows.map(row => row.wd_deg));
-  const earlyDir = wxCircularMean(wdRows.slice(0, Math.max(2, Math.floor(wdRows.length / 3))).map(row => row.wd_deg));
-  const lateDir = wxCircularMean(wdRows.slice(-Math.max(2, Math.floor(wdRows.length / 3))).map(row => row.wd_deg));
+  const earlyDir = segments[0]?.stats?.meanDir ?? wxCircularMean(wdRows.slice(0, Math.max(2, Math.floor(wdRows.length / 3))).map(row => row.wd_deg));
+  const lateDir = segments[segments.length - 1]?.stats?.meanDir ?? wxCircularMean(wdRows.slice(-Math.max(2, Math.floor(wdRows.length / 3))).map(row => row.wd_deg));
   const shiftDelta = earlyDir != null && lateDir != null ? wxCircularDiff(earlyDir, lateDir) : 0;
   const shiftAbs = Math.abs(shiftDelta);
+
   let shiftLabel = 'Little change';
-  let shiftNote = 'Direction stays fairly steady through the forecast window.';
+  let shiftNote = 'Direction stays fairly steady through the selected window.';
   if (shiftAbs >= 15) {
     shiftLabel = shiftDelta > 0 ? `Veering ${shiftAbs.toFixed(0)} deg` : `Backing ${shiftAbs.toFixed(0)} deg`;
     shiftNote = shiftDelta > 0
-      ? 'Direction trends clockwise through the period.'
-      : 'Direction trends counter-clockwise through the period.';
+      ? 'Direction trends clockwise through the window.'
+      : 'Direction trends counter-clockwise through the window.';
   }
 
   const strongest = wsRows.reduce((best, row) => (best == null || row.ws_kt > best.ws_kt ? row : best), null);
@@ -156,26 +296,44 @@ function wxBuildWeatherSummary(models, consensus) {
   const totalPrecip = precipRows.reduce((acc, row) => acc + (row.precip_mm || 0), 0);
 
   let weatherLabel = 'Dry';
-  let weatherNote = 'No meaningful precipitation signal in the model consensus.';
+  let weatherNote = 'No meaningful precipitation signal in the selected window.';
   if (totalPrecip >= 0.2) {
     weatherLabel = totalPrecip >= 3 ? 'Showery' : 'Light rain risk';
     weatherNote = wettest
       ? `Wettest period looks near ${wxFmtHour(wettest.time_utc)} with around ${wettest.precip_mm.toFixed(1)} mm/h.`
-      : 'Some precipitation is present in the forecast window.';
+      : 'Some precipitation is present in the selected window.';
   }
 
-  const report = [
-    `Consensus points to ${confidence.label.toLowerCase()} confidence for a ${wxCardinal(prevailingDir)} flow, mostly ${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt. Gusts peak near ${gustMax != null ? gustMax.toFixed(0) : '-'} kt${strongest ? ` around ${wxFmtHour(strongest.time_utc)}` : ''}.`,
-    `${shiftLabel}. ${shiftNote} Average model spread is ${confidence.meanWsSpread.toFixed(1)} kt in speed and ${confidence.meanDirSpread.toFixed(0)} deg in direction. ${confidence.sentence}`,
-    `Temperatures run about ${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC. ${weatherNote} Total modeled precipitation is about ${totalPrecip.toFixed(1)} mm for the loaded window.`,
-    forecastData?.winner_model_id
-      ? `Best validated model over the recent lookback is ${forecastData.winner_model_id}. Use that as the anchor, but keep the consensus in view for timing confidence.`
-      : 'No validated winner model is currently available, so the report leans entirely on model consensus.'
-  ].join('\n\n');
+  const risks = [];
+  if (confidence.score < 75) risks.push(`Model confidence is ${confidence.label.toLowerCase()} because average spread is ${confidence.meanWsSpread.toFixed(1)} kt and ${confidence.meanDirSpread.toFixed(0)} deg.`);
+  if (shiftAbs >= 15) risks.push(`${shiftLabel}. ${shiftNote}`);
+  if (gustMax != null && gustMax >= 22) risks.push(`Gust risk rises to about ${gustMax.toFixed(0)} kt${strongest ? ` near ${wxFmtHour(strongest.time_utc)}` : ''}.`);
+  if (totalPrecip >= 0.2) risks.push(weatherNote);
+  if (!risks.length) risks.push('No obvious hazard signal stands out in the selected window beyond normal short-term variability.');
+
+  const timingLines = segments.map(wxTimingLine).filter(Boolean);
+  const reportLines = [
+    'HEADLINE',
+    `${wxCardinal(prevailingDir)} flow, mostly ${windMin != null ? windMin.toFixed(0) : '-'}-${windMax != null ? windMax.toFixed(0) : '-'} kt, with ${confidence.label.toLowerCase()} confidence. Gusts top out near ${gustMax != null ? gustMax.toFixed(0) : '-'} kt${strongest ? ` around ${wxFmtHour(strongest.time_utc)}` : ''}.`,
+    '',
+    'TIMING',
+    ...timingLines,
+    '',
+    'MODEL SIGNAL',
+    `- Confidence score ${confidence.score.toFixed(0)}/100. ${confidence.sentence}`,
+    `- Consensus mean direction is ${wxCardinal(prevailingDir)}${prevailingDir != null ? ` (${prevailingDir.toFixed(0)} deg)` : ''}. Winner model from validation: ${forecastData?.winner_model_id ?? 'none'}.`,
+    '',
+    'RISKS',
+    ...risks.map(line => `- ${line}`),
+    '',
+    'TACTICAL TAKE',
+    `- Use ${forecastData?.winner_model_id ?? 'the consensus'} as the anchor model, but watch the consensus spread more than the exact hour-to-hour value.`,
+    `- Expect ${weatherLabel.toLowerCase()} conditions with temperatures around ${tempMin != null ? tempMin.toFixed(1) : '-'} to ${tempMax != null ? tempMax.toFixed(1) : '-'} degC and total precipitation near ${totalPrecip.toFixed(1)} mm.`,
+  ];
 
   return {
     confidence,
-    report,
+    report: reportLines.join('\n'),
     cards: [
       {
         label: 'Consensus Wind',
@@ -219,8 +377,125 @@ function wxRenderReport(summary, modelCount) {
   if (reportEl && summary) reportEl.textContent = summary.report;
   if (statusEl) {
     const winner = forecastData?.winner_model_id ? ` Winner model: ${forecastData.winner_model_id}.` : '';
-    statusEl.textContent = `Built from ${modelCount} active model${modelCount === 1 ? '' : 's'}.${winner}`;
+    statusEl.textContent = `Built from ${modelCount} active model${modelCount === 1 ? '' : 's'} in the selected window.${winner}`;
   }
+}
+
+function wxRenderWindChart(models, consensus) {
+  const panel = document.getElementById('wxWindPanel');
+  const chartDiv = document.getElementById('wxWindChart');
+  if (!panel || !chartDiv) return;
+
+  const traces = [];
+  models.forEach(series => {
+    const speeds = series.hours.map(hour => hour.ws_ms != null ? +(hour.ws_ms * MS_TO_KT).toFixed(1) : null);
+    if (!speeds.some(value => value != null)) return;
+    traces.push({
+      x: series.hours.map(hour => wxLocalISO(hour.time_utc)),
+      y: speeds,
+      name: series.model_id,
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: modelColor(series.model_id), width: series.model_id === forecastData?.winner_model_id ? 2.5 : 1.5 },
+      opacity: 0.85,
+    });
+  });
+
+  const consensusWind = consensus.map(row => row.ws_kt);
+  if (consensusWind.some(value => value != null)) {
+    traces.push({
+      x: consensus.map(row => wxLocalISO(row.time_utc)),
+      y: consensusWind,
+      name: 'Consensus',
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: '#0f172a', width: 3, dash: 'dash' },
+    });
+  }
+
+  const consensusGust = consensus.map(row => row.gust_kt);
+  if (consensusGust.some(value => value != null)) {
+    traces.push({
+      x: consensus.map(row => wxLocalISO(row.time_utc)),
+      y: consensusGust,
+      name: 'Consensus gust',
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: '#f59e0b', width: 2, dash: 'dot' },
+    });
+  }
+
+  if (!traces.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 320,
+    margin: { t: 20, b: 50, l: 55, r: 20 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { ...LIGHT_YAXIS('Wind (kt)') },
+  }, { responsive: true, displayModeBar: false });
+}
+
+function wxRenderDirChart(models, consensus) {
+  const panel = document.getElementById('wxDirPanel');
+  const chartDiv = document.getElementById('wxDirChart');
+  if (!panel || !chartDiv) return;
+
+  const traces = [];
+  models.forEach(series => {
+    const dirs = series.hours.map(hour => hour.wd_deg != null ? +hour.wd_deg.toFixed(0) : null);
+    if (!dirs.some(value => value != null)) return;
+    traces.push({
+      x: series.hours.map(hour => wxLocalISO(hour.time_utc)),
+      y: dirs,
+      name: series.model_id,
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: modelColor(series.model_id), width: series.model_id === forecastData?.winner_model_id ? 2.5 : 1.5 },
+      opacity: 0.8,
+    });
+  });
+
+  const consensusDir = consensus.map(row => row.wd_deg);
+  if (consensusDir.some(value => value != null)) {
+    traces.push({
+      x: consensus.map(row => wxLocalISO(row.time_utc)),
+      y: consensusDir,
+      name: 'Consensus',
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: '#0f172a', width: 3, dash: 'dash' },
+    });
+  }
+
+  if (!traces.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 320,
+    margin: { t: 20, b: 50, l: 72, r: 20 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: {
+      title: { text: 'Direction (deg)', standoff: 16 },
+      automargin: true,
+      range: [0, 360],
+      dtick: 90,
+      gridcolor: '#e2e8f0',
+      tickfont: { color: '#64748b' },
+      tickvals: [0, 90, 180, 270, 360],
+      ticktext: ['N', 'E', 'S', 'W', 'N'],
+    },
+  }, { responsive: true, displayModeBar: false });
 }
 
 function wxRenderTempChart(models, consensus) {
@@ -278,8 +553,8 @@ function wxRenderPrecipChart(models, consensus) {
 
   const consensusPrecip = consensus.map(row => row.precip_mm);
   const hasConsensus = consensusPrecip.some(value => value != null && value > 0);
-
   const traces = [];
+
   if (hasConsensus) {
     traces.push({
       x: consensus.map(row => wxLocalISO(row.time_utc)),
@@ -321,7 +596,14 @@ function wxRenderPrecipChart(models, consensus) {
   }, { responsive: true, displayModeBar: false });
 }
 
-function renderWeatherTab() {
+function wxHidePanels() {
+  ['wxWindPanel', 'wxDirPanel', 'wxTempPanel', 'wxPrecipPanel'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function renderWeatherTab(forceResetRange = false) {
   const reportEl = document.getElementById('wxReportText');
   const statusEl = document.getElementById('wxStatus');
   const factsEl = document.getElementById('wxFactsGrid');
@@ -338,18 +620,24 @@ function renderWeatherTab() {
         </article>
       `;
     }
-    document.getElementById('wxTempPanel').style.display = 'none';
-    document.getElementById('wxPrecipPanel').style.display = 'none';
+    wxHidePanels();
+    wxSetWindowSummary();
     return;
   }
 
+  wxInitRangeControls(forceResetRange);
   const models = wxSelectedModels();
   const consensus = wxBuildConsensus(models);
   const summary = wxBuildWeatherSummary(models, consensus);
-  if (!summary) return;
+  if (!summary) {
+    wxHidePanels();
+    return;
+  }
 
   wxRenderCards(summary);
   wxRenderReport(summary, models.length);
+  wxRenderWindChart(models, consensus);
+  wxRenderDirChart(models, consensus);
   wxRenderTempChart(models, consensus);
   wxRenderPrecipChart(models, consensus);
 }
@@ -359,6 +647,8 @@ async function wxEnsureForecastThenRender(forceReload = false) {
     const statusEl = document.getElementById('wxStatus');
     if (statusEl) statusEl.textContent = 'Loading forecast data...';
     await loadForecast();
+    renderWeatherTab(true);
+    return;
   }
   renderWeatherTab();
 }
@@ -377,8 +667,10 @@ document.getElementById('wxCopyBtn')?.addEventListener('click', async () => {
   if (!report) return;
   try {
     await navigator.clipboard.writeText(report);
+    renderWeatherTab();
     if (statusEl) statusEl.textContent = `${statusEl.textContent} Report copied.`;
   } catch {
+    renderWeatherTab();
     if (statusEl) statusEl.textContent = `${statusEl.textContent} Copy failed in this browser.`;
   }
 });

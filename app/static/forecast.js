@@ -106,6 +106,9 @@ async function loadForecast() {
     updateWindyMap(pos.lat, pos.lon);
     renderModelToggles();
     renderAllCharts();
+    if (typeof renderWeatherTab === 'function' && document.getElementById('tab-weather')?.classList.contains('active')) {
+      renderWeatherTab(true);
+    }
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   } finally {
@@ -139,6 +142,9 @@ function renderModelToggles() {
       }
       renderModelToggles();
       renderAllCharts();
+      if (typeof renderWeatherTab === 'function' && document.getElementById('tab-weather')?.classList.contains('active')) {
+        renderWeatherTab();
+      }
     });
     container.appendChild(btn);
   });

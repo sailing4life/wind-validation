@@ -495,6 +495,65 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   white-space: pre-wrap;
 }
 
+.wx-window {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #dbe7f1;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.wx-window-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.wx-window-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.wx-range-summary {
+  font-size: 12px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.wx-slider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.wx-slider-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.wx-slider-label strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.wx-slider-label input[type="range"] {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  accent-color: #0284c7;
+}
+
 .wx-facts {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -687,6 +746,9 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   .fc-map-wrap #fcMap { height: 55vw; min-height: 300px; }
   .wx-top,
   .wx-charts {
+    grid-template-columns: 1fr;
+  }
+  .wx-slider-grid {
     grid-template-columns: 1fr;
   }
 }

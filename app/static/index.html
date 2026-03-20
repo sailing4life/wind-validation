@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=21" />
+  <link rel="stylesheet" href="/static/styles.css?v=22" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -169,6 +169,24 @@
               <button id="wxCopyBtn" type="button">Copy Report</button>
             </div>
           </div>
+          <div class="wx-window">
+            <div class="wx-window-head">
+              <div class="wx-window-title">Report Window</div>
+              <div id="wxRangeSummary" class="wx-range-summary">Full loaded forecast window</div>
+            </div>
+            <div class="wx-slider-grid">
+              <label class="wx-slider-label">
+                <span>Start</span>
+                <strong id="wxStartLabel">-</strong>
+                <input id="wxStartRange" type="range" min="0" max="0" value="0" step="1" />
+              </label>
+              <label class="wx-slider-label">
+                <span>End</span>
+                <strong id="wxEndLabel">-</strong>
+                <input id="wxEndRange" type="range" min="0" max="0" value="0" step="1" />
+              </label>
+            </div>
+          </div>
           <div id="wxReportText" class="wx-report-text">
             Run validation, then load forecast data to generate a weather report from the active models.
           </div>
@@ -184,6 +202,14 @@
       </div>
 
       <div class="wx-charts">
+        <section class="panel" id="wxWindPanel">
+          <div class="fc-chart-title">Wind Speed Outlook</div>
+          <div id="wxWindChart"></div>
+        </section>
+        <section class="panel" id="wxDirPanel">
+          <div class="fc-chart-title">Wind Direction Outlook</div>
+          <div id="wxDirChart"></div>
+        </section>
         <section class="panel" id="wxTempPanel">
           <div class="fc-chart-title">Temperature Outlook</div>
           <div id="wxTempChart"></div>
@@ -261,10 +287,10 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=21"></script>
-  <script src="/static/forecast.js?v=21"></script>
-  <script src="/static/weather.js?v=21"></script>
-  <script src="/static/briefing.js?v=21"></script>
+  <script src="/static/app.js?v=22"></script>
+  <script src="/static/forecast.js?v=22"></script>
+  <script src="/static/weather.js?v=22"></script>
+  <script src="/static/briefing.js?v=22"></script>
 </body>
 </html>
 
