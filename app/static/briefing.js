@@ -515,10 +515,25 @@ document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
     alert('Popup blocked. Allow popups to export PDF.');
     return;
   }
-  const bestImg = await bfChartAsImg('bfBestChart', 340);
-  const ensTwsImg = await bfChartAsImg('bfEnsembleChart', 300);
-  const ensTwdImg = await bfChartAsImg('bfEnsembleDirChart', 300);
-  const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
+  const bestImg    = await bfChartAsImg('bfBestChart', 340);
+  const ensTwsImg  = await bfChartAsImg('bfEnsembleChart', 300);
+  const ensTwdImg  = await bfChartAsImg('bfEnsembleDirChart', 300);
+  const tableHtml  = document.getElementById('bfTableWrap')?.innerHTML || '';
+  const currentImg = document.getElementById('bfIncludeCurrent')?.checked
+    ? await bfChartAsImg('bfCurrentChart', 260) : null;
+  const includeWindmaps = document.getElementById('bfIncludeWindmaps')?.checked;
+  const { startTime: wStart, endTime: wEnd } = bfGetRangeTimes();
+  const wStartMs = wStart ? bfParseUtc(wStart).getTime() : null;
+  const wEndMs   = wEnd   ? bfParseUtc(wEnd).getTime()   : null;
+  const windmapFrames = includeWindmaps && _bfWindmapFramesCache?.frames
+    ? _bfWindmapFramesCache.frames.filter(f => {
+        if (!f.time_utc) return true;
+        const fMs = new Date(f.time_utc).getTime();
+        if (wStartMs && fMs < wStartMs) return false;
+        if (wEndMs   && fMs > wEndMs)   return false;
+        return true;
+      })
+    : [];
 
   const html = `<!doctype html>
 <html><head><meta charset="utf-8" />
@@ -594,6 +609,18 @@ td[style*="background"]{background-clip:padding-box}
   </div>
   ${ensTwsImg ? `<div class="section"><div class="label">Ensemble TWS</div><img src="${ensTwsImg}" alt="Ensemble TWS" /></div>` : ''}
   ${ensTwdImg ? `<div class="section"><div class="label">Ensemble TWD</div><img src="${ensTwdImg}" alt="Ensemble TWD" /></div>` : ''}
+  ${currentImg ? `<div class="section"><div class="label">Ocean Current</div><img src="${currentImg}" alt="Ocean current" /></div>` : ''}
+  ${windmapFrames.length ? `
+  <div class="section">
+    <div class="label">Wind Maps</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+      ${windmapFrames.map(f => `
+        <figure style="margin:0">
+          <img src="data:image/png;base64,${f.png_b64}" alt="${f.label}" style="border-radius:4px;border:1px solid #e2e8f0" />
+          <figcaption style="font-size:9px;color:#64748b;text-align:center;margin-top:2px;font-weight:600">${f.label}</figcaption>
+        </figure>`).join('')}
+    </div>
+  </div>` : ''}
   <div class="footer">Jelle Lourens - jelle@jellelourens.nl - ${bfEscapeHtml(exportedAt)}</div>
 </div></body></html>`;
 
@@ -631,7 +658,10 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   btn.textContent = 'Generating…';
 
   try {
-    const url = `/api/windmap-gif?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}`;
+    const { startTime: gifStart, endTime: gifEnd } = bfGetRangeTimes();
+    const url = `/api/windmap-gif?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}`
+      + (gifStart ? `&start_iso=${encodeURIComponent(gifStart)}` : '')
+      + (gifEnd   ? `&end_iso=${encodeURIComponent(gifEnd)}`     : '');
     const resp = await fetch(url);
     if (!resp.ok) {
       const msg = await resp.text();
@@ -696,7 +726,9 @@ async function bfFetchAndRenderWindmaps() {
   if (metaEl) metaEl.textContent = '— loading…';
 
   try {
-    const url = `/api/windmap-frames?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}&step=${step}`;
+    const url = `/api/windmap-frames?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}&step=${step}`
+      + (startTime ? `&start_iso=${encodeURIComponent(startTime)}` : '')
+      + (endTime   ? `&end_iso=${encodeURIComponent(endTime)}`     : '');
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
     const data = await resp.json();
@@ -714,10 +746,14 @@ function _bfRenderWindmapFrames(frames, startTime, endTime) {
   const grid  = document.getElementById('bfWindmapsGrid');
   if (!panel || !grid || !frames?.length) return;
 
+  // Use Date-based comparison to avoid Z-suffix string mismatch
+  const startMs = startTime ? bfParseUtc(startTime).getTime() : null;
+  const endMs   = endTime   ? bfParseUtc(endTime).getTime()   : null;
   const visible = frames.filter(f => {
     if (!f.time_utc) return true;
-    if (startTime && f.time_utc < startTime) return false;
-    if (endTime   && f.time_utc > endTime)   return false;
+    const fMs = new Date(f.time_utc).getTime();
+    if (startMs && fMs < startMs) return false;
+    if (endMs   && fMs > endMs)   return false;
     return true;
   });
 

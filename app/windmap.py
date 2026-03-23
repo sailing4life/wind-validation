@@ -319,12 +319,48 @@ def _to_gif(frames: list[Image.Image], duration_ms: int) -> bytes:
 
 # ── main entry point ───────────────────────────────────────────────────────────
 
+def _filter_by_range(
+    times_utc: list[str],
+    labels: list[str],
+    u_arr: np.ndarray,
+    v_arr: np.ndarray,
+    start_iso: str = "",
+    end_iso: str = "",
+) -> tuple[list[str], list[str], np.ndarray, np.ndarray]:
+    """Return (times_utc, labels, u, v) filtered to [start_iso, end_iso]."""
+    if not start_iso and not end_iso:
+        return times_utc, labels, u_arr, v_arr
+    start_dt = datetime.fromisoformat(start_iso.rstrip("Z")).replace(tzinfo=UTC) if start_iso else None
+    end_dt   = datetime.fromisoformat(end_iso.rstrip("Z")).replace(tzinfo=UTC)   if end_iso   else None
+    keep = []
+    for i, t in enumerate(times_utc):
+        if not t:
+            keep.append(i)
+            continue
+        dt = datetime.fromisoformat(t.rstrip("Z")).replace(tzinfo=UTC)
+        if start_dt and dt < start_dt:
+            continue
+        if end_dt and dt > end_dt:
+            continue
+        keep.append(i)
+    if not keep:
+        return times_utc, labels, u_arr, v_arr  # no match — return all
+    return (
+        [times_utc[i] for i in keep],
+        [labels[i]    for i in keep],
+        u_arr[keep],
+        v_arr[keep],
+    )
+
+
 def generate_wind_gif(
     lat: float,
     lon: float,
     hours: int,
     endpoint_url: str = "",      # unused — kept for API compat with main.py
     model_param:  str = "",      # maps to meteofetch model name (see below)
+    start_iso:    str = "",      # ISO8601 UTC — only include frames >= this time
+    end_iso:      str = "",      # ISO8601 UTC — only include frames <= this time
 ) -> bytes:
     """Generate animated wind barb GIF from native Météo-France GRIB data.
 
@@ -352,7 +388,11 @@ def generate_wind_gif(
                                lat_min, lat_max, lon_min, lon_max,
                                mf_model, hours)
         basemap, extent = bmap_fut.result()
-        lats, lons, u_arr, v_arr, labels, _ = grid_fut.result()
+        lats, lons, u_arr, v_arr, labels, times_utc = grid_fut.result()
+
+    times_utc, labels, u_arr, v_arr = _filter_by_range(
+        times_utc, labels, u_arr, v_arr, start_iso, end_iso
+    )
 
     # Compute barb stride so barb spacing ≈ BARB_SPACING_DEG
     lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
@@ -382,6 +422,8 @@ def generate_wind_frames(
     endpoint_url: str = "",
     model_param: str = "",
     step_hours: int = 3,
+    start_iso: str = "",
+    end_iso: str = "",
 ) -> list[dict]:
     """Return a list of {label, png_b64} dicts — one per ``step_hours`` timestep.
 
@@ -405,6 +447,10 @@ def generate_wind_frames(
                                mf_model, hours)
         basemap, extent = bmap_fut.result()
         lats, lons, u_arr, v_arr, labels, times_utc = grid_fut.result()
+
+    times_utc, labels, u_arr, v_arr = _filter_by_range(
+        times_utc, labels, u_arr, v_arr, start_iso, end_iso
+    )
 
     lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
     barb_stride = max(1, round(BARB_SPACING_DEG / lat_res))

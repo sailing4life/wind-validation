@@ -133,19 +133,21 @@ def _windmap_model_params(model_id: str) -> tuple[str, str]:
 
 @app.get("/api/windmap-gif")
 async def windmap_gif(
-    lat:   float = Query(..., ge=-90.0,  le=90.0),
-    lon:   float = Query(..., ge=-180.0, le=180.0),
-    hours: int   = Query(48,  ge=1,      le=120),
-    model: str   = Query("harmonie_nl"),
+    lat:       float = Query(..., ge=-90.0,  le=90.0),
+    lon:       float = Query(..., ge=-180.0, le=180.0),
+    hours:     int   = Query(48,  ge=1,      le=120),
+    model:     str   = Query("harmonie_nl"),
+    start_iso: str   = Query(""),
+    end_iso:   str   = Query(""),
 ) -> Response:
-    """Generate an animated wind-map GIF via Open-Meteo point-forecast grid."""
+    """Generate an animated wind-map GIF from native GRIB data, optionally range-filtered."""
     from .windmap import generate_wind_gif  # lazy import — only needed when called
 
     endpoint_url, model_param = _windmap_model_params(model)
 
     try:
         gif_bytes: bytes = await asyncio.to_thread(
-            generate_wind_gif, lat, lon, hours, endpoint_url, model_param,
+            generate_wind_gif, lat, lon, hours, endpoint_url, model_param, start_iso, end_iso,
         )
     except ValueError as exc:
         return Response(content=str(exc), status_code=400, media_type="text/plain")
@@ -162,13 +164,15 @@ async def windmap_gif(
 
 @app.get("/api/windmap-frames")
 async def windmap_frames(
-    lat:   float = Query(..., ge=-90.0,  le=90.0),
-    lon:   float = Query(..., ge=-180.0, le=180.0),
-    hours: int   = Query(48,  ge=1,      le=120),
-    model: str   = Query("harmonie_nl"),
-    step:  int   = Query(3,   ge=1,      le=24),
+    lat:       float = Query(..., ge=-90.0,  le=90.0),
+    lon:       float = Query(..., ge=-180.0, le=180.0),
+    hours:     int   = Query(48,  ge=1,      le=120),
+    model:     str   = Query("harmonie_nl"),
+    step:      int   = Query(3,   ge=1,      le=24),
+    start_iso: str   = Query(""),
+    end_iso:   str   = Query(""),
 ) -> Response:
-    """Return JSON list of {label, png_b64} wind-map frames for embedding in the briefing."""
+    """Return JSON list of {label, time_utc, png_b64} wind-map frames for the briefing."""
     import json
     from .windmap import generate_wind_frames  # noqa: PLC0415
 
@@ -176,7 +180,7 @@ async def windmap_frames(
 
     try:
         frames = await asyncio.to_thread(
-            generate_wind_frames, lat, lon, hours, "", model_param, step,
+            generate_wind_frames, lat, lon, hours, "", model_param, step, start_iso, end_iso,
         )
     except ValueError as exc:
         return Response(content=str(exc), status_code=400, media_type="text/plain")
