@@ -153,7 +153,7 @@ def _fetch_grib_grid(
 
     logger.info("Fetching %s GRIB (SP2) via meteofetch…", model)
     try:
-        ds = Model.get_latest_forecast(paquet="SP2")
+        ds = Model.get_latest_forecast(paquet="SP1")
     except Exception as exc:
         raise RuntimeError(f"meteofetch download failed: {exc}") from exc
 
