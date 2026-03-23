@@ -199,13 +199,14 @@ def _fetch_grib_grid(
     u_clip = u_da.isel(latitude=lat_mask, longitude=lon_mask)
     v_clip = v_da.isel(latitude=lat_mask, longitude=lon_mask)
 
-    lats = u_clip.latitude.values
-    lons = u_clip.longitude.values
+    lats  = u_clip.latitude.values
+    lons  = u_clip.longitude.values
+    # Force eager evaluation into plain numpy arrays before releasing xarray objects
     u_arr = np.array(u_clip.values, dtype=float)
     v_arr = np.array(v_clip.values, dtype=float)
 
-    # Free the full-domain xarray objects immediately — they hold the entire GRIB grid
-    del u_da, v_da, u_clip, v_clip, ds
+    # Free the full-domain xarray/GRIB objects — clips are no longer needed
+    del u_clip, v_clip, u_da, v_da, ds
     gc.collect()
 
     if u_arr.ndim == 2:
