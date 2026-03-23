@@ -643,13 +643,16 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   const pos = currentLatLon();
   if (!pos) { alert('No location set — run a forecast first.'); return; }
 
-  const { endTime } = bfGetRangeTimes();
+  const { startTime, endTime } = bfGetRangeTimes();
   const hoursDefault = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
-  let hours = hoursDefault;
-  if (endTime) {
-    const hoursToEnd = Math.ceil((bfParseUtc(endTime) - new Date()) / 3_600_000);
-    if (hoursToEnd > 0) hours = Math.min(120, hoursToEnd);
-  }
+  // Always request the full default window so the GRIB has enough frames;
+  // let start_iso / end_iso do the filtering on the server side.
+  const hours = hoursDefault;
+  const now = new Date();
+  // Only pass start_iso when it's in the future — GRIB model runs start near "now"
+  // so a past startTime would filter out all frames.
+  const gifStartIso = (startTime && bfParseUtc(startTime) > now) ? startTime : '';
+  const gifEndIso   = endTime || '';
   const gifModel = _winnerModelId || 'harmonie_nl';
 
   btn.disabled = true;
@@ -657,9 +660,9 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   btn.textContent = 'Generating…';
 
   try {
-    const { endTime: gifEnd } = bfGetRangeTimes();
     const url = `/api/windmap-gif?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}`
-      + (gifEnd ? `&end_iso=${encodeURIComponent(gifEnd)}` : '');
+      + (gifStartIso ? `&start_iso=${encodeURIComponent(gifStartIso)}` : '')
+      + (gifEndIso   ? `&end_iso=${encodeURIComponent(gifEndIso)}`     : '');
     const resp = await fetch(url);
     if (!resp.ok) {
       const msg = await resp.text();
@@ -697,23 +700,23 @@ async function bfFetchAndRenderWindmaps() {
 
   const { startTime, endTime } = bfGetRangeTimes();
   const hoursDefault = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
-  let hours = hoursDefault;
-  if (endTime) {
-    const hoursToEnd = Math.ceil((bfParseUtc(endTime) - new Date()) / 3_600_000);
-    if (hoursToEnd > 0) hours = Math.min(120, hoursToEnd);
-  }
+  const hours = hoursDefault;
+  const now = new Date();
+  // Only filter by start when it's in the future — GRIB starts near “now”
+  const framesStartIso = (startTime && bfParseUtc(startTime) > now) ? startTime : '';
+  const framesEndIso   = endTime || '';
   const step     = parseInt(document.getElementById('bfWindmapStep')?.value || '3', 10);
   const gifModel = _winnerModelId || 'harmonie_nl';
 
   if (
     _bfWindmapFramesCache &&
-    _bfWindmapFramesCache.lat       === pos.lat &&
-    _bfWindmapFramesCache.lon       === pos.lon &&
-    _bfWindmapFramesCache.hours     === hours &&
-    _bfWindmapFramesCache.step      === step &&
-    _bfWindmapFramesCache.model     === gifModel &&
-    _bfWindmapFramesCache.startTime === startTime &&
-    _bfWindmapFramesCache.endTime   === endTime
+    _bfWindmapFramesCache.lat          === pos.lat &&
+    _bfWindmapFramesCache.lon          === pos.lon &&
+    _bfWindmapFramesCache.hours        === hours &&
+    _bfWindmapFramesCache.step         === step &&
+    _bfWindmapFramesCache.model        === gifModel &&
+    _bfWindmapFramesCache.framesStartIso === framesStartIso &&
+    _bfWindmapFramesCache.framesEndIso   === framesEndIso
   ) {
     _bfRenderWindmapFrames(_bfWindmapFramesCache.frames);
     return;
@@ -725,11 +728,12 @@ async function bfFetchAndRenderWindmaps() {
 
   try {
     const url = `/api/windmap-frames?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}&step=${step}`
-      + (endTime ? `&end_iso=${encodeURIComponent(endTime)}` : '');
+      + (framesStartIso ? `&start_iso=${encodeURIComponent(framesStartIso)}` : '')
+      + (framesEndIso   ? `&end_iso=${encodeURIComponent(framesEndIso)}`     : '');
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
     const data = await resp.json();
-    _bfWindmapFramesCache = { lat: pos.lat, lon: pos.lon, hours, step, model: gifModel, startTime, endTime, frames: data.frames };
+    _bfWindmapFramesCache = { lat: pos.lat, lon: pos.lon, hours, step, model: gifModel, framesStartIso, framesEndIso, frames: data.frames };
     _bfRenderWindmapFrames(data.frames);
     if (metaEl) metaEl.textContent = `— ${data.frames.length} frames`;
   } catch (err) {

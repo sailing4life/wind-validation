@@ -484,6 +484,7 @@ def generate_wind_frames(
         )
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
+        buf.seek(0)
         png_b64 = base64.b64encode(buf.read()).decode()
         buf.close()
         del img
