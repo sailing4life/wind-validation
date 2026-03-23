@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=24" />
+  <link rel="stylesheet" href="/static/styles.css?v=25" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -258,6 +258,19 @@
           <button id="bfLoadBtn" class="btn-secondary">Load</button>
           <button id="bfSaveBtn" class="btn-secondary">Save</button>
           <button id="bfWindmapBtn" class="btn-secondary" title="Generate animated wind map GIF (requires meteofetch)">Wind Map GIF</button>
+          <label class="bf-include-label" title="Embed wind map snapshots in the printed report">
+            <input type="checkbox" id="bfIncludeWindmaps">
+            <span>Wind maps</span>
+            <select id="bfWindmapStep" title="Time step between frames">
+              <option value="3">every 3 h</option>
+              <option value="6">every 6 h</option>
+              <option value="12">every 12 h</option>
+            </select>
+          </label>
+          <label class="bf-include-label" title="Include ocean current chart in the printed report">
+            <input type="checkbox" id="bfIncludeCurrent">
+            <span>Current</span>
+          </label>
           <button id="bfPrintBtn">Print / PDF</button>
         </div>
       </div>
@@ -304,16 +317,22 @@
           <div id="bfCurrentChart"></div>
         </div>
 
+        <!-- Wind map snapshots (embedded images, one per timestep) -->
+        <div class="panel bf-section" id="bfWindmapsPanel" style="display:none">
+          <div class="fc-chart-title">Wind Maps  <span id="bfWindmapsMeta" style="font-weight:400;font-size:11px;color:#64748b"></span></div>
+          <div id="bfWindmapsGrid" class="bf-windmaps-grid"></div>
+        </div>
+
       </div>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=24"></script>
-  <script src="/static/forecast.js?v=24"></script>
-  <script src="/static/weather.js?v=24"></script>
-  <script src="/static/briefing.js?v=24"></script>
+  <script src="/static/app.js?v=25"></script>
+  <script src="/static/forecast.js?v=25"></script>
+  <script src="/static/weather.js?v=25"></script>
+  <script src="/static/briefing.js?v=25"></script>
 </body>
 </html>
 

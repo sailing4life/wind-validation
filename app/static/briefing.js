@@ -297,10 +297,15 @@ function renderBriefingWindTable() {
 let _bfCurrentData = null;   // cached fetch result { lat, lon, hours }
 
 async function bfFetchAndRenderCurrent() {
-  const panel   = document.getElementById('bfCurrentPanel');
-  const chartDiv= document.getElementById('bfCurrentChart');
-  const metaEl  = document.getElementById('bfCurrentMeta');
+  const panel    = document.getElementById('bfCurrentPanel');
+  const chartDiv = document.getElementById('bfCurrentChart');
+  const metaEl   = document.getElementById('bfCurrentMeta');
   if (!panel || !chartDiv) return;
+
+  if (!document.getElementById('bfIncludeCurrent')?.checked) {
+    panel.style.display = 'none';
+    return;
+  }
 
   const pos = currentLatLon();
   if (!pos) { panel.style.display = 'none'; return; }
@@ -637,7 +642,85 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   }
 });
 
-// â”€â”€ Save briefing as JSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Wind map snapshots in report ───────────────────────────────────────────────
+let _bfWindmapFramesCache = null;  // { lat, lon, hours, step, model, frames }
+
+async function bfFetchAndRenderWindmaps() {
+  const panel    = document.getElementById('bfWindmapsPanel');
+  const grid     = document.getElementById('bfWindmapsGrid');
+  const metaEl   = document.getElementById('bfWindmapsMeta');
+  const checkbox = document.getElementById('bfIncludeWindmaps');
+  if (!panel || !grid || !checkbox) return;
+
+  if (!checkbox.checked) { panel.style.display = 'none'; return; }
+
+  const pos = currentLatLon();
+  if (!pos) { panel.style.display = 'none'; return; }
+
+  const hours    = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  const step     = parseInt(document.getElementById('bfWindmapStep')?.value || '3', 10);
+  const gifModel = _winnerModelId || 'harmonie_nl';
+
+  if (
+    _bfWindmapFramesCache &&
+    _bfWindmapFramesCache.lat   === pos.lat &&
+    _bfWindmapFramesCache.lon   === pos.lon &&
+    _bfWindmapFramesCache.hours === hours &&
+    _bfWindmapFramesCache.step  === step &&
+    _bfWindmapFramesCache.model === gifModel
+  ) {
+    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames);
+    return;
+  }
+
+  panel.style.display = '';
+  grid.innerHTML = '<p style=”color:#64748b;padding:8px”>Generating wind maps — this may take a minute…</p>';
+  if (metaEl) metaEl.textContent = '— loading…';
+
+  try {
+    const url = `/api/windmap-frames?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}&step=${step}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    const data = await resp.json();
+    _bfWindmapFramesCache = { lat: pos.lat, lon: pos.lon, hours, step, model: gifModel, frames: data.frames };
+    _bfRenderWindmapFrames(data.frames);
+    if (metaEl) metaEl.textContent = `— ${data.frames.length} frames`;
+  } catch (err) {
+    grid.innerHTML = `<p style=”color:#dc2626;padding:8px”>Failed: ${err.message}</p>`;
+    if (metaEl) metaEl.textContent = '— unavailable';
+  }
+}
+
+function _bfRenderWindmapFrames(frames) {
+  const panel = document.getElementById('bfWindmapsPanel');
+  const grid  = document.getElementById('bfWindmapsGrid');
+  if (!panel || !grid || !frames?.length) return;
+  grid.innerHTML = frames.map(f =>
+    `<figure class=”bf-windmap-fig”>
+       <img src=”data:image/png;base64,${f.png_b64}” alt=”${f.label}” />
+       <figcaption>${f.label}</figcaption>
+     </figure>`
+  ).join('');
+  panel.style.display = '';
+}
+
+document.getElementById('bfIncludeWindmaps')?.addEventListener('change', () => {
+  _bfWindmapFramesCache = null;
+  bfFetchAndRenderWindmaps();
+});
+document.getElementById('bfWindmapStep')?.addEventListener('change', () => {
+  _bfWindmapFramesCache = null;
+  if (document.getElementById('bfIncludeWindmaps')?.checked) bfFetchAndRenderWindmaps();
+});
+document.getElementById('bfIncludeCurrent')?.addEventListener('change', () => {
+  if (document.getElementById('bfIncludeCurrent').checked) {
+    bfFetchAndRenderCurrent();
+  } else {
+    document.getElementById('bfCurrentPanel').style.display = 'none';
+  }
+});
+
+// ── Save briefing as JSON ──────────────────────────────────────────────────────
 document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
   if (!forecastData) { alert('No forecast loaded.'); return; }
 

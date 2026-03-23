@@ -363,3 +363,59 @@ def generate_wind_gif(
         ))
 
     return _to_gif(frames, FRAME_MS)
+
+
+def generate_wind_frames(
+    lat: float,
+    lon: float,
+    hours: int,
+    endpoint_url: str = "",
+    model_param: str = "",
+    step_hours: int = 3,
+) -> list[dict]:
+    """Return a list of {label, png_b64} dicts — one per ``step_hours`` timestep.
+
+    Suitable for embedding as ``<img src="data:image/png;base64,...">`` in an HTML report.
+    """
+    import base64
+    import concurrent.futures
+
+    if "arpege" in model_param.lower() or "ecmwf" in model_param.lower():
+        mf_model = "arpege025"
+    else:
+        mf_model = "arome025"
+
+    lat_min, lat_max = lat - AREA_LAT_DEG, lat + AREA_LAT_DEG
+    lon_min, lon_max = lon - AREA_LON_DEG, lon + AREA_LON_DEG
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        bmap_fut = pool.submit(_get_basemap, lat_min, lat_max, lon_min, lon_max)
+        grid_fut = pool.submit(_fetch_grib_grid,
+                               lat_min, lat_max, lon_min, lon_max,
+                               mf_model, hours)
+        basemap, extent = bmap_fut.result()
+        lats, lons, u_arr, v_arr, labels = grid_fut.result()
+
+    lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
+    barb_stride = max(1, round(BARB_SPACING_DEG / lat_res))
+
+    result: list[dict] = []
+    for t_idx, label in enumerate(labels):
+        if t_idx % max(1, step_hours) != 0:
+            continue
+        img = _render_frame(
+            lats, lons,
+            u_arr[t_idx], v_arr[t_idx],
+            basemap, extent,
+            lat, lon, label,
+            barb_stride=barb_stride,
+        )
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        result.append({
+            "label": label,
+            "png_b64": base64.b64encode(buf.read()).decode(),
+        })
+
+    return result

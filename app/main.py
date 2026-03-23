@@ -160,6 +160,32 @@ async def windmap_gif(
     )
 
 
+@app.get("/api/windmap-frames")
+async def windmap_frames(
+    lat:   float = Query(..., ge=-90.0,  le=90.0),
+    lon:   float = Query(..., ge=-180.0, le=180.0),
+    hours: int   = Query(48,  ge=1,      le=120),
+    model: str   = Query("harmonie_nl"),
+    step:  int   = Query(3,   ge=1,      le=24),
+) -> Response:
+    """Return JSON list of {label, png_b64} wind-map frames for embedding in the briefing."""
+    import json
+    from .windmap import generate_wind_frames  # noqa: PLC0415
+
+    _, model_param = _windmap_model_params(model)
+
+    try:
+        frames = await asyncio.to_thread(
+            generate_wind_frames, lat, lon, hours, "", model_param, step,
+        )
+    except ValueError as exc:
+        return Response(content=str(exc), status_code=400, media_type="text/plain")
+    except Exception as exc:
+        return Response(content=str(exc), status_code=503, media_type="text/plain")
+
+    return Response(content=json.dumps({"frames": frames}), media_type="application/json")
+
+
 @app.get("/api/ocean-current")
 async def ocean_current(
     lat:   float = Query(..., ge=-90.0,  le=90.0),

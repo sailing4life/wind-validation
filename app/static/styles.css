@@ -944,6 +944,52 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 }
 .btn-secondary:hover { background: #e0e7ef; }
 
+/* "Wind maps / Current" include-in-report toggles */
+.bf-include-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bf-include-label input[type="checkbox"] { cursor: pointer; margin: 0; }
+.bf-include-label select {
+  font-size: 11px;
+  padding: 1px 3px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* Wind map snapshot grid */
+.bf-windmaps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+.bf-windmap-fig {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.bf-windmap-fig img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.bf-windmap-fig figcaption {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 600;
+}
+
 .bf-section { /* inherits .panel */ }
 
 /* Title + subtitle + notes header */
