@@ -5,7 +5,6 @@ WORKDIR /app
 # eccodes C library — required by meteofetch / cfgrib for GRIB2 parsing
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libeccodes-dev \
-    libeccodes2 \
     && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
