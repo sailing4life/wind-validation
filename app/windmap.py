@@ -25,6 +25,7 @@ Runs **synchronously** — call via ``asyncio.to_thread()`` from async endpoints
 """
 from __future__ import annotations
 
+import gc
 import io
 import math
 import logging
@@ -203,6 +204,10 @@ def _fetch_grib_grid(
     u_arr = np.array(u_clip.values, dtype=float)
     v_arr = np.array(v_clip.values, dtype=float)
 
+    # Free the full-domain xarray objects immediately — they hold the entire GRIB grid
+    del u_da, v_da, u_clip, v_clip, ds
+    gc.collect()
+
     if u_arr.ndim == 2:
         u_arr = u_arr[np.newaxis]
         v_arr = v_arr[np.newaxis]
@@ -229,11 +234,13 @@ def _render_frame(
     center_lon: float,
     label:      str,
     barb_stride: int = 1,
+    dpi: int = 96,
+    fig_w_px: int = FIG_W_PX,
+    fig_h_px: int = FIG_H_PX,
 ) -> Image.Image:
     lon_min, lon_max, lat_min, lat_max = extent
-    dpi = 96
 
-    fig, ax = plt.subplots(figsize=(FIG_W_PX / dpi, FIG_H_PX / dpi), dpi=dpi)
+    fig, ax = plt.subplots(figsize=(fig_w_px / dpi, fig_h_px / dpi), dpi=dpi)
 
     # ── 1. OSM basemap ────────────────────────────────────────────────────────
     ax.imshow(
@@ -455,6 +462,11 @@ def generate_wind_frames(
     lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
     barb_stride = max(1, round(BARB_SPACING_DEG / lat_res))
 
+    # Smaller figures for embedded report snapshots (saves ~55 % memory vs GIF size)
+    FRAME_DPI    = 72
+    FRAME_W_PX   = 560
+    FRAME_H_PX   = 420
+
     result: list[dict] = []
     for t_idx, (label, time_utc) in enumerate(zip(labels, times_utc)):
         if t_idx % max(1, step_hours) != 0:
@@ -465,14 +477,16 @@ def generate_wind_frames(
             basemap, extent,
             lat, lon, label,
             barb_stride=barb_stride,
+            dpi=FRAME_DPI,
+            fig_w_px=FRAME_W_PX,
+            fig_h_px=FRAME_H_PX,
         )
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        result.append({
-            "label": label,
-            "time_utc": time_utc,
-            "png_b64": base64.b64encode(buf.read()).decode(),
-        })
+        img.save(buf, format="PNG", optimize=True)
+        png_b64 = base64.b64encode(buf.read()).decode()
+        buf.close()
+        del img
+        result.append({"label": label, "time_utc": time_utc, "png_b64": png_b64})
+        gc.collect()
 
     return result

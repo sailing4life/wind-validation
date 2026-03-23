@@ -19,6 +19,9 @@ from .repositories import InMemoryRepository
 from .schemas import ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
 from .services import ValidationService, run_hourly_refresh
 
+# Only one windmap generation at a time — GRIB download + rendering is memory-heavy
+_windmap_sem = asyncio.Semaphore(1)
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
@@ -145,10 +148,14 @@ async def windmap_gif(
 
     endpoint_url, model_param = _windmap_model_params(model)
 
+    if _windmap_sem.locked():
+        return Response(content="A wind map is already being generated. Try again in a moment.",
+                        status_code=503, media_type="text/plain")
     try:
-        gif_bytes: bytes = await asyncio.to_thread(
-            generate_wind_gif, lat, lon, hours, endpoint_url, model_param, start_iso, end_iso,
-        )
+        async with _windmap_sem:
+            gif_bytes: bytes = await asyncio.to_thread(
+                generate_wind_gif, lat, lon, hours, endpoint_url, model_param, start_iso, end_iso,
+            )
     except ValueError as exc:
         return Response(content=str(exc), status_code=400, media_type="text/plain")
     except Exception as exc:
@@ -166,7 +173,7 @@ async def windmap_gif(
 async def windmap_frames(
     lat:       float = Query(..., ge=-90.0,  le=90.0),
     lon:       float = Query(..., ge=-180.0, le=180.0),
-    hours:     int   = Query(48,  ge=1,      le=120),
+    hours:     int   = Query(24,  ge=1,      le=48),   # capped at 48 to limit memory
     model:     str   = Query("harmonie_nl"),
     step:      int   = Query(3,   ge=1,      le=24),
     start_iso: str   = Query(""),
@@ -178,10 +185,14 @@ async def windmap_frames(
 
     _, model_param = _windmap_model_params(model)
 
+    if _windmap_sem.locked():
+        return Response(content="A wind map is already being generated. Try again in a moment.",
+                        status_code=503, media_type="text/plain")
     try:
-        frames = await asyncio.to_thread(
-            generate_wind_frames, lat, lon, hours, "", model_param, step, start_iso, end_iso,
-        )
+        async with _windmap_sem:
+            frames = await asyncio.to_thread(
+                generate_wind_frames, lat, lon, hours, "", model_param, step, start_iso, end_iso,
+            )
     except ValueError as exc:
         return Response(content=str(exc), status_code=400, media_type="text/plain")
     except Exception as exc:
