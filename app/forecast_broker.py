@@ -27,7 +27,7 @@ class ForecastBroker:
         updated: dict[str, list[ForecastValue]] = {}
         for i, model in enumerate(self.repo.models):
             if i > 0:
-                time.sleep(1.0)  # stay within Open-Meteo free-tier rate limit
+                time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
             rows = self.openmeteo.fetch_model_at_coords(model, coords, start, end)
             if rows:
                 updated[model.model_id] = rows

@@ -129,7 +129,7 @@ class OpenMeteoForecastAdapter:
                     for _attempt in range(3):
                         if resp.status_code != 429:
                             break
-                        wait = 10 * (2 ** _attempt)   # 10s, 20s, 40s
+                        wait = 20 * (2 ** _attempt)   # 20s, 40s, 80s
                         logger.debug("429 from %s, retrying after %ds", url, wait)
                         time.sleep(wait)
                         resp = client.get(url, params=params)
@@ -281,7 +281,7 @@ class OpenMeteoForecastAdapter:
             endpoint = self._endpoint(model.model_id)
             if endpoint:
                 if rows:  # already made a past call; pause before the future call
-                    time.sleep(0.5)
+                    time.sleep(2.0)
                 model_param = self.model_param_map.get(model.model_id, "")
                 rows.extend(self._fetch_batch(
                     endpoint, model.model_id, model_param, in_cov,
