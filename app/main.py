@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .catalog import catalog_as_dict
@@ -116,3 +116,34 @@ def freshness() -> dict:
         "sources": repo.freshness.sources,
         "models": repo.freshness.models,
     }
+
+
+@app.get("/api/windmap-gif")
+async def windmap_gif(
+    lat:   float = Query(..., ge=-90.0,  le=90.0),
+    lon:   float = Query(..., ge=-180.0, le=180.0),
+    hours: int   = Query(48,  ge=1,      le=120),
+    model: str   = Query("arpege025"),
+) -> Response:
+    """Generate an animated wind-map GIF using Météo-France gridded forecasts.
+
+    Supported *model* values: ``arpege025`` (global 0.25°, default) or
+    ``arome025`` (France + neighbours, 0.025°).
+    """
+    from .windmap import generate_wind_gif  # lazy import — heavy deps
+
+    try:
+        gif_bytes: bytes = await asyncio.to_thread(
+            generate_wind_gif, lat, lon, hours, model
+        )
+    except RuntimeError as exc:
+        return Response(content=str(exc), status_code=503, media_type="text/plain")
+    except ValueError as exc:
+        return Response(content=str(exc), status_code=400, media_type="text/plain")
+
+    filename = f"windmap_{lat:.3f}N_{lon:.3f}E_{model}.gif"
+    return Response(
+        content=gif_bytes,
+        media_type="image/gif",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

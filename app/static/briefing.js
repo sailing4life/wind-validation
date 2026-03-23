@@ -189,10 +189,12 @@ function renderBriefingEnsembleCharts() {
   const twdDiv = document.getElementById('bfEnsembleDirChart');
   if (twdDiv) {
     const traces = [];
+    const allWd = [];
     filteredSelected.forEach(series => {
       const color = modelColor(series.model_id);
       const times = series.hours.map(h => bfLocalISO(h.time_utc));
       const wd    = series.hours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null);
+      wd.forEach(v => { if (v != null) allWd.push(v); });
       traces.push({
         x: times, y: wd, name: series.model_id,
         type: 'scatter', mode: 'lines',
@@ -200,6 +202,23 @@ function renderBriefingEnsembleCharts() {
         opacity: 0.85, showlegend: false,
       });
     });
+
+    // Dynamic y-axis range and tick interval based on data spread
+    const wdMin = allWd.length ? Math.min(...allWd) : 0;
+    const wdMax = allWd.length ? Math.max(...allWd) : 360;
+    const spread = wdMax - wdMin;
+    const pad = Math.max(spread * 0.1, 5);
+    const yMin = Math.max(0, Math.floor((wdMin - pad) / 5) * 5);
+    const yMax = Math.min(360, Math.ceil((wdMax + pad) / 5) * 5);
+    const yRange = yMax - yMin;
+    let dtick;
+    if (yRange <= 30)       dtick = 5;
+    else if (yRange <= 60)  dtick = 10;
+    else if (yRange <= 120) dtick = 20;
+    else if (yRange <= 180) dtick = 30;
+    else if (yRange <= 270) dtick = 45;
+    else                    dtick = 90;
+
     Plotly.newPlot(twdDiv, traces, {
       ...LIGHT_LAYOUT,
       height: 300,
@@ -209,10 +228,8 @@ function renderBriefingEnsembleCharts() {
       yaxis: {
         title: { text: 'TWD (deg)', standoff: 16 },
         automargin: true,
-        range: [0, 360], dtick: 90,
+        range: [yMin, yMax], dtick,
         gridcolor: '#e2e8f0', tickfont: { color: '#64748b' },
-        tickvals: [0, 90, 180, 270, 360],
-        ticktext: ['N (0 deg)', 'E (90 deg)', 'S (180 deg)', 'W (270 deg)', 'N (360 deg)'],
       },
     }, { responsive: true, displayModeBar: false });
   }
@@ -474,6 +491,52 @@ td[style*="background"]{background-clip:padding-box}
 
   btn.disabled = false;
   btn.textContent = 'Print / PDF';
+});
+
+// â”€â”€ Wind Map GIF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('bfWindmapBtn');
+  const pos = currentLatLon();
+  if (!pos) { alert('No location set — run a forecast first.'); return; }
+
+  const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+
+  // Prefer a model that covers the area; fall back to arpege025 (global)
+  const modelMap = {
+    harmonie_nl: 'arpege025',
+    arome_hd:    'arome025',
+    icon_eu:     'arpege025',
+    icon_it:     'arpege025',
+    arpege:      'arpege025',
+    ecmwf_global:'arpege025',
+  };
+  const fcModel = _winnerModelId || '';
+  const gifModel = modelMap[fcModel] || 'arpege025';
+
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Generating…';
+
+  try {
+    const url = `/api/windmap-gif?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const msg = await resp.text();
+      throw new Error(msg || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+    a.download = `windmap_${ts}.gif`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    alert('Wind map failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
 });
 
 // â”€â”€ Save briefing as JSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
