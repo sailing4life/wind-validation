@@ -199,8 +199,9 @@ def _fetch_grib_grid(
     u_clip = u_da.isel(latitude=lat_mask, longitude=lon_mask)
     v_clip = v_da.isel(latitude=lat_mask, longitude=lon_mask)
 
-    lats  = u_clip.latitude.values
-    lons  = u_clip.longitude.values
+    lats   = u_clip.latitude.values
+    lons   = u_clip.longitude.values
+    t_vals = u_clip.time.values[:max_hours]
     # Force eager evaluation into plain numpy arrays before releasing xarray objects
     u_arr = np.array(u_clip.values, dtype=float)
     v_arr = np.array(v_clip.values, dtype=float)
@@ -213,7 +214,6 @@ def _fetch_grib_grid(
         u_arr = u_arr[np.newaxis]
         v_arr = v_arr[np.newaxis]
 
-    t_vals = u_clip.time.values[:max_hours]
     u_arr  = u_arr[:max_hours]
     v_arr  = v_arr[:max_hours]
     labels     = [_np_dt_to_label(t) for t in t_vals]
