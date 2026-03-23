@@ -52,6 +52,13 @@ def default_model_catalog() -> list[ModelDefinition]:
             priority_by_country={"NL": 10, "FR": 10, "IT": 10, "OTHER": 10},
             is_global_baseline=True,
         ),
+        ModelDefinition(
+            model_id="openwrf",
+            provider="OpenSkiron",
+            category="regional",
+            coverage_bbox={"min_lat": 30.0, "max_lat": 48.0, "min_lon": -6.0, "max_lon": 42.0},
+            priority_by_country={"IT": 2, "OTHER": 5},
+        ),
     ]
 
 

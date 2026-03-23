@@ -61,23 +61,52 @@ function allPointText(vals, fmt = v => String(v)) {
   return vals.map(v => v != null ? fmt(v) : '');
 }
 
+// ── Model override helpers ───────────────────────────────────────────────────────
+function bfGetActiveModel() {
+  const sel = document.getElementById('bfModelOverride');
+  return (sel && sel.value) ? sel.value : (_winnerModelId || null);
+}
+
+function bfGetActiveBias() {
+  const overrideId = document.getElementById('bfModelOverride')?.value;
+  if (overrideId && overrideId !== _winnerModelId) return 0;
+  return _biasWsMs || 0;
+}
+
+function bfPopulateModelOverride() {
+  const sel = document.getElementById('bfModelOverride');
+  if (!sel || !forecastData) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Auto (best)</option>';
+  (forecastData.models || []).forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.model_id;
+    opt.textContent = m.model_id + (m.model_id === _winnerModelId ? ' ★' : '');
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
+}
+
+
 // â”€â”€ Best model chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderBriefingBestChart() {
   const panel   = document.getElementById('bfBestPanel');
   const chartDiv= document.getElementById('bfBestChart');
   if (!panel || !chartDiv || !forecastData) { if (panel) panel.style.display = 'none'; return; }
 
-  const { winner_model_id, bias_ws_ms, models } = forecastData;
-  const winner = models.find(m => m.model_id === winner_model_id) || models[0];
+  const { models } = forecastData;
+  const activeModelId = bfGetActiveModel();
+  const activeBias    = bfGetActiveBias();
+  const winner = models.find(m => m.model_id === activeModelId) || models[0];
   if (!winner) { panel.style.display = 'none'; return; }
   panel.style.display = '';
 
   const titleEl = document.getElementById('bfBestTitle');
   if (titleEl) titleEl.textContent =
-    winner_model_id + (bias_ws_ms ? `  -  bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
+    winner.model_id + (activeBias ? `  -  bias ${(activeBias * MS_TO_KT).toFixed(1)} kt` : '');
 
   const fh      = bfFilterHours(winner.hours);
-  const biasKt  = bias_ws_ms * MS_TO_KT;
+  const biasKt  = activeBias * MS_TO_KT;
   const times   = fh.map(h => bfLocalISO(h.time_utc));
   const ws_kt   = fh.map(h => h.ws_ms   != null ? +(h.ws_ms   * MS_TO_KT).toFixed(1) : null);
   const corr_kt = ws_kt.map(v  => v != null ? +(v - biasKt).toFixed(1) : null);
@@ -240,12 +269,14 @@ function renderBriefingWindTable() {
   const wrap = document.getElementById('bfTableWrap');
   if (!wrap || !forecastData) return;
 
-  const { winner_model_id, bias_ws_ms, models } = forecastData;
-  const winner  = models.find(m => m.model_id === winner_model_id) || models[0];
+  const { models } = forecastData;
+  const activeModelId = bfGetActiveModel();
+  const activeBias    = bfGetActiveBias();
+  const winner  = models.find(m => m.model_id === activeModelId) || models[0];
   if (!winner) { wrap.innerHTML = ''; return; }
 
   const fh       = bfFilterHours(winner.hours);
-  const biasKt   = bias_ws_ms * MS_TO_KT;
+  const biasKt   = activeBias * MS_TO_KT;
   const hasPrecip= winner.hours.some(h => h.precip_mm != null);
 
   let headerCols = '<th class="bfc-time">Time</th>'
@@ -428,6 +459,7 @@ function renderBriefingTab() {
   if (meta) meta.textContent = `${pos ? `${pos.lat.toFixed(4)}N, ${pos.lon.toFixed(4)}E` : ''}  -  ${now}`;
 
   bfInitRange();
+  bfPopulateModelOverride();
   bfRerender();
   bfFetchAndRenderCurrent();
 }
@@ -653,7 +685,7 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   // so a past startTime would filter out all frames.
   const gifStartIso = (startTime && bfParseUtc(startTime) > now) ? startTime : '';
   const gifEndIso   = endTime || '';
-  const gifModel = _winnerModelId || 'harmonie_nl';
+  const gifModel = bfGetActiveModel() || 'harmonie_nl';
 
   btn.disabled = true;
   const orig = btn.textContent;
@@ -706,7 +738,7 @@ async function bfFetchAndRenderWindmaps() {
   const framesStartIso = (startTime && bfParseUtc(startTime) > now) ? startTime : '';
   const framesEndIso   = endTime || '';
   const step     = parseInt(document.getElementById('bfWindmapStep')?.value || '3', 10);
-  const gifModel = _winnerModelId || 'harmonie_nl';
+  const gifModel = bfGetActiveModel() || 'harmonie_nl';
 
   if (
     _bfWindmapFramesCache &&
@@ -775,6 +807,11 @@ function _bfRenderWindmapFrames(frames) {
   panel.style.display = '';
 }
 
+document.getElementById('bfModelOverride')?.addEventListener('change', () => {
+  _bfWindmapFramesCache = null;
+  bfRerender();
+  if (document.getElementById('bfIncludeWindmaps')?.checked) bfFetchAndRenderWindmaps();
+});
 document.getElementById('bfIncludeWindmaps')?.addEventListener('change', () => {
   _bfWindmapFramesCache = null;
   bfFetchAndRenderWindmaps();
@@ -840,6 +877,7 @@ document.getElementById('bfFileInput')?.addEventListener('change', e => {
       _winnerModelId    = payload.winner_model_id ?? forecastData.winner_model_id;
       _biasWsMs         = payload.bias_ws_ms      ?? forecastData.bias_ws_ms;
       _selectedModels   = new Set(forecastData.models.map(m => m.model_id));
+      bfPopulateModelOverride();
 
       // Restore coordinates
       if (payload.lat != null) document.getElementById('lat').value = payload.lat;

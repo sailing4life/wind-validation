@@ -6,7 +6,10 @@ from datetime import datetime, timedelta, timezone
 from .config import Settings
 from .domain import ForecastValue
 from .forecast_adapters import OpenMeteoForecastAdapter
+from .openwrf_adapter import OpenWrfAdapter
 from .repositories import InMemoryRepository
+
+_OPENWRF_ID = "openwrf"
 
 
 class ForecastBroker:
@@ -14,6 +17,7 @@ class ForecastBroker:
         self.repo = repo
         self.settings = settings
         self.openmeteo = OpenMeteoForecastAdapter(settings)
+        self.openwrf = OpenWrfAdapter()
 
     def refresh_recent_forecasts(self, hours_back: int = 72) -> dict[str, list[ForecastValue]]:
         if not self.settings.live_forecasts_enabled:
@@ -26,9 +30,12 @@ class ForecastBroker:
 
         updated: dict[str, list[ForecastValue]] = {}
         for i, model in enumerate(self.repo.models):
-            if i > 0:
-                time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
-            rows = self.openmeteo.fetch_model_at_coords(model, coords, start, end)
+            if model.model_id == _OPENWRF_ID:
+                rows = self.openwrf.fetch_model_at_coords(model, coords, start, end)
+            else:
+                if i > 0:
+                    time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
+                rows = self.openmeteo.fetch_model_at_coords(model, coords, start, end)
             if rows:
                 updated[model.model_id] = rows
         return updated

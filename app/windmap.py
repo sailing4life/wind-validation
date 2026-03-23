@@ -653,22 +653,27 @@ def _render_frame(
         origin="upper", aspect="auto", zorder=0,
     )
 
-    # ── 2. Wind-speed shading — smooth filled contours ────────────────────
+    # ── 2. Wind-speed shading — smooth pcolormesh with alpha fade ────────────
     speeds_kt = np.sqrt(u_ms**2 + v_ms**2) * MS_TO_KT
     speeds_kt = np.where(np.isfinite(speeds_kt), speeds_kt, 0.0)
 
     LON_MESH, LAT_MESH = np.meshgrid(lons, lats)
-    norm_shade = mcolors.Normalize(vmin=0, vmax=MAX_WS_KT)
-    cmap_shade = mcolors.LinearSegmentedColormap.from_list(
-        "wind_kt", ["#3b82f6", "#22c55e", "#ef4444", "#a855f7"]
-    )
-    levels = np.linspace(0, MAX_WS_KT, 22)
 
-    cf = ax.contourf(
+    # Build an RGBA colormap: alpha fades from ~0 (calm, land visible) to 0.72 (strong winds)
+    _n = 256
+    _t = np.linspace(0, 1, _n)
+    # RGB: blue → green → red → purple
+    _base = mcolors.LinearSegmentedColormap.from_list(
+        "_wind_rgb", ["#3b82f6", "#22c55e", "#ef4444", "#a855f7"]
+    )(_t)  # (N, 4) RGBA with alpha=1
+    _base[:, 3] = 0.08 + _t * 0.64   # alpha 0.08 → 0.72
+    cmap_shade = mcolors.ListedColormap(_base, name="wind_kt")
+    norm_shade = mcolors.Normalize(vmin=0, vmax=MAX_WS_KT)
+
+    ax.pcolormesh(
         LON_MESH, LAT_MESH, speeds_kt,
-        levels=levels,
         cmap=cmap_shade, norm=norm_shade,
-        alpha=0.48, zorder=1, extend="max",
+        shading="gouraud", zorder=1,
     )
 
     # ── 3. Wind barbs — subsampled to BARB_SPACING_DEG density ───────────────
@@ -691,7 +696,9 @@ def _render_frame(
     )
 
     # ── 4. Colorbar ───────────────────────────────────────────────────────────
-    cb = fig.colorbar(cf, ax=ax, fraction=0.026, pad=0.02)
+    sm = plt.cm.ScalarMappable(cmap=cmap_shade, norm=norm_shade)
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax, fraction=0.026, pad=0.02)
     cb.set_label("Wind speed (kt)", fontsize=9)
     cb.set_ticks([0, 5, 10, 15, 20, 25, 30, 35])
     cb.ax.tick_params(labelsize=8)

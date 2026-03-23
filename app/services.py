@@ -13,6 +13,7 @@ from .catalog import select_candidate_models
 from .config import Settings
 from .domain import Observation, ScoreRow
 from .forecast_adapters import OpenMeteoForecastAdapter
+from .openwrf_adapter import OpenWrfAdapter as _OpenWrfAdapter, MODEL_ID as _OPENWRF_ID
 from .geo import haversine_km
 from .location_fingerprint import LocationFingerprintService
 from .observation_broker import ObservationBroker
@@ -34,6 +35,7 @@ class ValidationService:
         self.repo = repo
         self.broker = broker
         self.forecast_adapter = forecast_adapter
+        self.openwrf = _OpenWrfAdapter()
         self.settings = settings
         self.fingerprint_service = fingerprint_service
         self.cache: TTLCache[dict] = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
@@ -145,12 +147,18 @@ class ValidationService:
         # On-demand fetch: augment index with exact pin + obs station coordinates
         all_coords = list({(lat, lon)} | {(s.lat, s.lon) for s in stations})
         for i, model in enumerate(candidates):
-            if i > 0:
-                time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
             try:
-                for fv in self.forecast_adapter.fetch_model_at_coords(
-                    model, all_coords, window_start, forecast_end
-                ):
+                if model.model_id == _OPENWRF_ID:
+                    fvs = self.openwrf.fetch_model_at_coords(
+                        model, all_coords, window_start, forecast_end
+                    )
+                else:
+                    if i > 0:
+                        time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
+                    fvs = self.forecast_adapter.fetch_model_at_coords(
+                        model, all_coords, window_start, forecast_end
+                    )
+                for fv in fvs:
                     fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
             except Exception as exc:
                 logger.warning("On-demand batch fetch failed for %s", model.model_id, exc_info=exc)
@@ -393,12 +401,15 @@ class ValidationService:
         for model in catalog:
             if model.status != "ACTIVE":
                 continue
-            if models_series:  # sleep only after a real HTTP call was made
-                time.sleep(4.0)
             try:
-                fvs = self.forecast_adapter.fetch_forecast_with_extras(
-                    model, [(lat, lon)], now, end
-                )
+                if model.model_id == _OPENWRF_ID:
+                    fvs = self.openwrf.fetch_forecast_with_extras(model, [(lat, lon)], now, end)
+                else:
+                    if models_series:  # sleep only after a real HTTP call was made
+                        time.sleep(4.0)
+                    fvs = self.forecast_adapter.fetch_forecast_with_extras(
+                        model, [(lat, lon)], now, end
+                    )
             except Exception as exc:
                 logger.warning("forecast_point fetch failed for %s: %s", model.model_id, exc)
                 fvs = []

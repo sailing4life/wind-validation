@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=27" />
+  <link rel="stylesheet" href="/static/styles.css?v=28" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -269,6 +269,12 @@
           <label class="bf-include-label" title="Include ocean current chart in the printed report">
             <input type="checkbox" id="bfIncludeCurrent">
             <span>Current</span>
+          </label>
+          <label class="bf-include-label" title="Override which model is shown in the chart, table and wind maps">
+            <span>Model</span>
+            <select id="bfModelOverride" title="Wind map / chart / table model override">
+              <option value="">Auto (best)</option>
+            </select>
           </label>
           <button id="bfPrintBtn">Print / PDF</button>
         </div>
