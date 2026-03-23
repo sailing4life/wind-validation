@@ -205,8 +205,8 @@ def _fetch_grib_grid(
     u_arr = np.array(u_clip.values, dtype=float)
     v_arr = np.array(v_clip.values, dtype=float)
 
-    # Free the full-domain xarray/GRIB objects — clips are no longer needed
-    del u_clip, v_clip, u_da, v_da, ds
+    # Drop references so GC can free the full-domain GRIB data
+    u_clip = v_clip = u_da = v_da = ds = None
     gc.collect()
 
     if u_arr.ndim == 2:
