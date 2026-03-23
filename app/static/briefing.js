@@ -114,7 +114,7 @@ function renderBriefingBestChart() {
   const wd      = fh.map(h => h.wd_deg);
 
   // Briefing always shows corrected TWS when a bias exists
-  const mainWs = bias_ws_ms !== 0 ? corr_kt : ws_kt;
+  const mainWs = activeBias !== 0 ? corr_kt : ws_kt;
 
   const traces = [{
     x: times, y: mainWs, name: 'TWS (kt)',
