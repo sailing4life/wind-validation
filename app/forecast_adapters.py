@@ -126,9 +126,12 @@ class OpenMeteoForecastAdapter:
 
                 try:
                     resp = client.get(url, params=params)
-                    if resp.status_code == 429:
-                        logger.debug("429 from %s, retrying after 5s", url)
-                        time.sleep(5)
+                    for _attempt in range(3):
+                        if resp.status_code != 429:
+                            break
+                        wait = 10 * (2 ** _attempt)   # 10s, 20s, 40s
+                        logger.debug("429 from %s, retrying after %ds", url, wait)
+                        time.sleep(wait)
                         resp = client.get(url, params=params)
                     resp.raise_for_status()
                     payload = resp.json()

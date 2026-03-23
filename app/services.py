@@ -394,7 +394,7 @@ class ValidationService:
             if model.status != "ACTIVE":
                 continue
             if models_series:  # sleep only after a real HTTP call was made
-                time.sleep(2.0)
+                time.sleep(4.0)
             try:
                 fvs = self.forecast_adapter.fetch_forecast_with_extras(
                     model, [(lat, lon)], now, end
