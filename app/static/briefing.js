@@ -412,8 +412,7 @@ function bfRerender() {
   renderBriefingWindTable();
   if (_bfCurrentData) _bfRenderCurrentChart(_bfCurrentData.payload);
   if (_bfWindmapFramesCache) {
-    const { startTime, endTime } = bfGetRangeTimes();
-    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames, startTime, endTime);
+    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames);
   }
 }
 
@@ -658,10 +657,9 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   btn.textContent = 'Generating…';
 
   try {
-    const { startTime: gifStart, endTime: gifEnd } = bfGetRangeTimes();
+    const { endTime: gifEnd } = bfGetRangeTimes();
     const url = `/api/windmap-gif?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}`
-      + (gifStart ? `&start_iso=${encodeURIComponent(gifStart)}` : '')
-      + (gifEnd   ? `&end_iso=${encodeURIComponent(gifEnd)}`     : '');
+      + (gifEnd ? `&end_iso=${encodeURIComponent(gifEnd)}` : '');
     const resp = await fetch(url);
     if (!resp.ok) {
       const msg = await resp.text();
@@ -717,7 +715,7 @@ async function bfFetchAndRenderWindmaps() {
     _bfWindmapFramesCache.startTime === startTime &&
     _bfWindmapFramesCache.endTime   === endTime
   ) {
-    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames, startTime, endTime);
+    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames);
     return;
   }
 
@@ -727,13 +725,12 @@ async function bfFetchAndRenderWindmaps() {
 
   try {
     const url = `/api/windmap-frames?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}&model=${encodeURIComponent(gifModel)}&step=${step}`
-      + (startTime ? `&start_iso=${encodeURIComponent(startTime)}` : '')
-      + (endTime   ? `&end_iso=${encodeURIComponent(endTime)}`     : '');
+      + (endTime ? `&end_iso=${encodeURIComponent(endTime)}` : '');
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
     const data = await resp.json();
     _bfWindmapFramesCache = { lat: pos.lat, lon: pos.lon, hours, step, model: gifModel, startTime, endTime, frames: data.frames };
-    _bfRenderWindmapFrames(data.frames, startTime, endTime);
+    _bfRenderWindmapFrames(data.frames);
     if (metaEl) metaEl.textContent = `— ${data.frames.length} frames`;
   } catch (err) {
     grid.innerHTML = `<p style=”color:#dc2626;padding:8px”>Failed: ${err.message}</p>`;
@@ -741,30 +738,24 @@ async function bfFetchAndRenderWindmaps() {
   }
 }
 
-function _bfRenderWindmapFrames(frames, startTime, endTime) {
+function _bfRenderWindmapFrames(frames) {
   const panel = document.getElementById('bfWindmapsPanel');
   const grid  = document.getElementById('bfWindmapsGrid');
-  if (!panel || !grid || !frames?.length) return;
+  if (!panel || !grid || !frames?.length) { if (panel) panel.style.display = 'none'; return; }
 
-  // Use Date-based comparison to avoid Z-suffix string mismatch
-  const startMs = startTime ? bfParseUtc(startTime).getTime() : null;
-  const endMs   = endTime   ? bfParseUtc(endTime).getTime()   : null;
-  const visible = frames.filter(f => {
-    if (!f.time_utc) return true;
-    const fMs = new Date(f.time_utc).getTime();
-    if (startMs && fMs < startMs) return false;
-    if (endMs   && fMs > endMs)   return false;
-    return true;
+  grid.innerHTML = '';
+  frames.forEach(f => {
+    const fig = document.createElement('figure');
+    fig.className = 'bf-windmap-fig';
+    const img = document.createElement('img');
+    img.src = 'data:image/png;base64,' + f.png_b64;
+    img.alt = f.label || '';
+    const cap = document.createElement('figcaption');
+    cap.textContent = f.label || '';
+    fig.appendChild(img);
+    fig.appendChild(cap);
+    grid.appendChild(fig);
   });
-
-  if (!visible.length) { panel.style.display = 'none'; return; }
-
-  grid.innerHTML = visible.map(f =>
-    `<figure class=”bf-windmap-fig”>
-       <img src=”data:image/png;base64,${f.png_b64}” alt=”${f.label}” />
-       <figcaption>${f.label}</figcaption>
-     </figure>`
-  ).join('');
   panel.style.display = '';
 }
 
