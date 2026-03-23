@@ -59,8 +59,9 @@ TILE_UA   = "wind-validation/1.0 (contact: admin@jellelourens.nl)"
 FIG_W_PX  = 900
 FIG_H_PX  = 680
 
-# Barb density target — AROME025 (0.025°) needs stride=2 → one barb per ~5 km
-BARB_SPACING_DEG = 0.05
+# Target one wind barb per ~4 km regardless of model resolution
+# AROME001 (0.01°) → stride≈4;  AROME0025 (0.025°) → stride≈2;  ICON-D2 (0.02°) → stride≈2
+BARB_SPACING_DEG = 0.04
 
 
 # ── OSM tile helpers ──────────────────────────────────────────────────────────
@@ -543,10 +544,7 @@ def _fetch_meteofetch(
     max_hours: int,
 ) -> tuple:
     try:
-        if model == "arome025":
-            from meteofetch import Arome0025 as Model  # noqa: PLC0415
-        else:
-            from meteofetch import Arpege025 as Model  # noqa: PLC0415
+        import meteofetch as _mf  # noqa: PLC0415
     except ImportError as exc:
         raise RuntimeError(
             f"meteofetch import failed: {exc}\n"
@@ -554,17 +552,45 @@ def _fetch_meteofetch(
             "Linux: apt-get install libeccodes-dev && pip install meteofetch"
         ) from exc
 
-    logger.info("Fetching %s GRIB (SP1) via meteofetch…", model)
-    try:
-        ds = Model.get_latest_forecast(paquet="SP1")
-    except Exception as exc:
-        raise RuntimeError(f"meteofetch download failed: {exc}") from exc
+    if model == "arpege025":
+        candidates = [("arpege025", _mf.Arpege025)]
+    else:
+        # Try Arome001 (1 km) first; fall back to Arome0025 (2.5 km) if bbox is outside domain
+        candidates = [("arome001", _mf.Arome001), ("arome025", _mf.Arome0025)]
 
-    if "u10" not in ds or "v10" not in ds:
-        raise ValueError(
-            f"u10/v10 absent from {model}. Keys: {list(ds.keys())}"
-        )
-    return _clip_and_pack(ds["u10"], ds["v10"], lat_min, lat_max, lon_min, lon_max, max_hours)
+    last_exc: Exception | None = None
+    for name, Model in candidates:
+        logger.info("Fetching %s GRIB (SP1) via meteofetch…", name)
+        try:
+            ds = Model.get_latest_forecast(paquet="SP1")
+        except Exception as exc:
+            logger.warning("meteofetch %s failed: %s", name, exc)
+            last_exc = exc
+            continue
+
+        if "u10" not in ds or "v10" not in ds:
+            logger.warning("%s: u10/v10 absent (keys: %s), trying next", name, list(ds.keys()))
+            continue
+
+        try:
+            result = _clip_and_pack(
+                ds["u10"], ds["v10"],
+                lat_min, lat_max, lon_min, lon_max,
+                max_hours,
+            )
+            logger.info("Using %s (%d frames)", name, result[2].shape[0])
+            return result
+        except ValueError as exc:
+            # bbox outside this model's domain — try next resolution
+            logger.info("%s bbox miss (%s), trying fallback", name, exc)
+            last_exc = exc
+            continue
+
+    raise RuntimeError(
+        f"All meteofetch candidates failed for bbox "
+        f"({lat_min:.2f}–{lat_max:.2f} N, {lon_min:.2f}–{lon_max:.2f} E). "
+        f"Last error: {last_exc}"
+    )
 
 
 # ── dispatcher ─────────────────────────────────────────────────────────────────
