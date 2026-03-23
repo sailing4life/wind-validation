@@ -411,6 +411,10 @@ function bfRerender() {
   renderBriefingEnsembleCharts();
   renderBriefingWindTable();
   if (_bfCurrentData) _bfRenderCurrentChart(_bfCurrentData.payload);
+  if (_bfWindmapFramesCache) {
+    const { startTime, endTime } = bfGetRangeTimes();
+    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames, startTime, endTime);
+  }
 }
 
 // â”€â”€ Orchestrator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -613,7 +617,13 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   const pos = currentLatLon();
   if (!pos) { alert('No location set — run a forecast first.'); return; }
 
-  const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  const { endTime } = bfGetRangeTimes();
+  const hoursDefault = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  let hours = hoursDefault;
+  if (endTime) {
+    const hoursToEnd = Math.ceil((bfParseUtc(endTime) - new Date()) / 3_600_000);
+    if (hoursToEnd > 0) hours = Math.min(120, hoursToEnd);
+  }
   const gifModel = _winnerModelId || 'harmonie_nl';
 
   btn.disabled = true;
@@ -657,19 +667,27 @@ async function bfFetchAndRenderWindmaps() {
   const pos = currentLatLon();
   if (!pos) { panel.style.display = 'none'; return; }
 
-  const hours    = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  const { startTime, endTime } = bfGetRangeTimes();
+  const hoursDefault = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  let hours = hoursDefault;
+  if (endTime) {
+    const hoursToEnd = Math.ceil((bfParseUtc(endTime) - new Date()) / 3_600_000);
+    if (hoursToEnd > 0) hours = Math.min(120, hoursToEnd);
+  }
   const step     = parseInt(document.getElementById('bfWindmapStep')?.value || '3', 10);
   const gifModel = _winnerModelId || 'harmonie_nl';
 
   if (
     _bfWindmapFramesCache &&
-    _bfWindmapFramesCache.lat   === pos.lat &&
-    _bfWindmapFramesCache.lon   === pos.lon &&
-    _bfWindmapFramesCache.hours === hours &&
-    _bfWindmapFramesCache.step  === step &&
-    _bfWindmapFramesCache.model === gifModel
+    _bfWindmapFramesCache.lat       === pos.lat &&
+    _bfWindmapFramesCache.lon       === pos.lon &&
+    _bfWindmapFramesCache.hours     === hours &&
+    _bfWindmapFramesCache.step      === step &&
+    _bfWindmapFramesCache.model     === gifModel &&
+    _bfWindmapFramesCache.startTime === startTime &&
+    _bfWindmapFramesCache.endTime   === endTime
   ) {
-    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames);
+    _bfRenderWindmapFrames(_bfWindmapFramesCache.frames, startTime, endTime);
     return;
   }
 
@@ -682,8 +700,8 @@ async function bfFetchAndRenderWindmaps() {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
     const data = await resp.json();
-    _bfWindmapFramesCache = { lat: pos.lat, lon: pos.lon, hours, step, model: gifModel, frames: data.frames };
-    _bfRenderWindmapFrames(data.frames);
+    _bfWindmapFramesCache = { lat: pos.lat, lon: pos.lon, hours, step, model: gifModel, startTime, endTime, frames: data.frames };
+    _bfRenderWindmapFrames(data.frames, startTime, endTime);
     if (metaEl) metaEl.textContent = `— ${data.frames.length} frames`;
   } catch (err) {
     grid.innerHTML = `<p style=”color:#dc2626;padding:8px”>Failed: ${err.message}</p>`;
@@ -691,11 +709,21 @@ async function bfFetchAndRenderWindmaps() {
   }
 }
 
-function _bfRenderWindmapFrames(frames) {
+function _bfRenderWindmapFrames(frames, startTime, endTime) {
   const panel = document.getElementById('bfWindmapsPanel');
   const grid  = document.getElementById('bfWindmapsGrid');
   if (!panel || !grid || !frames?.length) return;
-  grid.innerHTML = frames.map(f =>
+
+  const visible = frames.filter(f => {
+    if (!f.time_utc) return true;
+    if (startTime && f.time_utc < startTime) return false;
+    if (endTime   && f.time_utc > endTime)   return false;
+    return true;
+  });
+
+  if (!visible.length) { panel.style.display = 'none'; return; }
+
+  grid.innerHTML = visible.map(f =>
     `<figure class=”bf-windmap-fig”>
        <img src=”data:image/png;base64,${f.png_b64}” alt=”${f.label}” />
        <figcaption>${f.label}</figcaption>

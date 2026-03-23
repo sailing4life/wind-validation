@@ -122,12 +122,21 @@ def _np_dt_to_label(t) -> str:
         return str(t)[:16]
 
 
+def _np_dt_to_iso(t) -> str:
+    try:
+        ts_s = int(np.datetime64(t, "s").astype("int64"))
+        dt = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=ts_s)
+        return dt.strftime("%Y-%m-%dT%H:%M:00Z")
+    except Exception:
+        return ""
+
+
 def _fetch_grib_grid(
     lat_min: float, lat_max: float,
     lon_min: float, lon_max: float,
     model: str = "arpege025",
     max_hours: int = 48,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
     """Fetch native-grid U10 / V10 via meteofetch.
 
     Returns
@@ -201,9 +210,10 @@ def _fetch_grib_grid(
     t_vals = u_clip.time.values[:max_hours]
     u_arr  = u_arr[:max_hours]
     v_arr  = v_arr[:max_hours]
-    labels = [_np_dt_to_label(t) for t in t_vals]
+    labels     = [_np_dt_to_label(t) for t in t_vals]
+    times_utc  = [_np_dt_to_iso(t)   for t in t_vals]
 
-    return lats, lons, u_arr, v_arr, labels
+    return lats, lons, u_arr, v_arr, labels, times_utc
 
 
 # ── frame rendering ────────────────────────────────────────────────────────────
@@ -342,7 +352,7 @@ def generate_wind_gif(
                                lat_min, lat_max, lon_min, lon_max,
                                mf_model, hours)
         basemap, extent = bmap_fut.result()
-        lats, lons, u_arr, v_arr, labels = grid_fut.result()
+        lats, lons, u_arr, v_arr, labels, _ = grid_fut.result()
 
     # Compute barb stride so barb spacing ≈ BARB_SPACING_DEG
     lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
@@ -394,13 +404,13 @@ def generate_wind_frames(
                                lat_min, lat_max, lon_min, lon_max,
                                mf_model, hours)
         basemap, extent = bmap_fut.result()
-        lats, lons, u_arr, v_arr, labels = grid_fut.result()
+        lats, lons, u_arr, v_arr, labels, times_utc = grid_fut.result()
 
     lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
     barb_stride = max(1, round(BARB_SPACING_DEG / lat_res))
 
     result: list[dict] = []
-    for t_idx, label in enumerate(labels):
+    for t_idx, (label, time_utc) in enumerate(zip(labels, times_utc)):
         if t_idx % max(1, step_hours) != 0:
             continue
         img = _render_frame(
@@ -415,6 +425,7 @@ def generate_wind_frames(
         buf.seek(0)
         result.append({
             "label": label,
+            "time_utc": time_utc,
             "png_b64": base64.b64encode(buf.read()).decode(),
         })
 
