@@ -293,11 +293,119 @@ function renderBriefingWindTable() {
   wrap.appendChild(scrollWrap);
 }
 
+// â”€â”€ Ocean current chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let _bfCurrentData = null;   // cached fetch result { lat, lon, hours }
+
+async function bfFetchAndRenderCurrent() {
+  const panel   = document.getElementById('bfCurrentPanel');
+  const chartDiv= document.getElementById('bfCurrentChart');
+  const metaEl  = document.getElementById('bfCurrentMeta');
+  if (!panel || !chartDiv) return;
+
+  const pos = currentLatLon();
+  if (!pos) { panel.style.display = 'none'; return; }
+
+  const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+
+  // Re-use cached data if location/hours unchanged
+  if (
+    _bfCurrentData &&
+    _bfCurrentData.lat === pos.lat &&
+    _bfCurrentData.lon === pos.lon &&
+    _bfCurrentData.hours === hours
+  ) {
+    _bfRenderCurrentChart(_bfCurrentData.payload);
+    return;
+  }
+
+  if (metaEl) metaEl.textContent = '— loading…';
+  panel.style.display = '';
+
+  try {
+    const url = `/api/ocean-current?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    _bfCurrentData = { lat: pos.lat, lon: pos.lon, hours, payload };
+    _bfRenderCurrentChart(payload);
+    if (metaEl) metaEl.textContent = `— ${pos.lat.toFixed(3)}N ${pos.lon.toFixed(3)}E`;
+  } catch (err) {
+    if (metaEl) metaEl.textContent = `— unavailable (${err.message})`;
+    panel.style.display = 'none';
+  }
+}
+
+function _bfRenderCurrentChart(payload) {
+  const panel   = document.getElementById('bfCurrentPanel');
+  const chartDiv= document.getElementById('bfCurrentChart');
+  if (!panel || !chartDiv) return;
+
+  const { startTime, endTime } = bfGetRangeTimes();
+  const allHours = payload.hours ?? [];
+  const fh = allHours.filter(h =>
+    (!startTime || h.time_utc >= startTime) &&
+    (!endTime   || h.time_utc <= endTime)
+  );
+
+  if (!fh.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+
+  const times  = fh.map(h => bfLocalISO(h.time_utc));
+  const speeds = fh.map(h => h.speed_kt);
+  const dirs   = fh.map(h => h.direction_deg);
+
+  // Dynamic y-axis for direction
+  const validDirs = dirs.filter(d => d != null);
+  const dMin = validDirs.length ? Math.min(...validDirs) : 0;
+  const dMax = validDirs.length ? Math.max(...validDirs) : 360;
+  const dPad = Math.max((dMax - dMin) * 0.1, 5);
+  const dirRange = [Math.max(0, Math.floor(dMin - dPad)), Math.min(360, Math.ceil(dMax + dPad))];
+  const dirSpread = dirRange[1] - dirRange[0];
+  const dirDtick = dirSpread <= 30 ? 5 : dirSpread <= 60 ? 10 : dirSpread <= 120 ? 20 : dirSpread <= 180 ? 30 : 45;
+
+  const traces = [
+    {
+      x: times, y: speeds, name: 'Speed (kt)',
+      type: 'scatter', mode: 'lines+markers+text',
+      line: { color: '#0891b2', width: 2 },
+      marker: { color: '#0891b2', size: 4 },
+      text: speeds.map(v => v != null ? v.toFixed(1) : ''),
+      textposition: 'top center',
+      textfont: { size: 8, color: '#0e7490' },
+      yaxis: 'y1',
+    },
+    {
+      x: times, y: dirs, name: 'Direction (°)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#7c3aed', width: 1.5 },
+      marker: { color: '#7c3aed', size: 3 },
+      yaxis: 'y2',
+    },
+  ];
+
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 260,
+    margin: { t: 20, b: 30, l: 50, r: 60 },
+    legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false, rangemode: 'tozero' },
+    yaxis2: {
+      title: '°', overlaying: 'y', side: 'right',
+      range: dirRange, dtick: dirDtick,
+      gridcolor: 'transparent',
+      tickfont: { color: '#7c3aed' },
+      titlefont: { color: '#7c3aed' },
+    },
+  }, { responsive: true, displayModeBar: false });
+}
+
 // â”€â”€ Re-render charts + table (called by range selects) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function bfRerender() {
   renderBriefingBestChart();
   renderBriefingEnsembleCharts();
   renderBriefingWindTable();
+  if (_bfCurrentData) _bfRenderCurrentChart(_bfCurrentData.payload);
 }
 
 // â”€â”€ Orchestrator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -313,6 +421,7 @@ function renderBriefingTab() {
 
   bfInitRange();
   bfRerender();
+  bfFetchAndRenderCurrent();
 }
 
 // â”€â”€ Tab click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -500,18 +609,7 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
   if (!pos) { alert('No location set — run a forecast first.'); return; }
 
   const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
-
-  // Prefer a model that covers the area; fall back to arpege025 (global)
-  const modelMap = {
-    harmonie_nl: 'arpege025',
-    arome_hd:    'arome025',
-    icon_eu:     'arpege025',
-    icon_it:     'arpege025',
-    arpege:      'arpege025',
-    ecmwf_global:'arpege025',
-  };
-  const fcModel = _winnerModelId || '';
-  const gifModel = modelMap[fcModel] || 'arpege025';
+  const gifModel = _winnerModelId || 'harmonie_nl';
 
   btn.disabled = true;
   const orig = btn.textContent;

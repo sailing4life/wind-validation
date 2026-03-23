@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -118,28 +119,38 @@ def freshness() -> dict:
     }
 
 
+def _windmap_model_params(model_id: str) -> tuple[str, str]:
+    """Map a forecast model ID to (endpoint_url, model_param) for Open-Meteo."""
+    model_map = {
+        "harmonie_nl":  (SETTINGS.openmeteo_knmi_url,     SETTINGS.openmeteo_knmi_model),
+        "arome_hd":     (SETTINGS.openmeteo_arome_hd_url, SETTINGS.openmeteo_arome_hd_model),
+        "icon_eu":      (SETTINGS.openmeteo_icon_eu_url,  SETTINGS.openmeteo_icon_eu_model),
+        "arpege":       (SETTINGS.openmeteo_arpege_url,   SETTINGS.openmeteo_arpege_model),
+        "ecmwf_global": (SETTINGS.openmeteo_ecmwf_url,    SETTINGS.openmeteo_ecmwf_model),
+    }
+    return model_map.get(model_id, model_map["harmonie_nl"])
+
+
 @app.get("/api/windmap-gif")
 async def windmap_gif(
     lat:   float = Query(..., ge=-90.0,  le=90.0),
     lon:   float = Query(..., ge=-180.0, le=180.0),
     hours: int   = Query(48,  ge=1,      le=120),
-    model: str   = Query("arpege025"),
+    model: str   = Query("harmonie_nl"),
 ) -> Response:
-    """Generate an animated wind-map GIF using Météo-France gridded forecasts.
+    """Generate an animated wind-map GIF via Open-Meteo point-forecast grid."""
+    from .windmap import generate_wind_gif  # lazy import — only needed when called
 
-    Supported *model* values: ``arpege025`` (global 0.25°, default) or
-    ``arome025`` (France + neighbours, 0.025°).
-    """
-    from .windmap import generate_wind_gif  # lazy import — heavy deps
+    endpoint_url, model_param = _windmap_model_params(model)
 
     try:
         gif_bytes: bytes = await asyncio.to_thread(
-            generate_wind_gif, lat, lon, hours, model
+            generate_wind_gif, lat, lon, hours, endpoint_url, model_param,
         )
-    except RuntimeError as exc:
-        return Response(content=str(exc), status_code=503, media_type="text/plain")
     except ValueError as exc:
         return Response(content=str(exc), status_code=400, media_type="text/plain")
+    except Exception as exc:
+        return Response(content=str(exc), status_code=503, media_type="text/plain")
 
     filename = f"windmap_{lat:.3f}N_{lon:.3f}E_{model}.gif"
     return Response(
@@ -147,3 +158,39 @@ async def windmap_gif(
         media_type="image/gif",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/ocean-current")
+async def ocean_current(
+    lat:   float = Query(..., ge=-90.0,  le=90.0),
+    lon:   float = Query(..., ge=-180.0, le=180.0),
+    hours: int   = Query(48,  ge=1,      le=120),
+) -> dict:
+    """Fetch hourly ocean current (speed in kt + direction) from Open-Meteo marine API."""
+    params = {
+        "latitude":  lat,
+        "longitude": lon,
+        "hourly":    "ocean_current_velocity,ocean_current_direction",
+        "wind_speed_unit": "kn",    # request knots directly
+        "forecast_hours": min(hours, 120),
+        "timezone": "UTC",
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(SETTINGS.openmeteo_marine_url, params=params)
+        resp.raise_for_status()
+
+    data = resp.json()
+    hourly = data.get("hourly", {})
+    times  = hourly.get("time", [])
+    speeds = hourly.get("ocean_current_velocity", [])
+    dirs   = hourly.get("ocean_current_direction", [])
+
+    hours_out = []
+    for t, s, d in zip(times, speeds, dirs):
+        hours_out.append({
+            "time_utc":    t if t.endswith("Z") else t + "Z",
+            "speed_kt":    round(float(s), 2) if s is not None else None,
+            "direction_deg": round(float(d), 1) if d is not None else None,
+        })
+
+    return {"hours": hours_out}

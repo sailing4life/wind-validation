@@ -3,10 +3,7 @@ uvicorn==0.35.0
 pydantic==2.11.7
 pytest==8.4.1
 httpx==0.28.1
-# Wind map GIF generation
-# On macOS, eccodes must be installed first: brew install eccodes
-# On Debian/Ubuntu: apt-get install -y libeccodes-dev
-meteofetch
+# Wind map GIF generation (matplotlib + Pillow ship prebuilt wheels, no system deps needed)
 matplotlib
 Pillow
 numpy

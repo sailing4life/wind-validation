@@ -1,14 +1,13 @@
 """Wind map GIF generator.
 
-Fetches gridded 10-m wind (U10 / V10) from Météo-France via the *meteofetch*
-package, renders each forecast hour as a matplotlib frame with an
+Fetches a 7×7 grid of 10-m wind forecasts from Open-Meteo (single batch
+request), renders each forecast hour as a matplotlib frame on an
 OpenStreetMap basemap, and encodes the result as an animated GIF.
 
-Runs **synchronously** — call via ``asyncio.to_thread()`` from async endpoints.
+No eccodes / GRIB2 dependency — uses only matplotlib, Pillow, numpy and
+httpx (already in the project).
 
-Requirements (in addition to the project base deps):
-    pip install meteofetch matplotlib Pillow numpy
-On macOS you may also need:  brew install eccodes
+Runs **synchronously** — call via ``asyncio.to_thread()`` from async endpoints.
 """
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import matplotlib
-matplotlib.use("Agg")                   # non-interactive backend, must be set first
+matplotlib.use("Agg")               # non-interactive backend, set before other matplotlib imports
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
@@ -28,14 +27,18 @@ from PIL import Image
 
 logger = logging.getLogger("wind_validation.windmap")
 
-# ── constants ─────────────────────────────────────────────────────────────────
-OSM_ZOOM   = 8
-TILE_PX    = 256
-FRAME_MS   = 600            # ms per GIF frame
-MAX_WS_MS  = 18.0           # m/s ≈ 35 kt  — top of colour scale
-MS_TO_KT   = 1.943844
-OSM_UA     = "wind-validation/1.0"
-AREA_DEG   = 1.75           # half-extent of map in degrees (lat & lon each side)
+# ── grid & display constants ──────────────────────────────────────────────────
+GRID_N       = 7        # N×N forecast points
+LAT_SPACING  = 0.25     # degrees between rows   (~28 km)
+LON_SPACING  = 0.30     # degrees between columns (~21 km at 52°N)
+OSM_ZOOM     = 8
+TILE_PX      = 256
+FRAME_MS     = 600      # ms per GIF frame
+MAX_WS_MS    = 18.0     # m/s ≈ 35 kt  — top of colour scale
+MS_TO_KT     = 1.943844
+OSM_UA       = "wind-validation/1.0"
+FIG_W_PX     = 860
+FIG_H_PX     = 640
 
 
 # ── OSM tile helpers ──────────────────────────────────────────────────────────
@@ -69,12 +72,11 @@ def _get_basemap(
     lon_min: float, lon_max: float,
     zoom: int = OSM_ZOOM,
 ) -> tuple[Image.Image, tuple[float, float, float, float]]:
-    """Download and stitch OSM tiles covering the bbox.
+    """Stitch OSM tiles covering the bbox.
 
-    Returns ``(image, (lon_min, lon_max, lat_min, lat_max))`` where the extent
-    matches the stitched canvas so it can be passed directly to Axes.imshow.
+    Returns ``(image, (lon_min, lon_max, lat_min, lat_max))`` extent.
     """
-    x0, y0 = _tile_xy(lat_max, lon_min, zoom)   # top-left  (y inc. southward)
+    x0, y0 = _tile_xy(lat_max, lon_min, zoom)   # top-left  (y increases south)
     x1, y1 = _tile_xy(lat_min, lon_max, zoom)   # bottom-right
 
     cols, rows = x1 - x0 + 1, y1 - y0 + 1
@@ -95,126 +97,62 @@ def _get_basemap(
 
     lat_nw, lon_nw = _tile_nw(x0,     y0,     zoom)
     lat_se, lon_se = _tile_nw(x1 + 1, y1 + 1, zoom)
-    return canvas, (lon_nw, lon_se, lat_se, lat_nw)   # (lon_min, lon_max, lat_min, lat_max)
+    return canvas, (lon_nw, lon_se, lat_se, lat_nw)  # (lon_min, lon_max, lat_min, lat_max)
 
 
-# ── meteofetch wind data ───────────────────────────────────────────────────────
+# ── Open-Meteo wind grid fetch ────────────────────────────────────────────────
 
-def _np_dt_to_label(t) -> str:
-    """Convert a numpy datetime64 value to a human-readable UTC string."""
-    try:
-        ts_s = int(np.datetime64(t, "s").astype("int64"))
-        dt = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=ts_s)
-        return dt.strftime("%d %b  %H:%M UTC")
-    except Exception:
-        return str(t)[:16]
+def _fetch_openmeteo_wind_grid(
+    coords: list[tuple[float, float]],
+    hours: int,
+    endpoint_url: str,
+    model_param: str,
+) -> list[dict]:
+    """Fetch wind_speed_10m + wind_direction_10m for all grid coords in one call.
 
-
-def _fetch_meteofrance_grid(
-    lat_min: float, lat_max: float,
-    lon_min: float, lon_max: float,
-    model: str = "arpege025",
-    max_hours: int = 48,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Fetch gridded U10 / V10 from Météo-France via meteofetch.
-
-    Returns ``(lats, lons, u10, v10, time_labels)`` where
-    ``u10`` and ``v10`` are shaped ``(T, Y, X)``.
-
-    Supported *model* values: ``"arpege025"`` (global, 0.25°) or
-    ``"arome025"`` (France + neighbours, 0.025°).
+    Open-Meteo accepts comma-separated lat/lon lists and returns a JSON array,
+    one element per location in the same order.
     """
-    try:
-        if model == "arome025":
-            from meteofetch import Arome025 as Model  # noqa: PLC0415
-        else:
-            from meteofetch import Arpege025 as Model  # noqa: PLC0415
-    except ImportError as exc:
-        raise RuntimeError(
-            "meteofetch is not installed. Install it with:\n"
-            "  pip install meteofetch\n"
-            "On macOS you may also need:  brew install eccodes"
-        ) from exc
+    params: dict = {
+        "latitude":  ",".join(str(lat) for lat, _ in coords),
+        "longitude": ",".join(str(lon) for _, lon in coords),
+        "hourly":    "wind_speed_10m,wind_direction_10m",
+        "wind_speed_unit": "ms",
+        "forecast_hours": min(hours, 120),
+        "timezone": "UTC",
+    }
+    if model_param:
+        params["models"] = model_param
 
-    logger.info("Fetching %s gridded wind via meteofetch (paquet=SP2)…", model)
-    try:
-        ds = Model.get_latest_forecast(paquet="SP2")
-    except Exception as exc:
-        raise RuntimeError(f"meteofetch forecast fetch failed: {exc}") from exc
+    with httpx.Client(timeout=30) as c:
+        resp = c.get(endpoint_url, params=params)
+        resp.raise_for_status()
 
-    if "u10" not in ds or "v10" not in ds:
-        raise ValueError(
-            f"u10/v10 not found in {model} SP2 dataset. "
-            f"Available keys: {list(ds.keys())}"
-        )
-
-    u_all: object = ds["u10"]
-    v_all: object = ds["v10"]
-
-    lats_all = u_all.latitude.values    # type: ignore[attr-defined]
-    lons_all = u_all.longitude.values   # type: ignore[attr-defined]
-
-    # Longitude: wrap if needed (some models use 0–360 instead of -180–180)
-    if lons_all.max() > 180:
-        lons_all = np.where(lons_all > 180, lons_all - 360, lons_all)
-
-    lat_mask = (lats_all >= lat_min) & (lats_all <= lat_max)
-    lon_mask = (lons_all >= lon_min) & (lons_all <= lon_max)
-
-    if not lat_mask.any() or not lon_mask.any():
-        raise ValueError(
-            f"Location ({lat_min:.1f}–{lat_max:.1f} N, "
-            f"{lon_min:.1f}–{lon_max:.1f} E) not covered by {model}. "
-            "Try model='arpege025' for global coverage."
-        )
-
-    u_clip = u_all.isel(latitude=lat_mask, longitude=lon_mask)  # type: ignore[attr-defined]
-    v_clip = v_all.isel(latitude=lat_mask, longitude=lon_mask)  # type: ignore[attr-defined]
-
-    lats = u_clip.latitude.values   # type: ignore[attr-defined]
-    lons = u_clip.longitude.values  # type: ignore[attr-defined]
-    u_arr = np.array(u_clip.values, dtype=float)
-    v_arr = np.array(v_clip.values, dtype=float)
-
-    # Ensure (T, Y, X)
-    if u_arr.ndim == 2:
-        u_arr = u_arr[np.newaxis]
-        v_arr = v_arr[np.newaxis]
-
-    # Trim to requested hours
-    t_vals = u_clip.time.values  # type: ignore[attr-defined]
-    n_steps = min(len(t_vals), max_hours)
-    u_arr = u_arr[:n_steps]
-    v_arr = v_arr[:n_steps]
-    t_vals = t_vals[:n_steps]
-
-    time_labels = [_np_dt_to_label(t) for t in t_vals]
-    return lats, lons, u_arr, v_arr, time_labels
+    payload = resp.json()
+    if not isinstance(payload, list):
+        payload = [payload]
+    return payload
 
 
 # ── frame rendering ────────────────────────────────────────────────────────────
 
-FIG_W_PX = 860
-FIG_H_PX = 640
+def _wd_to_uv(speed: float, direction_deg: float) -> tuple[float, float]:
+    """Meteorological wind direction → (u_east, v_north) pointing in travel direction."""
+    rad = math.radians(direction_deg)
+    return -speed * math.sin(rad), -speed * math.cos(rad)
 
 
 def _render_frame(
-    lats: np.ndarray,
-    lons: np.ndarray,
-    u_grid: np.ndarray,
-    v_grid: np.ndarray,
+    grid_lats: list[float],
+    grid_lons: list[float],
+    speeds: list[float | None],
+    dirs: list[float | None],
     basemap: Image.Image,
     extent: tuple[float, float, float, float],
     center_lat: float,
     center_lon: float,
     label: str,
-    stride: int = 1,
 ) -> Image.Image:
-    """Render one time-step as a PIL Image.
-
-    *stride* sub-samples the grid so dense models (AROME 0.025°) don't
-    produce unreadably crowded arrows.
-    """
     lon_min, lon_max, lat_min, lat_max = extent
     lon_range = lon_max - lon_min
     lat_range = lat_max - lat_min
@@ -222,7 +160,7 @@ def _render_frame(
 
     fig, ax = plt.subplots(figsize=(FIG_W_PX / dpi, FIG_H_PX / dpi), dpi=dpi)
 
-    # Basemap (origin='upper' because OSM tiles run top-down)
+    # Basemap (origin='upper': OSM tiles run top-to-bottom)
     ax.imshow(
         basemap,
         extent=[lon_min, lon_max, lat_min, lat_max],
@@ -231,42 +169,40 @@ def _render_frame(
         zorder=0,
     )
 
-    # Sub-sample grid if needed
-    lats_s = lats[::stride]
-    lons_s = lons[::stride]
-    u_s = u_grid[::stride, ::stride]
-    v_s = v_grid[::stride, ::stride]
-
-    LON_GRID, LAT_GRID = np.meshgrid(lons_s, lats_s)
-    speeds = np.sqrt(u_s ** 2 + v_s ** 2)
-
-    # ── arrow direction correction for equirectangular projection ────────────
-    # At latitude φ, 1° lon is cos(φ) × 1° lat in km. We compensate so arrows
-    # point in the true compass direction on screen.
-    lat_c = math.radians((lat_min + lat_max) / 2)
-    # Factor that scales U (degrees-lon) relative to V (degrees-lat) on screen:
-    #   screen_pixels_per_deg_lon × u_corrected = screen_pixels_per_deg_lat × v
-    u_corr = (FIG_H_PX / FIG_W_PX) * (lon_range / lat_range) / math.cos(lat_c)
-    u_display = u_s * u_corr
-
-    # Arrow scale: MAX_WS_MS wind spans ~60 % of grid spacing in lat degrees
-    dy = abs(lats_s[1] - lats_s[0]) if len(lats_s) > 1 else 0.25
-    arrow_scale = MAX_WS_MS / (dy * 0.60)
+    # Build valid arrow arrays
+    xs, ys, u_raw, vs, cs = [], [], [], [], []
+    for lat, lon, ws, wd in zip(grid_lats, grid_lons, speeds, dirs):
+        if ws is None or wd is None:
+            continue
+        u, v = _wd_to_uv(ws, wd)
+        xs.append(lon)
+        ys.append(lat)
+        u_raw.append(u)
+        vs.append(v)
+        cs.append(ws)
 
     norm = mcolors.Normalize(vmin=0, vmax=MAX_WS_MS)
     cmap = plt.get_cmap("YlOrRd")
 
-    ax.quiver(
-        LON_GRID, LAT_GRID,
-        u_display, v_s,
-        speeds,
-        cmap=cmap, norm=norm,
-        scale=arrow_scale, scale_units="xy",
-        width=0.004, headwidth=5, headlength=6,
-        alpha=0.88, zorder=2,
-    )
+    if xs:
+        # Correct U so arrows point in the true compass direction on an
+        # equirectangular map.  At latitude φ, 1° lon = cos(φ) × 1° lat in km.
+        lat_c = math.radians((lat_min + lat_max) / 2)
+        u_corr = (FIG_H_PX / FIG_W_PX) * (lon_range / lat_range) / math.cos(lat_c)
+        us = [u * u_corr for u in u_raw]
 
-    # Colorbar in knots
+        # Scale: MAX_WS_MS arrow spans ~60 % of grid spacing (lat degrees)
+        arrow_scale = MAX_WS_MS / (LAT_SPACING * 0.60)
+
+        ax.quiver(
+            xs, ys, us, vs, cs,
+            cmap=cmap, norm=norm,
+            scale=arrow_scale, scale_units="xy",
+            width=0.004, headwidth=5, headlength=6,
+            alpha=0.88, zorder=2,
+        )
+
+    # Colorbar labelled in knots
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, ax=ax, fraction=0.028, pad=0.02)
@@ -276,12 +212,10 @@ def _render_frame(
     cb.set_ticks(ms_ticks)
     cb.set_ticklabels([f"{t * MS_TO_KT:.0f}" for t in ms_ticks], fontsize=8)
 
-    # Centre cross
-    ax.plot(
-        center_lon, center_lat,
-        marker="x", color="#1d4ed8",
-        markersize=11, markeredgewidth=2.2, zorder=3,
-    )
+    # Centre location marker
+    ax.plot(center_lon, center_lat,
+            marker="x", color="#1d4ed8",
+            markersize=11, markeredgewidth=2.2, zorder=3)
 
     ax.set_xlim(lon_min, lon_max)
     ax.set_ylim(lat_min, lat_max)
@@ -308,13 +242,10 @@ def _to_gif(frames: list[Image.Image], duration_ms: int) -> bytes:
     ]
     buf = io.BytesIO()
     palette_frames[0].save(
-        buf,
-        format="GIF",
-        save_all=True,
-        append_images=palette_frames[1:],
-        loop=0,
-        duration=duration_ms,
-        optimize=False,   # optimize=True can corrupt palette frames
+        buf, format="GIF",
+        save_all=True, append_images=palette_frames[1:],
+        loop=0, duration=duration_ms,
+        optimize=False,
     )
     buf.seek(0)
     return buf.read()
@@ -325,67 +256,90 @@ def _to_gif(frames: list[Image.Image], duration_ms: int) -> bytes:
 def generate_wind_gif(
     lat: float,
     lon: float,
-    hours: int = 48,
-    model: str = "arpege025",
+    hours: int,
+    endpoint_url: str,
+    model_param: str,
 ) -> bytes:
     """Generate an animated GIF of 10-m wind vectors on an OSM basemap.
 
     Parameters
     ----------
-    lat, lon : float
-        Centre of the map in decimal degrees.
-    hours : int
-        Number of forecast hours to include (capped at model limit).
-    model : str
-        ``"arpege025"`` (global, 0.25°, good for North Sea / NL) or
-        ``"arome025"`` (0.025°, France + neighbours, higher resolution).
+    lat, lon      : Centre of the map in decimal degrees.
+    hours         : Number of forecast hours (capped at 120).
+    endpoint_url  : Open-Meteo forecast API URL for the chosen model.
+    model_param   : Open-Meteo ``models=`` parameter value.
 
     Returns
     -------
-    bytes
-        Raw GIF file contents.
+    bytes  Raw GIF file contents.
     """
-    import concurrent.futures  # local to keep top-level imports light
+    import concurrent.futures
 
-    lat_min = lat - AREA_DEG
-    lat_max = lat + AREA_DEG
-    lon_min = lon - AREA_DEG
-    lon_max = lon + AREA_DEG
+    half = GRID_N // 2
 
-    # Fetch basemap tiles and wind data in parallel threads
+    coords: list[tuple[float, float]] = [
+        (round(lat + (i - half) * LAT_SPACING, 4),
+         round(lon + (j - half) * LON_SPACING, 4))
+        for i in range(GRID_N)
+        for j in range(GRID_N)
+    ]
+    grid_lats = [c[0] for c in coords]
+    grid_lons = [c[1] for c in coords]
+
+    # Basemap extent (slightly wider than the arrow grid)
+    pad_lat = (half + 0.5) * LAT_SPACING
+    pad_lon = (half + 0.5) * LON_SPACING
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        bmap_fut = pool.submit(_get_basemap, lat_min, lat_max, lon_min, lon_max)
+        bmap_fut = pool.submit(
+            _get_basemap,
+            lat - pad_lat, lat + pad_lat,
+            lon - pad_lon, lon + pad_lon,
+        )
         wind_fut = pool.submit(
-            _fetch_meteofrance_grid,
-            lat_min, lat_max, lon_min, lon_max,
-            model, hours,
+            _fetch_openmeteo_wind_grid,
+            coords, hours, endpoint_url, model_param,
         )
         basemap, extent = bmap_fut.result()
-        lats, lons, u_arr, v_arr, time_labels = wind_fut.result()
+        wind_payloads = wind_fut.result()
 
-    logger.info(
-        "Rendering %d frames for %.4fN %.4fE (%s)…",
-        len(time_labels), lat, lon, model,
-    )
+    if not wind_payloads:
+        raise ValueError("No wind data returned from Open-Meteo")
 
-    # For high-res AROME (0.025°) sub-sample so arrows aren't too crowded
-    grid_spacing_lat = abs(lats[1] - lats[0]) if len(lats) > 1 else 0.25
-    stride = max(1, round(0.25 / grid_spacing_lat))   # target ~0.25° arrow spacing
+    times = wind_payloads[0].get("hourly", {}).get("time", [])
+    if not times:
+        raise ValueError("Empty time series from Open-Meteo")
+
+    logger.info("Rendering %d frames for %.4fN %.4fE…", len(times), lat, lon)
 
     frames: list[Image.Image] = []
-    for t_idx, label in enumerate(time_labels):
-        frame = _render_frame(
-            lats=lats,
-            lons=lons,
-            u_grid=u_arr[t_idx],
-            v_grid=v_arr[t_idx],
-            basemap=basemap,
-            extent=extent,
-            center_lat=lat,
-            center_lon=lon,
-            label=label,
-            stride=stride,
-        )
-        frames.append(frame)
+    for t_idx, t_raw in enumerate(times):
+        speeds_t: list[float | None] = []
+        dirs_t:   list[float | None] = []
+
+        for pl in wind_payloads:
+            h = pl.get("hourly", {})
+            ws_list = h.get("wind_speed_10m", [])
+            wd_list = h.get("wind_direction_10m", [])
+            try:
+                ws = float(ws_list[t_idx]) if t_idx < len(ws_list) and ws_list[t_idx] is not None else None
+                wd = float(wd_list[t_idx]) if t_idx < len(wd_list) and wd_list[t_idx] is not None else None
+            except (TypeError, ValueError):
+                ws, wd = None, None
+            speeds_t.append(ws)
+            dirs_t.append(wd)
+
+        try:
+            dt = datetime.fromisoformat(t_raw).replace(tzinfo=UTC)
+            label = dt.strftime("%d %b  %H:%M UTC")
+        except ValueError:
+            label = t_raw
+
+        frames.append(_render_frame(
+            grid_lats, grid_lons,
+            speeds_t, dirs_t,
+            basemap, extent,
+            lat, lon, label,
+        ))
 
     return _to_gif(frames, FRAME_MS)
