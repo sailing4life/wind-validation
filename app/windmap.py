@@ -52,7 +52,10 @@ TILE_PX   = 256
 FRAME_MS  = 600       # ms per GIF frame
 MAX_WS_KT = 35.0      # top of colour scale (knots)
 MS_TO_KT  = 1.943844
-OSM_UA    = "wind-validation/1.0"
+# CartoDB Positron — clean light-grey basemap, good for wind overlays
+TILE_URL  = "https://{sub}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+TILE_SUBS = ("a", "b", "c", "d")
+TILE_UA   = "wind-validation/1.0 (contact: admin@jellelourens.nl)"
 FIG_W_PX  = 900
 FIG_H_PX  = 680
 
@@ -78,8 +81,9 @@ def _tile_nw(x: int, y: int, zoom: int) -> tuple[float, float]:
 
 
 def _fetch_one_tile(x: int, y: int, zoom: int) -> Image.Image:
-    url = f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png"
-    with httpx.Client(headers={"User-Agent": OSM_UA}, timeout=15) as c:
+    sub = TILE_SUBS[(x + y) % len(TILE_SUBS)]
+    url = TILE_URL.format(sub=sub, z=zoom, x=x, y=y)
+    with httpx.Client(headers={"User-Agent": TILE_UA}, timeout=15) as c:
         resp = c.get(url)
         resp.raise_for_status()
     return Image.open(io.BytesIO(resp.content)).convert("RGB")
@@ -250,18 +254,22 @@ def _render_frame(
         origin="upper", aspect="auto", zorder=0,
     )
 
-    # ── 2. Wind-speed shading — full native resolution ─────────────────────
+    # ── 2. Wind-speed shading — smooth filled contours ────────────────────
     speeds_kt = np.sqrt(u_ms**2 + v_ms**2) * MS_TO_KT
     speeds_kt = np.where(np.isfinite(speeds_kt), speeds_kt, 0.0)
 
     LON_MESH, LAT_MESH = np.meshgrid(lons, lats)
     norm_shade = mcolors.Normalize(vmin=0, vmax=MAX_WS_KT)
-    cmap_shade = plt.get_cmap("YlOrRd")
+    cmap_shade = mcolors.LinearSegmentedColormap.from_list(
+        "wind_kt", ["#3b82f6", "#22c55e", "#ef4444", "#a855f7"]
+    )
+    levels = np.linspace(0, MAX_WS_KT, 22)
 
-    ax.pcolormesh(
+    cf = ax.contourf(
         LON_MESH, LAT_MESH, speeds_kt,
+        levels=levels,
         cmap=cmap_shade, norm=norm_shade,
-        alpha=0.42, shading="gouraud", zorder=1,
+        alpha=0.48, zorder=1, extend="max",
     )
 
     # ── 3. Wind barbs — subsampled to BARB_SPACING_DEG density ───────────────
@@ -284,9 +292,7 @@ def _render_frame(
     )
 
     # ── 4. Colorbar ───────────────────────────────────────────────────────────
-    sm = plt.cm.ScalarMappable(cmap=cmap_shade, norm=norm_shade)
-    sm.set_array([])
-    cb = fig.colorbar(sm, ax=ax, fraction=0.026, pad=0.02)
+    cb = fig.colorbar(cf, ax=ax, fraction=0.026, pad=0.02)
     cb.set_label("Wind speed (kt)", fontsize=9)
     cb.set_ticks([0, 5, 10, 15, 20, 25, 30, 35])
     cb.ax.tick_params(labelsize=8)

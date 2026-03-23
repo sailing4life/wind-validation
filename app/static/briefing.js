@@ -754,8 +754,20 @@ function _bfRenderWindmapFrames(frames) {
     const img = document.createElement('img');
     img.src = 'data:image/png;base64,' + f.png_b64;
     img.alt = f.label || '';
+    // Show local time so it matches the range selectors, with UTC offset for clarity
+    let caption = f.label || '';
+    if (f.time_utc) {
+      const dt = new Date(f.time_utc.endsWith('Z') ? f.time_utc : f.time_utc + 'Z');
+      const pad = n => String(n).padStart(2, '0');
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const offsetMin = -dt.getTimezoneOffset();
+      const sign = offsetMin >= 0 ? '+' : '-';
+      const oh = pad(Math.floor(Math.abs(offsetMin) / 60));
+      const om = pad(Math.abs(offsetMin) % 60);
+      caption = `${pad(dt.getDate())} ${months[dt.getMonth()]}  ${pad(dt.getHours())}:${pad(dt.getMinutes())} (UTC${sign}${oh}:${om})`;
+    }
     const cap = document.createElement('figcaption');
-    cap.textContent = f.label || '';
+    cap.textContent = caption;
     fig.appendChild(img);
     fig.appendChild(cap);
     grid.appendChild(fig);
