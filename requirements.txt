@@ -6,6 +6,7 @@ httpx==0.28.1
 # Wind map GIF generation
 # eccodes C lib installed via apt in Dockerfile (libeccodes-dev)
 # macOS: brew install eccodes
+cfgrib
 meteofetch
 matplotlib
 Pillow
