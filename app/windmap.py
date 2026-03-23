@@ -140,7 +140,7 @@ def _fetch_grib_grid(
     """
     try:
         if model == "arome025":
-            from meteofetch import Arome025 as Model  # noqa: PLC0415
+            from meteofetch import Arome0025 as Model  # noqa: PLC0415
         else:
             from meteofetch import Arpege025 as Model  # noqa: PLC0415
     except ImportError as exc:
