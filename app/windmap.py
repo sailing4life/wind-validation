@@ -145,8 +145,10 @@ def _fetch_grib_grid(
             from meteofetch import Arpege025 as Model  # noqa: PLC0415
     except ImportError as exc:
         raise RuntimeError(
-            "meteofetch not installed — run:  pip install meteofetch\n"
-            "macOS also needs:  brew install eccodes"
+            f"meteofetch import failed: {exc}\n"
+            "Ensure meteofetch is installed and the eccodes C library is available.\n"
+            "macOS: brew install eccodes && pip install meteofetch\n"
+            "Linux: apt-get install libeccodes-dev && pip install meteofetch"
         ) from exc
 
     logger.info("Fetching %s GRIB (SP2) via meteofetch…", model)
