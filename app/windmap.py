@@ -63,6 +63,16 @@ FIG_H_PX  = 680
 # AROME001 (0.01°) → stride≈4;  AROME0025 (0.025°) → stride≈2;  ICON-D2 (0.02°) → stride≈2
 BARB_SPACING_DEG = 0.04
 
+# ── wind colormap (built once at import time) ──────────────────────────────────
+_n = 256
+_t = np.linspace(0, 1, _n)
+_base = mcolors.LinearSegmentedColormap.from_list(
+    "_wind_rgb", ["#3b82f6", "#22c55e", "#ef4444", "#a855f7"]
+)(_t)
+_base[:, 3] = 0.08 + _t * 0.64   # alpha: 0.08 (calm, transparent) → 0.72 (strong)
+CMAP_WIND = mcolors.ListedColormap(_base, name="wind_kt")
+NORM_WIND = mcolors.Normalize(vmin=0, vmax=MAX_WS_KT)
+
 
 # ── OSM tile helpers ──────────────────────────────────────────────────────────
 
@@ -659,20 +669,9 @@ def _render_frame(
 
     LON_MESH, LAT_MESH = np.meshgrid(lons, lats)
 
-    # Build an RGBA colormap: alpha fades from ~0 (calm, land visible) to 0.72 (strong winds)
-    _n = 256
-    _t = np.linspace(0, 1, _n)
-    # RGB: blue → green → red → purple
-    _base = mcolors.LinearSegmentedColormap.from_list(
-        "_wind_rgb", ["#3b82f6", "#22c55e", "#ef4444", "#a855f7"]
-    )(_t)  # (N, 4) RGBA with alpha=1
-    _base[:, 3] = 0.08 + _t * 0.64   # alpha 0.08 → 0.72
-    cmap_shade = mcolors.ListedColormap(_base, name="wind_kt")
-    norm_shade = mcolors.Normalize(vmin=0, vmax=MAX_WS_KT)
-
     ax.pcolormesh(
         LON_MESH, LAT_MESH, speeds_kt,
-        cmap=cmap_shade, norm=norm_shade,
+        cmap=CMAP_WIND, norm=NORM_WIND,
         shading="gouraud", zorder=1,
     )
 
@@ -696,7 +695,7 @@ def _render_frame(
     )
 
     # ── 4. Colorbar ───────────────────────────────────────────────────────────
-    sm = plt.cm.ScalarMappable(cmap=cmap_shade, norm=norm_shade)
+    sm = plt.cm.ScalarMappable(cmap=CMAP_WIND, norm=NORM_WIND)
     sm.set_array([])
     cb = fig.colorbar(sm, ax=ax, fraction=0.026, pad=0.02)
     cb.set_label("Wind speed (kt)", fontsize=9)
@@ -717,8 +716,12 @@ def _render_frame(
 
     fig.tight_layout(pad=0.5)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi)
-    plt.close(fig)
+    try:
+        fig.savefig(buf, format="png", dpi=dpi)
+    finally:
+        plt.close(fig)
+        del LON_MESH, LAT_MESH, speeds_kt
+        gc.collect()
     buf.seek(0)
     return Image.open(buf).copy()
 
@@ -825,6 +828,8 @@ def generate_wind_gif(
             lat, lon, label,
             barb_stride=barb_stride,
         ))
+    del u_arr, v_arr, basemap
+    gc.collect()
 
     return _to_gif(frames, FRAME_MS)
 
@@ -894,4 +899,6 @@ def generate_wind_frames(
         result.append({"label": label, "time_utc": time_utc, "png_b64": png_b64})
         gc.collect()
 
+    del u_arr, v_arr, basemap
+    gc.collect()
     return result

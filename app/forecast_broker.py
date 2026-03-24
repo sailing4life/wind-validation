@@ -29,13 +29,16 @@ class ForecastBroker:
         coords = list({(s.lat, s.lon) for s in self.repo.stations})
 
         updated: dict[str, list[ForecastValue]] = {}
-        for i, model in enumerate(self.repo.models):
+        om_index = 0
+        for model in self.repo.models:
             if model.model_id == _OPENWRF_ID:
-                rows = self.openwrf.fetch_model_at_coords(model, coords, start, end)
-            else:
-                if i > 0:
-                    time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
-                rows = self.openmeteo.fetch_model_at_coords(model, coords, start, end)
+                # OpenWRF downloads large GRIB files — skip in background refresh;
+                # data is fetched on-demand in forecast_point / wind map requests.
+                continue
+            if om_index > 0:
+                time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
+            rows = self.openmeteo.fetch_model_at_coords(model, coords, start, end)
+            om_index += 1
             if rows:
                 updated[model.model_id] = rows
         return updated
