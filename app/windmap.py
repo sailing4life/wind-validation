@@ -207,61 +207,72 @@ def _clip_and_pack(
     max_hours: int,
     run_dt: datetime | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
-    """Clip DataArrays to bbox and return the standard 6-tuple."""
-    u_da = u_da.sortby("latitude")
-    v_da = v_da.sortby("latitude")
+    """Clip DataArrays to bbox and return the standard 6-tuple.
 
+    Memory strategy: read coordinate vectors first (tiny), compute clip indices,
+    read time axis (tiny), then load the full data array to numpy ONCE per
+    variable and clip immediately — avoids the sortby() full-array copy that
+    previously doubled peak memory usage.
+    """
+    # ── coordinates (lazy access — no data loaded yet) ────────────────────────
     lats_all = u_da.latitude.values
     lons_all = u_da.longitude.values.copy()
     if lons_all.max() > 180:
         lons_all = np.where(lons_all > 180, lons_all - 360, lons_all)
 
-    lat_mask = (lats_all >= lat_min) & (lats_all <= lat_max)
-    lon_mask = (lons_all >= lon_min) & (lons_all <= lon_max)
-
-    if not lat_mask.any() or not lon_mask.any():
+    lat_idx = np.where((lats_all >= lat_min) & (lats_all <= lat_max))[0]
+    lon_idx = np.where((lons_all >= lon_min) & (lons_all <= lon_max))[0]
+    if not len(lat_idx) or not len(lon_idx):
         raise ValueError(
             f"No data in bbox ({lat_min:.2f}–{lat_max:.2f} N, "
             f"{lon_min:.2f}–{lon_max:.2f} E)"
         )
 
-    u_clip = u_da.isel(latitude=lat_mask, longitude=lon_mask)
-    v_clip = v_da.isel(latitude=lat_mask, longitude=lon_mask)
+    lats = lats_all[lat_idx]
+    lons = lons_all[lon_idx]
 
-    lats = u_clip.latitude.values
-    lons = u_clip.longitude.values
-
-    # Determine time axis
-    if "time" in u_clip.dims and u_clip.time.size > 1:
-        t_vals = u_clip.time.values[:max_hours]
-    elif hasattr(u_clip, "valid_time"):
-        raw = u_clip.valid_time.values
-        t_vals = np.atleast_1d(raw)[:max_hours]
+    # ── time axis (still lazy) ────────────────────────────────────────────────
+    if "time" in u_da.dims and u_da.time.size > 1:
+        t_vals = u_da.time.values[:max_hours]
+    elif hasattr(u_da, "valid_time"):
+        t_vals = np.atleast_1d(u_da.valid_time.values)[:max_hours]
     else:
         t_vals = np.array([])
 
-    u_arr = np.array(u_clip.values, dtype=float)
-    v_arr = np.array(v_clip.values, dtype=float)
-    u_clip = v_clip = u_da = v_da = None
+    # ── load + clip: one variable at a time, free full array immediately ──────
+    # Peak memory = one full variable array + one clipped array (not 2× full).
+    # We do NOT call sortby() — that materialises a sorted copy of everything.
+    def _materialise(da) -> np.ndarray:
+        raw = np.array(da.values, dtype=float)        # full grid, all timesteps
+        if raw.ndim == 2:
+            raw = raw[np.newaxis]
+        raw = raw[:max_hours]
+        clipped = raw[np.ix_(np.arange(raw.shape[0]), lat_idx, lon_idx)]
+        del raw
+        return clipped
+
+    u_arr = _materialise(u_da);  u_da = None
+    v_arr = _materialise(v_da);  v_da = None
     gc.collect()
 
-    if u_arr.ndim == 2:
-        u_arr = u_arr[np.newaxis]
-        v_arr = v_arr[np.newaxis]
+    # ── ensure ascending latitude order ──────────────────────────────────────
+    if len(lats) > 1 and lats[0] > lats[-1]:
+        lats  = lats[::-1]
+        u_arr = u_arr[:, ::-1, :]
+        v_arr = v_arr[:, ::-1, :]
 
-    u_arr = u_arr[:max_hours]
-    v_arr = v_arr[:max_hours]
-
+    # ── labels & times ────────────────────────────────────────────────────────
+    n_t = u_arr.shape[0]
     if len(t_vals):
+        t_vals = t_vals[:n_t]
         labels    = [_np_dt_to_label(t) for t in t_vals]
         times_utc = [_np_dt_to_iso(t)   for t in t_vals]
     elif run_dt is not None:
-        # Synthesise labels from run time + step index (single-step files stacked externally)
         labels    = [_dt_to_label(run_dt)]
         times_utc = [_dt_to_iso(run_dt)]
     else:
-        labels    = [f"T+{i:02d}h" for i in range(u_arr.shape[0])]
-        times_utc = [""] * u_arr.shape[0]
+        labels    = [f"T+{i:02d}h" for i in range(n_t)]
+        times_utc = [""] * n_t
 
     return lats, lons, u_arr, v_arr, labels, times_utc
 
