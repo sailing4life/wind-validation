@@ -321,6 +321,7 @@ def _fetch_harmonie_s3(
         with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
             f.write(resp.content)
             tmp_path = f.name
+        del resp; gc.collect()   # free download bytes before parsing (can be 200 MB+)
         u_da, v_da = _cfgrib_wind(tmp_path)
         return _clip_and_pack(u_da, v_da, lat_min, lat_max, lon_min, lon_max, max_hours)
     finally:
@@ -543,9 +544,11 @@ def _fetch_openwrf(
     try:
         import bz2 as _bz2  # noqa: PLC0415
         raw = _bz2.decompress(resp.content)
+        del resp; gc.collect()   # free compressed bytes before writing decompressed
         with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
             f.write(raw)
             tmp_path = f.name
+        del raw; gc.collect()    # free decompressed bytes now they're on disk
         u_da, v_da = _cfgrib_wind(tmp_path)
         return _clip_and_pack(u_da, v_da, lat_min, lat_max, lon_min, lon_max, max_hours)
     finally:
@@ -576,8 +579,9 @@ def _fetch_meteofetch(
     if model == "arpege025":
         candidates = [("arpege025", _mf.Arpege025)]
     else:
-        # Try Arome001 (1 km) first; fall back to Arome0025 (2.5 km) if bbox is outside domain
-        candidates = [("arome001", _mf.Arome001), ("arome025", _mf.Arome0025)]
+        # AROME001 (0.01°) domain is ~1750×2800 = 5 M pts → 2 GB/variable at 48 steps.
+        # Use AROME0025 only to keep peak memory well under 8 GB.
+        candidates = [("arome025", _mf.Arome0025)]
 
     last_exc: Exception | None = None
     for name, Model in candidates:
@@ -591,11 +595,17 @@ def _fetch_meteofetch(
 
         if "u10" not in ds or "v10" not in ds:
             logger.warning("%s: u10/v10 absent (keys: %s), trying next", name, list(ds.keys()))
+            del ds; gc.collect()
             continue
+
+        # Extract only u10/v10 and free the rest of ds (other variables, potentially large)
+        u_da = ds["u10"]
+        v_da = ds["v10"]
+        del ds; gc.collect()
 
         try:
             result = _clip_and_pack(
-                ds["u10"], ds["v10"],
+                u_da, v_da,
                 lat_min, lat_max, lon_min, lon_max,
                 max_hours,
             )
@@ -605,6 +615,7 @@ def _fetch_meteofetch(
             # bbox outside this model's domain — try next resolution
             logger.info("%s bbox miss (%s), trying fallback", name, exc)
             last_exc = exc
+            del u_da, v_da; gc.collect()
             continue
 
     raise RuntimeError(
