@@ -605,11 +605,23 @@ def _openwrf_eccodes_clip(
                     break
                 try:
                     try:
-                        param_id = eccodes.codes_get(msg, "paramId")
+                        edition = eccodes.codes_get(msg, "edition")
                     except Exception:
-                        param_id = -1
-                    is_u = param_id in (33, 131)
-                    is_v = param_id in (34, 132)
+                        edition = 1
+                    if edition == 1:
+                        try:
+                            iop = eccodes.codes_get(msg, "indicatorOfParameter")
+                        except Exception:
+                            iop = -1
+                        is_u = iop == 33
+                        is_v = iop == 34
+                    else:
+                        try:
+                            param_id = eccodes.codes_get(msg, "paramId")
+                        except Exception:
+                            param_id = -1
+                        is_u = param_id in (33, 131)
+                        is_v = param_id in (34, 132)
                     if not (is_u or is_v):
                         continue
                     ni = eccodes.codes_get(msg, "Ni")

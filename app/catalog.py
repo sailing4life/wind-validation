@@ -58,6 +58,7 @@ def default_model_catalog() -> list[ModelDefinition]:
             category="regional",
             coverage_bbox={"min_lat": 30.0, "max_lat": 48.0, "min_lon": -6.0, "max_lon": 42.0},
             priority_by_country={"IT": 2, "OTHER": 5},
+            on_demand=True,   # fetched from GRIB on request, not stored in background repo
         ),
     ]
 
@@ -83,10 +84,11 @@ def select_candidate_models(
     baseline = next((m for m in catalog if m.is_global_baseline and m.status == "ACTIVE"), None)
 
     for model in covered:
-        availability = coverage_availability.get(model.model_id, 0.0)
-        if availability < (1.0 - missing_threshold):
-            reasons[model.model_id] = "excluded_missing_coverage"
-            continue
+        if not model.on_demand:
+            availability = coverage_availability.get(model.model_id, 0.0)
+            if availability < (1.0 - missing_threshold):
+                reasons[model.model_id] = "excluded_missing_coverage"
+                continue
         if model.is_global_baseline:
             continue
         selected.append(model)

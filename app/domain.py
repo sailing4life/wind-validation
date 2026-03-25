@@ -13,6 +13,7 @@ class ModelDefinition:
     priority_by_country: dict[str, int]
     is_global_baseline: bool = False
     status: str = "ACTIVE"
+    on_demand: bool = False   # if True, skip coverage_availability check in select_candidate_models
 
 
 @dataclass(slots=True)

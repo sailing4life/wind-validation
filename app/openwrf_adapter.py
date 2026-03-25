@@ -162,20 +162,28 @@ def _parse_grib(raw: bytes, run_dt: datetime) -> _GridData:
             f.write(raw)
             tmp_path = f.name
 
-        # NCEP GRIB1 paramId → role
-        # 33/131=u-wind  34/132=v-wind  180=gust  11=temp2m  2/151=msl  61=precip  71=cloud  157=CAPE
-        _ROLE = {
-            33: "u",  131: "u",
-            34: "v",  132: "v",
-            180: "gust", 228: "gust",
+        # WRF GRIB1 (centre=kwbc) uses NCEP parameter tables; eccodes reports paramId=0
+        # for all atmospheric fields. Use indicatorOfParameter (GRIB1) instead.
+        # Confirmed from file scan: iop=33→u, 34→v, 180→gust, 11→temp2m,
+        #   2→msl, 61→precip, 71→cloud, 157→CAPE
+        _IOP_ROLE = {   # GRIB1 indicatorOfParameter (NCEP table 2)
+            33: "u",   34: "v",
+            180: "gust",
             11: "temp",
-            2: "msl",  151: "msl",
+            2: "msl",
             61: "precip",
             71: "cloud",
             157: "cape",
         }
+        _PID_ROLE = {   # GRIB2 paramId fallback (ECMWF)
+            131: "u",  132: "v",
+            228: "gust",
+            130: "temp",
+            151: "msl",
+            164: "cloud",
+            59: "cape",
+        }
 
-        # step → 2-D array, per field
         buckets: dict[str, list[tuple[int, np.ndarray]]] = {
             k: [] for k in ("u", "v", "gust", "temp", "msl", "precip", "cloud", "cape")
         }
@@ -191,11 +199,23 @@ def _parse_grib(raw: bytes, run_dt: datetime) -> _GridData:
                     break
                 try:
                     try:
-                        param_id = eccodes.codes_get(msg, "paramId")
+                        edition = eccodes.codes_get(msg, "edition")
                     except Exception:
-                        param_id = -1
+                        edition = 1
 
-                    role = _ROLE.get(param_id)
+                    role = None
+                    if edition == 1:
+                        try:
+                            iop = eccodes.codes_get(msg, "indicatorOfParameter")
+                            role = _IOP_ROLE.get(iop)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            pid = eccodes.codes_get(msg, "paramId")
+                            role = _PID_ROLE.get(pid)
+                        except Exception:
+                            pass
                     if role is None:
                         continue
 
