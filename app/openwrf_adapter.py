@@ -37,27 +37,67 @@ class _Region(NamedTuple):
     lon_max: float
 
 
-REGIONS: list[_Region] = [
-    _Region("Aegean",           33.5, 43.0, 19.0, 30.5),
-    _Region("Adriatic_Central", 34.0, 48.0,  9.0, 22.0),
-    _Region("Ionian",           34.0, 42.0, 14.0, 24.0),
-    _Region("Mediterranean",    30.0, 48.0, -6.0, 42.0),  # fallback: large region
+REGIONS_4KM: list[_Region] = [
+    _Region("Baleares",          38.5, 41.0,  0.5,  5.0),
+    _Region("Gulf_of_Lion",      41.0, 44.5,  2.0,  7.5),
+    _Region("Ligurian",          42.5, 45.0,  5.5, 10.5),
+    _Region("Corsica",           41.0, 43.5,  7.5, 10.5),
+    _Region("Sardinia",          37.5, 41.5,  7.5, 10.5),
+    _Region("Tyrrhenian",        37.5, 44.5,  9.5, 15.0),
+    _Region("Sicily",            35.5, 39.5, 11.5, 16.5),
+    _Region("Adriatic_North",    44.5, 47.0, 12.0, 15.0),
+    _Region("Adriatic_Central",  41.0, 46.0, 12.5, 16.5),
+    _Region("Adriatic_South",    38.5, 42.5, 14.5, 21.0),
+    _Region("Ionian_Islands",    36.5, 40.5, 19.5, 23.5),
+    _Region("Aegean_NW",         38.0, 42.0, 22.0, 27.0),
+    _Region("Aegean_NE",         38.0, 42.0, 25.5, 29.5),
+    _Region("Aegean_SW",         35.0, 39.0, 22.0, 27.0),
+    _Region("Aegean_SE",         35.0, 39.0, 25.5, 29.5),
 ]
+REGIONS_12KM: list[_Region] = [
+    # Names must match file prefix on openskiron.org (Spain_12km_WRF_WAM_…)
+    _Region("Aegean",         33.5, 43.0, 19.0, 30.5),
+    _Region("Ionian",         34.0, 42.0, 14.0, 24.0),
+    _Region("Taurus",         30.0, 40.0, 25.0, 42.0),
+    _Region("Italy",          37.0, 47.0,  7.0, 20.0),
+    _Region("Spain",          35.0, 44.5, -9.5,  4.5),
+    _Region("France",         42.0, 51.5, -5.5, 10.5),
+    _Region("Atlantic_Coast", 34.0, 51.0,-16.0,  1.0),
+    _Region("Channel",        47.5, 56.0, -8.0,  5.0),
+]
+# Keep legacy alias for external callers
+REGIONS = REGIONS_12KM
 
-_BASE_URL = "https://openskiron.org/gribs_wrf_12km"
+_BASE_12KM = "https://openskiron.org/gribs_wrf_12km"
+_BASE_4KM  = "https://openskiron.org/gribs_wrf_4km"
 _RUN_HOURS = (0, 6, 12, 18)   # UTC cycles
 
 
-def find_region(lat: float, lon: float) -> _Region | None:
-    """Return the most specific region containing (lat, lon)."""
+def _find_in(regions: list[_Region], lat: float, lon: float) -> _Region | None:
     best: _Region | None = None
     best_area = float("inf")
-    for r in REGIONS:
+    for r in regions:
         if r.lat_min <= lat <= r.lat_max and r.lon_min <= lon <= r.lon_max:
             area = (r.lat_max - r.lat_min) * (r.lon_max - r.lon_min)
             if area < best_area:
                 best, best_area = r, area
     return best
+
+
+def find_region(lat: float, lon: float) -> _Region | None:
+    """Return the most specific 12 km region containing (lat, lon)."""
+    return _find_in(REGIONS_12KM, lat, lon)
+
+
+def find_best_region(lat: float, lon: float) -> tuple[_Region, str] | None:
+    """Return (region, resolution) — tries 4km first, falls back to 12km."""
+    r4 = _find_in(REGIONS_4KM, lat, lon)
+    if r4:
+        return r4, "4km"
+    r12 = _find_in(REGIONS_12KM, lat, lon)
+    if r12:
+        return r12, "12km"
+    return None
 
 
 # ── GRIB grid data container ──────────────────────────────────────────────────
@@ -77,24 +117,27 @@ _cache_lock = threading.Lock()
 _cache: dict[tuple[str, str], _GridData] = {}   # (region_name, run_iso) → grid
 
 
-def _cache_key(region_name: str, run_dt: datetime) -> tuple[str, str]:
-    return (region_name, run_dt.strftime("%Y%m%d%H"))
+def _cache_key(region_name: str, resolution: str, run_dt: datetime) -> tuple[str, str, str]:
+    return (region_name, resolution, run_dt.strftime("%Y%m%d%H"))
 
 
 # ── Download + parse ──────────────────────────────────────────────────────────
 
-def _download_grib(region: _Region, run_dt: datetime) -> bytes | None:
-    date_sfx = run_dt.strftime("%d%m%y")
-    url = f"{_BASE_URL}/{region.name}_12km_WRF_WAM_{date_sfx}-{run_dt.hour:02d}.grb.bz2"
+def _download_grib(region: _Region, resolution: str, run_dt: datetime) -> bytes | None:
+    date_sfx = run_dt.strftime("%y%m%d")   # YYMMDD e.g. 260325 for 2026-03-25
+    base = _BASE_4KM if resolution == "4km" else _BASE_12KM
+    url = f"{base}/{region.name}_{resolution}_WRF_WAM_{date_sfx}-{run_dt.hour:02d}.grb.bz2"
     try:
         with httpx.Client(timeout=120) as c:
             r = c.get(url)
         if r.status_code == 200:
-            logger.info("OpenWRF %s run %s downloaded (%d B)", region.name, run_dt, len(r.content))
-            return bz2.decompress(r.content)
-        logger.debug("OpenWRF %s %s → HTTP %d", region.name, url, r.status_code)
+            logger.info("OpenWRF %s (%s) run %s downloaded (%d B)",
+                        region.name, resolution, run_dt, len(r.content))
+            raw = bz2.decompress(r.content)
+            return raw
+        logger.info("OpenWRF %s %s → HTTP %d", region.name, url, r.status_code)
     except Exception as exc:
-        logger.debug("OpenWRF %s %s: %s", region.name, url, exc)
+        logger.warning("OpenWRF %s %s: %s", region.name, url, exc)
     return None
 
 
@@ -172,18 +215,18 @@ def _parse_grib(raw: bytes, run_dt: datetime) -> _GridData:
                 pass
 
 
-def _get_grid(region: _Region) -> _GridData | None:
-    """Return cached or freshly-downloaded grid for *region*."""
+def _get_grid(region: _Region, resolution: str) -> _GridData | None:
+    """Return cached or freshly-downloaded grid for *region* at *resolution*."""
     now = datetime.now(UTC)
     for h_back in range(0, 25):
         cand = (now - timedelta(hours=h_back)).replace(minute=0, second=0, microsecond=0)
         if cand.hour not in _RUN_HOURS:
             continue
-        key = _cache_key(region.name, cand)
+        key = _cache_key(region.name, resolution, cand)
         with _cache_lock:
             if key in _cache:
                 return _cache[key]
-        raw = _download_grib(region, cand)
+        raw = _download_grib(region, resolution, cand)
         if raw is None:
             continue
         try:
@@ -235,12 +278,14 @@ class OpenWrfAdapter:
 
         rows: list[ForecastValue] = []
         for lat, lon in coords:
-            region = find_region(lat, lon)
-            if region is None:
+            region_res = find_best_region(lat, lon)
+            if region_res is None:
                 continue
-            grid = _get_grid(region)
+            region, resolution = region_res
+            grid = _get_grid(region, resolution)
             if grid is None:
-                logger.warning("OpenWRF: no grid available for (%.2f, %.2f)", lat, lon)
+                logger.warning("OpenWRF: no grid available for (%.2f, %.2f) region=%s (%s)",
+                               lat, lon, region.name, resolution)
                 continue
 
             iy, ix = _nearest_idx(grid.lats, grid.lons, lat, lon)

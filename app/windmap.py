@@ -474,29 +474,54 @@ def _fetch_icon_d2_dwd(
 
 
 # ── OpenWRF (openskiron.org) ───────────────────────────────────────────────────
-# Pattern: https://openskiron.org/gribs_wrf_12km/{Region}_12km_WRF_WAM_{DDMMYY}-{HH}.grb.bz2
-# Runs available: 00 and 06 UTC; date suffix uses format DDMMYY.
+# Pattern: https://openskiron.org/gribs_wrf_{res}/{Region}_{res}_WRF_WAM_{YYMMDD}-{HH}.grb.bz2
+# Date suffix uses YYMMDD (e.g. 260325 for 2026-03-25).  Runs: 00, 06, 12, 18 UTC.
 
-_OPENWRF_BASE = "https://openskiron.org/gribs_wrf_12km"
-_OPENWRF_REGIONS = [
-    # (name,              lat_min, lat_max, lon_min, lon_max)
-    ("Aegean",             33.5,   43.0,   19.0,   30.5),
-    ("Adriatic_Central",   34.0,   48.0,    9.0,   22.0),
-    ("Mediterranean",      30.0,   48.0,   -6.0,   42.0),
-    ("Ionian",             34.0,   42.0,   14.0,   24.0),
+_OPENWRF_12KM_BASE = "https://openskiron.org/gribs_wrf_12km"
+_OPENWRF_4KM_BASE  = "https://openskiron.org/gribs_wrf_4km"
+
+# (name, lat_min, lat_max, lon_min, lon_max)  — smallest area wins
+_OPENWRF_4KM_REGIONS = [
+    ("Baleares",          38.5, 41.0,  0.5,  5.0),
+    ("Gulf_of_Lion",      41.0, 44.5,  2.0,  7.5),
+    ("Ligurian",          42.5, 45.0,  5.5, 10.5),
+    ("Corsica",           41.0, 43.5,  7.5, 10.5),
+    ("Sardinia",          37.5, 41.5,  7.5, 10.5),
+    ("Tyrrhenian",        37.5, 44.5,  9.5, 15.0),
+    ("Sicily",            35.5, 39.5, 11.5, 16.5),
+    ("Adriatic_North",    44.5, 47.0, 12.0, 15.0),
+    ("Adriatic_Central",  41.0, 46.0, 12.5, 16.5),
+    ("Adriatic_South",    38.5, 42.5, 14.5, 21.0),
+    ("Ionian_Islands",    36.5, 40.5, 19.5, 23.5),
+    ("Aegean_NW",         38.0, 42.0, 22.0, 27.0),
+    ("Aegean_NE",         38.0, 42.0, 25.5, 29.5),
+    ("Aegean_SW",         35.0, 39.0, 22.0, 27.0),
+    ("Aegean_SE",         35.0, 39.0, 25.5, 29.5),
+]
+_OPENWRF_12KM_REGIONS = [
+    ("Aegean",         33.5, 43.0, 19.0, 30.5),
+    ("Ionian",         34.0, 42.0, 14.0, 24.0),
+    ("Taurus",         30.0, 40.0, 25.0, 42.0),
+    ("Italy",          37.0, 47.0,  7.0, 20.0),
+    ("Spain",          35.0, 44.5, -9.5,  4.5),
+    ("France",         42.0, 51.5, -5.5, 10.5),
+    ("Atlantic_Coast", 34.0, 51.0,-16.0,  1.0),
+    ("Channel",        47.5, 56.0, -8.0,  5.0),
 ]
 
 
-def _openwrf_region(center_lat: float, center_lon: float) -> str | None:
-    """Return the smallest OpenWRF region that contains (center_lat, center_lon)."""
-    best = None
-    best_area = float("inf")
-    for name, lat0, lat1, lon0, lon1 in _OPENWRF_REGIONS:
-        if lat0 <= center_lat <= lat1 and lon0 <= center_lon <= lon1:
-            area = (lat1 - lat0) * (lon1 - lon0)
-            if area < best_area:
-                best, best_area = name, area
-    return best
+def _openwrf_region(center_lat: float, center_lon: float) -> tuple[str, str] | None:
+    """Return (region_name, resolution) for the best matching OpenWRF file."""
+    for table, res in [(_OPENWRF_4KM_REGIONS, "4km"), (_OPENWRF_12KM_REGIONS, "12km")]:
+        best = best_area = None
+        for name, lat0, lat1, lon0, lon1 in table:
+            if lat0 <= center_lat <= lat1 and lon0 <= center_lon <= lon1:
+                area = (lat1 - lat0) * (lon1 - lon0)
+                if best_area is None or area < best_area:
+                    best, best_area = (name, res), area
+        if best:
+            return best
+    return None
 
 
 def _fetch_openwrf(
@@ -508,12 +533,14 @@ def _fetch_openwrf(
 ) -> tuple:
     import bz2 as _bz2, os, tempfile  # noqa: PLC0415
 
-    region = _openwrf_region(center_lat, center_lon)
-    if region is None:
+    region_res = _openwrf_region(center_lat, center_lon)
+    if region_res is None:
         raise ValueError(
             f"Location ({center_lat:.2f} N, {center_lon:.2f} E) is outside all "
             "OpenWRF regions. OpenWRF covers the Mediterranean basin only."
         )
+    region, resolution = region_res
+    base_url = _OPENWRF_4KM_BASE if resolution == "4km" else _OPENWRF_12KM_BASE
 
     now = datetime.now(UTC)
     resp = run_dt_used = None
@@ -521,23 +548,23 @@ def _fetch_openwrf(
         cand = (now - timedelta(hours=h_back)).replace(minute=0, second=0, microsecond=0)
         if cand.hour not in (0, 6, 12, 18):
             continue
-        date_sfx = cand.strftime("%d%m%y")
-        url = f"{_OPENWRF_BASE}/{region}_12km_WRF_WAM_{date_sfx}-{cand.hour:02d}.grb.bz2"
+        date_sfx = cand.strftime("%y%m%d")   # YYMMDD e.g. 260325
+        url = f"{base_url}/{region}_{resolution}_WRF_WAM_{date_sfx}-{cand.hour:02d}.grb.bz2"
         try:
             with httpx.Client(timeout=120) as client:
                 r = client.get(url)
             if r.status_code == 200:
                 resp = r
                 run_dt_used = cand
-                logger.info("OpenWRF %s run %s (%d B)", region, run_dt_used, len(r.content))
+                logger.info("OpenWRF %s (%s) run %s (%d B)", region, resolution, run_dt_used, len(r.content))
                 break
-            logger.debug("OpenWRF %s → HTTP %d", url, r.status_code)
+            logger.info("OpenWRF %s → HTTP %d", url, r.status_code)
         except Exception as exc:
-            logger.debug("OpenWRF %s: %s", url, exc)
+            logger.warning("OpenWRF %s: %s", url, exc)
 
     if resp is None:
         raise RuntimeError(
-            f"No recent OpenWRF GRIB found for region '{region}' (tried last 24 h)"
+            f"No recent OpenWRF GRIB found for region '{region}' ({resolution}, tried last 24 h)"
         )
 
     tmp_path = None
