@@ -85,6 +85,42 @@ function bfPopulateModelOverride() {
     sel.appendChild(opt);
   });
   if (current) sel.value = current;
+
+  // Populate model checkboxes (preserve existing checked state)
+  const checksDiv = document.getElementById('bfModelChecks');
+  if (!checksDiv) return;
+  const existing = new Set(
+    [...checksDiv.querySelectorAll('input[type=checkbox]')]
+      .filter(cb => !cb.checked)
+      .map(cb => cb.value)
+  );
+  checksDiv.innerHTML = '';
+  (forecastData.models || []).forEach(m => {
+    const label = document.createElement('label');
+    label.className = 'bf-model-check-item';
+    label.title = m.model_id;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = m.model_id;
+    cb.checked = !existing.has(m.model_id);  // default: all checked
+    cb.addEventListener('change', bfRerender);
+    const dot = document.createElement('span');
+    dot.className = 'bf-model-dot';
+    dot.style.background = modelColor(m.model_id);
+    const name = document.createElement('span');
+    name.textContent = m.model_id;
+    label.append(cb, dot, name);
+    checksDiv.appendChild(label);
+  });
+}
+
+function bfGetCheckedModels() {
+  const checksDiv = document.getElementById('bfModelChecks');
+  if (!checksDiv) return null;
+  const boxes = [...checksDiv.querySelectorAll('input[type=checkbox]')];
+  if (!boxes.length) return null;
+  const checked = boxes.filter(cb => cb.checked).map(cb => cb.value);
+  return checked.length ? new Set(checked) : null;
 }
 
 
@@ -174,9 +210,18 @@ function renderBriefingEnsembleCharts() {
   const row = document.getElementById('bfEnsembleRow');
   if (!row || !forecastData) { if (row) row.style.display = 'none'; return; }
 
+  // Hide if the ensemble checkbox is not checked
+  if (!document.getElementById('bfIncludeEnsemble')?.checked) {
+    row.style.display = 'none';
+    return;
+  }
+
   const { winner_model_id, models } = forecastData;
-  // Briefing should always show ensemble context from all available models.
-  const selected = models.filter(m => Array.isArray(m.hours) && m.hours.length > 0);
+  const checkedModels = bfGetCheckedModels();
+  const selected = models.filter(m =>
+    Array.isArray(m.hours) && m.hours.length > 0 &&
+    (!checkedModels || checkedModels.has(m.model_id))
+  );
   if (selected.length < 2) { row.style.display = 'none'; return; }
   row.style.display = '';
 
@@ -827,6 +872,8 @@ document.getElementById('bfIncludeCurrent')?.addEventListener('change', () => {
     document.getElementById('bfCurrentPanel').style.display = 'none';
   }
 });
+
+document.getElementById('bfIncludeEnsemble')?.addEventListener('change', renderBriefingEnsembleCharts);
 
 // ── Save briefing as JSON ──────────────────────────────────────────────────────
 document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
