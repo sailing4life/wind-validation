@@ -151,23 +151,42 @@ def _parse_grib(raw: bytes, run_dt: datetime) -> _GridData:
             tmp_path = f.name
 
         u_da = v_da = None
+        _U_NAMES = ("u10", "u", "10u", "U10", "U_10M", "ugrd10m", "UGRD", "uas")
+        _V_NAMES = ("v10", "v", "10v", "V10", "V_10M", "vgrd10m", "VGRD", "vas")
         for filter_keys in [
             {"typeOfLevel": "heightAboveGround", "level": 10},
             {"typeOfLevel": "heightAboveGround"},
+            {"typeOfLevel": "meanSea"},
+            {"typeOfLevel": "surface"},
             {},
         ]:
-            datasets = cfgrib.open_datasets(tmp_path, filter_by_keys=filter_keys, indexpath=None)
+            try:
+                datasets = cfgrib.open_datasets(tmp_path, filter_by_keys=filter_keys,
+                                                indexpath=None)
+            except Exception as _e:
+                logger.debug("cfgrib filter %s: %s", filter_keys, _e)
+                continue
             for ds in datasets:
-                for u_name in ("u10", "u", "10u", "U10", "U_10M"):
+                for u_name in _U_NAMES:
                     if u_name in ds and u_da is None:
                         u_da = ds[u_name]
-                for v_name in ("v10", "v", "10v", "V10", "V_10M"):
+                for v_name in _V_NAMES:
                     if v_name in ds and v_da is None:
                         v_da = ds[v_name]
             if u_da is not None and v_da is not None:
                 break
 
         if u_da is None or v_da is None:
+            # Log actual GRIB contents to diagnose variable naming
+            try:
+                all_info = []
+                for ds in cfgrib.open_datasets(tmp_path, indexpath=None):
+                    lvl_info = {k: str(ds.coords[k].values) for k in ("typeOfLevel", "level")
+                                if k in ds.coords}
+                    all_info.append(f"{list(ds.keys())} {lvl_info}")
+                logger.warning("OpenWRF GRIB variables: %s", " | ".join(all_info))
+            except Exception as _e:
+                logger.warning("OpenWRF GRIB enumerate failed: %s", _e)
             raise ValueError("10 m wind not found in OpenWRF GRIB")
 
         lats_raw = u_da.latitude.values
