@@ -103,12 +103,18 @@ def find_best_region(lat: float, lon: float) -> tuple[_Region, str] | None:
 # ── GRIB grid data container ──────────────────────────────────────────────────
 
 class _GridData(NamedTuple):
-    lats: np.ndarray        # (Y,) or (Y, X)
-    lons: np.ndarray        # (X,) or (Y, X)
-    u_arr: np.ndarray       # (T, Y, X)
-    v_arr: np.ndarray       # (T, Y, X)
-    times: list[datetime]   # length T
+    lats: np.ndarray               # (Y,)
+    lons: np.ndarray               # (X,)
+    u_arr: np.ndarray              # (T, Y, X)
+    v_arr: np.ndarray              # (T, Y, X)
+    times: list[datetime]          # length T
     run_dt: datetime
+    gust_arr:   np.ndarray | None = None   # (T, Y, X) surface gust  m/s
+    temp_arr:   np.ndarray | None = None   # (T, Y, X) 2 m temp      °C
+    msl_arr:    np.ndarray | None = None   # (T, Y, X) MSL pressure  Pa
+    precip_arr: np.ndarray | None = None   # (T, Y, X) accum precip  kg/m²
+    cloud_arr:  np.ndarray | None = None   # (T, Y, X) total cloud   0-100 %
+    cape_arr:   np.ndarray | None = None   # (T, Y, X) CAPE          J/kg
 
 
 # ── Grid cache (avoid re-downloading the same run) ───────────────────────────
@@ -142,7 +148,13 @@ def _download_grib(region: _Region, resolution: str, run_dt: datetime) -> bytes 
 
 
 def _parse_grib(raw: bytes, run_dt: datetime) -> _GridData:
-    import cfgrib  # noqa: PLC0415
+    """Parse OpenWRF GRIB file using eccodes directly.
+
+    WRF uses GRIB1 with NCEP parameter tables (paramId 33 = u-wind, 34 = v-wind)
+    which cfgrib cannot name; the wind messages appear as 'unknown' in cfgrib.
+    Scanning with eccodes avoids the naming problem entirely.
+    """
+    import eccodes  # noqa: PLC0415
 
     tmp_path = None
     try:
@@ -150,82 +162,114 @@ def _parse_grib(raw: bytes, run_dt: datetime) -> _GridData:
             f.write(raw)
             tmp_path = f.name
 
-        u_da = v_da = None
-        _U_NAMES = ("u10", "u", "10u", "U10", "U_10M", "ugrd10m", "UGRD", "uas")
-        _V_NAMES = ("v10", "v", "10v", "V10", "V_10M", "vgrd10m", "VGRD", "vas")
-        for filter_keys in [
-            {"typeOfLevel": "heightAboveGround", "level": 10},
-            {"typeOfLevel": "heightAboveGround"},
-            {"typeOfLevel": "meanSea"},
-            {"typeOfLevel": "surface"},
-            {},
-        ]:
-            try:
-                datasets = cfgrib.open_datasets(tmp_path, filter_by_keys=filter_keys,
-                                                indexpath=None)
-            except Exception as _e:
-                logger.debug("cfgrib filter %s: %s", filter_keys, _e)
-                continue
-            for ds in datasets:
-                for u_name in _U_NAMES:
-                    if u_name in ds and u_da is None:
-                        u_da = ds[u_name]
-                for v_name in _V_NAMES:
-                    if v_name in ds and v_da is None:
-                        v_da = ds[v_name]
-            if u_da is not None and v_da is not None:
-                break
+        # NCEP GRIB1 paramId → role
+        # 33/131=u-wind  34/132=v-wind  180=gust  11=temp2m  2/151=msl  61=precip  71=cloud  157=CAPE
+        _ROLE = {
+            33: "u",  131: "u",
+            34: "v",  132: "v",
+            180: "gust", 228: "gust",
+            11: "temp",
+            2: "msl",  151: "msl",
+            61: "precip",
+            71: "cloud",
+            157: "cape",
+        }
 
-        if u_da is None or v_da is None:
-            # Log actual GRIB contents to diagnose variable naming
-            try:
-                all_info = []
-                for ds in cfgrib.open_datasets(tmp_path, indexpath=None):
-                    lvl_info = {k: str(ds.coords[k].values) for k in ("typeOfLevel", "level")
-                                if k in ds.coords}
-                    all_info.append(f"{list(ds.keys())} {lvl_info}")
-                logger.warning("OpenWRF GRIB variables: %s", " | ".join(all_info))
-            except Exception as _e:
-                logger.warning("OpenWRF GRIB enumerate failed: %s", _e)
-            raise ValueError("10 m wind not found in OpenWRF GRIB")
+        # step → 2-D array, per field
+        buckets: dict[str, list[tuple[int, np.ndarray]]] = {
+            k: [] for k in ("u", "v", "gust", "temp", "msl", "precip", "cloud", "cape")
+        }
+        lats_2d = lons_2d = None
 
-        lats_raw = u_da.latitude.values
-        lons_raw = u_da.longitude.values
+        with open(tmp_path, "rb") as fh:
+            while True:
+                try:
+                    msg = eccodes.codes_grib_new_from_file(fh)
+                except Exception:
+                    break
+                if msg is None:
+                    break
+                try:
+                    try:
+                        param_id = eccodes.codes_get(msg, "paramId")
+                    except Exception:
+                        param_id = -1
+
+                    role = _ROLE.get(param_id)
+                    if role is None:
+                        continue
+
+                    try:
+                        ni = eccodes.codes_get(msg, "Ni")
+                        nj = eccodes.codes_get(msg, "Nj")
+                        values = eccodes.codes_get_values(msg).reshape(nj, ni)
+                    except Exception as _e:
+                        logger.debug("OpenWRF eccodes reshape: %s", _e)
+                        continue
+
+                    if lats_2d is None:
+                        try:
+                            lats_2d = eccodes.codes_get_array(msg, "latitudes").reshape(nj, ni)
+                            lons_2d = eccodes.codes_get_array(msg, "longitudes").reshape(nj, ni)
+                        except Exception:
+                            pass
+
+                    try:
+                        step = int(str(eccodes.codes_get(msg, "stepRange")).split("-")[-1])
+                    except Exception:
+                        step = len(buckets[role])
+
+                    buckets[role].append((step, values))
+                finally:
+                    eccodes.codes_release(msg)
+
+        if not buckets["u"] or not buckets["v"]:
+            raise ValueError(
+                f"10 m wind not found in OpenWRF GRIB "
+                f"(u={len(buckets['u'])}, v={len(buckets['v'])})"
+            )
+
+        def _stack(key: str) -> np.ndarray | None:
+            lst = buckets[key]
+            if not lst:
+                return None
+            lst.sort(key=lambda x: x[0])
+            return np.stack([d for _, d in lst]).astype(float)
+
+        for k in buckets:
+            buckets[k].sort(key=lambda x: x[0])
+
+        u_arr    = _stack("u")
+        v_arr    = _stack("v")
+        gust_arr = _stack("gust")
+        temp_arr = _stack("temp")
+        if temp_arr is not None:
+            temp_arr = temp_arr - 273.15       # K → °C
+        msl_arr    = _stack("msl")
+        precip_arr = _stack("precip")
+        cloud_arr  = _stack("cloud")
+        cape_arr   = _stack("cape")
+
+        if lats_2d is None:
+            raise ValueError("Could not extract lat/lon from GRIB")
+
+        lats_raw = lats_2d[:, 0]
+        lons_raw = lons_2d[0, :]
         if lons_raw.max() > 180:
             lons_raw = np.where(lons_raw > 180, lons_raw - 360, lons_raw)
 
-        u_arr = np.array(u_da.values, dtype=float)
-        v_arr = np.array(v_da.values, dtype=float)
-        if u_arr.ndim == 2:
-            u_arr = u_arr[np.newaxis]
-            v_arr = v_arr[np.newaxis]
+        times: list[datetime] = [
+            run_dt + timedelta(hours=s) for s, _ in buckets["u"]
+        ]
 
-        # Build time list
-        times: list[datetime] = []
-        if hasattr(u_da, "time") and u_da.time.size > 1:
-            for t in u_da.time.values:
-                try:
-                    ts_s = int(np.datetime64(t, "s").astype("int64"))
-                    times.append(datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=ts_s))
-                except Exception:
-                    times.append(run_dt + timedelta(hours=len(times)))
-        elif hasattr(u_da, "valid_time"):
-            raw_vt = np.atleast_1d(u_da.valid_time.values)
-            for t in raw_vt:
-                try:
-                    ts_s = int(np.datetime64(t, "s").astype("int64"))
-                    times.append(datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=ts_s))
-                except Exception:
-                    times.append(run_dt + timedelta(hours=len(times)))
-        if not times:
-            times = [run_dt + timedelta(hours=i) for i in range(u_arr.shape[0])]
-
-        u_da = v_da = None
         gc.collect()
-
-        return _GridData(lats=lats_raw, lons=lons_raw,
-                         u_arr=u_arr, v_arr=v_arr,
-                         times=times[:u_arr.shape[0]], run_dt=run_dt)
+        return _GridData(
+            lats=lats_raw, lons=lons_raw,
+            u_arr=u_arr, v_arr=v_arr,
+            times=times, run_dt=run_dt,
+            gust_arr=gust_arr, temp_arr=temp_arr, msl_arr=msl_arr,
+            precip_arr=precip_arr, cloud_arr=cloud_arr, cape_arr=cape_arr,
+        )
     finally:
         if tmp_path:
             try:
@@ -309,21 +353,31 @@ class OpenWrfAdapter:
 
             iy, ix = _nearest_idx(grid.lats, grid.lons, lat, lon)
 
+            def _pt(arr: "np.ndarray | None", t: int) -> "float | None":
+                if arr is None or t >= arr.shape[0]:
+                    return None
+                v = float(arr[t, iy, ix])
+                return v if not math.isnan(v) else None
+
             for t_idx, valid_dt in enumerate(grid.times):
                 if valid_dt < start or valid_dt > end:
                     continue
                 if t_idx >= grid.u_arr.shape[0]:
                     break
-                u = float(grid.u_arr[t_idx, iy, ix])
-                v = float(grid.v_arr[t_idx, iy, ix])
                 rows.append(ForecastValue(
                     model_id=MODEL_ID,
                     run_time_utc=grid.run_dt,
                     valid_time_utc=valid_dt,
                     lat=lat,
                     lon=lon,
-                    u10=u,
-                    v10=v,
+                    u10=float(grid.u_arr[t_idx, iy, ix]),
+                    v10=float(grid.v_arr[t_idx, iy, ix]),
+                    gust_ms=_pt(grid.gust_arr, t_idx),
+                    temp_c=_pt(grid.temp_arr, t_idx),
+                    pressure_msl_hpa=(_pt(grid.msl_arr, t_idx) or 0) / 100 or None,
+                    precip_mm=_pt(grid.precip_arr, t_idx),
+                    cloud_cover_pct=_pt(grid.cloud_arr, t_idx),
+                    cape_jkg=_pt(grid.cape_arr, t_idx),
                 ))
 
         return rows

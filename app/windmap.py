@@ -567,17 +567,104 @@ def _fetch_openwrf(
             f"No recent OpenWRF GRIB found for region '{region}' ({resolution}, tried last 24 h)"
         )
 
+    import bz2 as _bz2  # noqa: PLC0415
+    raw = _bz2.decompress(resp.content)
+    del resp; gc.collect()
+    return _openwrf_eccodes_clip(raw, lat_min, lat_max, lon_min, lon_max, max_hours, run_dt_used)
+
+
+def _openwrf_eccodes_clip(
+    raw: bytes,
+    lat_min: float, lat_max: float,
+    lon_min: float, lon_max: float,
+    max_hours: int,
+    run_dt: "datetime",
+) -> tuple:
+    """Extract u/v 10 m wind from a WRF GRIB1 file using eccodes (NCEP paramId 33/34)
+    and return the standard 6-tuple expected by generate_wind_frames/gif."""
+    import eccodes  # noqa: PLC0415
+
     tmp_path = None
     try:
-        import bz2 as _bz2  # noqa: PLC0415
-        raw = _bz2.decompress(resp.content)
-        del resp; gc.collect()   # free compressed bytes before writing decompressed
         with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
             f.write(raw)
             tmp_path = f.name
-        del raw; gc.collect()    # free decompressed bytes now they're on disk
-        u_da, v_da = _cfgrib_wind(tmp_path)
-        return _clip_and_pack(u_da, v_da, lat_min, lat_max, lon_min, lon_max, max_hours)
+        del raw; gc.collect()
+
+        u_steps: list[tuple[int, np.ndarray]] = []
+        v_steps: list[tuple[int, np.ndarray]] = []
+        lats_2d = lons_2d = None
+
+        with open(tmp_path, "rb") as fh:
+            while True:
+                try:
+                    msg = eccodes.codes_grib_new_from_file(fh)
+                except Exception:
+                    break
+                if msg is None:
+                    break
+                try:
+                    try:
+                        param_id = eccodes.codes_get(msg, "paramId")
+                    except Exception:
+                        param_id = -1
+                    is_u = param_id in (33, 131)
+                    is_v = param_id in (34, 132)
+                    if not (is_u or is_v):
+                        continue
+                    ni = eccodes.codes_get(msg, "Ni")
+                    nj = eccodes.codes_get(msg, "Nj")
+                    values = eccodes.codes_get_values(msg).reshape(nj, ni)
+                    if lats_2d is None:
+                        lats_2d = eccodes.codes_get_array(msg, "latitudes").reshape(nj, ni)
+                        lons_2d = eccodes.codes_get_array(msg, "longitudes").reshape(nj, ni)
+                    try:
+                        step = int(str(eccodes.codes_get(msg, "stepRange")).split("-")[-1])
+                    except Exception:
+                        step = len(u_steps) if is_u else len(v_steps)
+                    if is_u:
+                        u_steps.append((step, values))
+                    else:
+                        v_steps.append((step, values))
+                finally:
+                    eccodes.codes_release(msg)
+
+        if not u_steps or not v_steps:
+            raise ValueError(f"No u/v wind in OpenWRF GRIB (u={len(u_steps)}, v={len(v_steps)})")
+
+        u_steps.sort(key=lambda x: x[0])
+        v_steps.sort(key=lambda x: x[0])
+
+        lats = lats_2d[:, 0]
+        lons = lons_2d[0, :]
+        if lons.max() > 180:
+            lons = np.where(lons > 180, lons - 360, lons)
+
+        lat_mask = (lats >= lat_min) & (lats <= lat_max)
+        lon_mask = (lons >= lon_min) & (lons <= lon_max)
+        if not lat_mask.any() or not lon_mask.any():
+            raise ValueError(f"No data in bbox ({lat_min:.2f}–{lat_max:.2f} N, {lon_min:.2f}–{lon_max:.2f} E)")
+
+        lat_idx = np.where(lat_mask)[0]
+        lon_idx = np.where(lon_mask)[0]
+
+        u_arr = np.stack([d for _, d in u_steps[:max_hours]])[:, lat_idx][:, :, lon_idx]
+        v_arr = np.stack([d for _, d in v_steps[:max_hours]])[:, lat_idx][:, :, lon_idx]
+        steps = [s for s, _ in u_steps[:max_hours]]
+
+        if lats[0] > lats[-1]:   # ensure ascending latitude
+            lat_idx_sorted = np.argsort(lats[lat_idx])
+            lats_clip = lats[lat_idx][lat_idx_sorted]
+            u_arr = u_arr[:, lat_idx_sorted, :]
+            v_arr = v_arr[:, lat_idx_sorted, :]
+        else:
+            lats_clip = lats[lat_idx]
+
+        labels    = [f"{run_dt + timedelta(hours=s):%d %b %H:%M}" for s in steps]
+        times_utc = [(run_dt + timedelta(hours=s)).strftime("%Y-%m-%dT%H:%M:%SZ") for s in steps]
+
+        gc.collect()
+        return lats_clip, lons[lon_idx], u_arr, v_arr, labels, times_utc
     finally:
         if tmp_path:
             try:
