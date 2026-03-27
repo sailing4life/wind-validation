@@ -54,6 +54,7 @@ class OpenMeteoForecastAdapter:
         # Regular forecast endpoints (used for near-future data)
         self.endpoint_map = {
             "harmonie_nl":  settings.openmeteo_knmi_url,
+            "harmonie_eu":  settings.openmeteo_harmonie_eu_url,
             "arome_hd":     settings.openmeteo_arome_hd_url,
             "icon_it":      settings.openmeteo_dwd_url,
             "icon_eu":      settings.openmeteo_icon_eu_url,
@@ -62,6 +63,7 @@ class OpenMeteoForecastAdapter:
         }
         self.model_param_map = {
             "harmonie_nl":  settings.openmeteo_knmi_model,
+            "harmonie_eu":  settings.openmeteo_harmonie_eu_model,
             "arome_hd":     settings.openmeteo_arome_hd_model,
             "icon_it":      settings.openmeteo_dwd_model,
             "icon_eu":      settings.openmeteo_icon_eu_model,
@@ -263,7 +265,7 @@ class OpenMeteoForecastAdapter:
                 prev_param = self.previous_runs_model_map.get(model.model_id, "")
                 past_rows = self._fetch_batch(
                     self.previous_runs_url, model.model_id, prev_param, in_cov,
-                    past_days=past_days, forecast_days=1,
+                    past_days=1, forecast_days=1,
                     start=start, end=min(end, now),
                 )
                 # Fall back to regular API if previous runs returned nothing
