@@ -230,10 +230,13 @@ async def upload_grib(file: UploadFile = File(...)) -> dict:
             shutil.copyfileobj(file.file, fout)
     finally:
         file.file.close()
-    try:
+    def _validate():
         from .windmap import _cfgrib_wind  # noqa: PLC0415
         u_da, v_da = _cfgrib_wind(str(dest))
         del u_da, v_da
+
+    try:
+        await asyncio.to_thread(_validate)
     except Exception as exc:
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"Could not read 10 m wind from GRIB: {exc}")

@@ -84,6 +84,13 @@ function bfPopulateModelOverride() {
     opt.textContent = m.model_id + (m.model_id === _winnerModelId ? ' ★' : '');
     sel.appendChild(opt);
   });
+  // Re-add any uploaded GRIB options (not part of forecastData.models)
+  _bfUploadedGribs.forEach(({ model_id, filename }) => {
+    const opt = document.createElement('option');
+    opt.value = model_id;
+    opt.textContent = `GRIB: ${filename}`;
+    sel.appendChild(opt);
+  });
   if (current) sel.value = current;
 
   // Populate model checkboxes (preserve existing checked state)
@@ -762,6 +769,7 @@ document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
 
 // ── Wind map snapshots in report ───────────────────────────────────────────────
 let _bfWindmapFramesCache = null;  // { lat, lon, hours, step, model, frames }
+const _bfUploadedGribs = [];       // { model_id, filename } — survives dropdown resets
 
 async function bfFetchAndRenderWindmaps() {
   const panel    = document.getElementById('bfWindmapsPanel');
@@ -896,12 +904,12 @@ document.getElementById('bfGribFileInput')?.addEventListener('change', async (e)
       throw new Error(msg || `HTTP ${resp.status}`);
     }
     const { model_id, filename } = await resp.json();
+    _bfUploadedGribs.push({ model_id, filename });
     const sel = document.getElementById('bfModelOverride');
     if (sel) {
       const opt = document.createElement('option');
       opt.value = model_id;
       opt.textContent = `GRIB: ${filename}`;
-      opt.dataset.uploadId = model_id.replace('upload_', '');
       sel.appendChild(opt);
       sel.value = model_id;
       sel.dispatchEvent(new Event('change'));
