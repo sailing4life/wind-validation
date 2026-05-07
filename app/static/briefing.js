@@ -899,11 +899,11 @@ document.getElementById('bfGribFileInput')?.addEventListener('change', async (e)
     const form = new FormData();
     form.append('file', file);
     const resp = await fetch('/api/upload-grib', { method: 'POST', body: form });
+    const data = await resp.json().catch(() => null);
     if (!resp.ok) {
-      const msg = await resp.text();
-      throw new Error(msg || `HTTP ${resp.status}`);
+      throw new Error(data?.detail || `HTTP ${resp.status}`);
     }
-    const { model_id, filename } = await resp.json();
+    const { model_id, filename } = data;
     _bfUploadedGribs.push({ model_id, filename });
     const sel = document.getElementById('bfModelOverride');
     if (sel) {
@@ -912,8 +912,13 @@ document.getElementById('bfGribFileInput')?.addEventListener('change', async (e)
       opt.textContent = `GRIB: ${filename}`;
       sel.appendChild(opt);
       sel.value = model_id;
-      sel.dispatchEvent(new Event('change'));
     }
+    // Auto-enable Wind maps so the result is visible immediately
+    const cb = document.getElementById('bfIncludeWindmaps');
+    if (cb && !cb.checked) cb.checked = true;
+    _bfWindmapFramesCache = null;
+    bfRerender();
+    bfFetchAndRenderWindmaps();
   } catch (err) {
     alert('GRIB import failed: ' + err.message);
   } finally {
