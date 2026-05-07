@@ -281,6 +281,8 @@
             </select>
           </label>
           <div id="bfModelChecks" class="bf-model-checks" title="Select which models appear in the ensemble charts"></div>
+          <input type="file" id="bfGribFileInput" accept=".grib,.grb,.grib2,.grb2" style="display:none">
+          <button id="bfImportGribBtn" class="btn-secondary" title="Import a local GRIB file as a wind map source">Import GRIB</button>
           <button id="bfPrintBtn">Print / PDF</button>
         </div>
       </div>
@@ -342,7 +344,7 @@
   <script src="/static/app.js?v=28"></script>
   <script src="/static/forecast.js?v=28"></script>
   <script src="/static/weather.js?v=28"></script>
-  <script src="/static/briefing.js?v=28"></script>
+  <script src="/static/briefing.js?v=29"></script>
 </body>
 </html>
 

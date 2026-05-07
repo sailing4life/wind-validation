@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -24,6 +26,11 @@ _windmap_sem = asyncio.Semaphore(1)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+# upload_id -> absolute Path for locally uploaded GRIBs (in-memory, process lifetime)
+_uploaded_gribs: dict[str, Path] = {}
 
 repo = InMemoryRepository()
 forecast_broker = ForecastBroker(repo, SETTINGS)
@@ -124,6 +131,12 @@ def freshness() -> dict:
 
 def _windmap_model_params(model_id: str) -> tuple[str, str]:
     """Map a forecast model ID to (endpoint_url, model_param) for Open-Meteo."""
+    if model_id.startswith("upload_"):
+        upload_id = model_id[len("upload_"):]
+        path = _uploaded_gribs.get(upload_id)
+        if path is None:
+            raise ValueError(f"Uploaded GRIB '{upload_id}' not found (may have been deleted).")
+        return ("", f"local_upload:{path}")
     model_map = {
         "harmonie_nl":  (SETTINGS.openmeteo_knmi_url,     SETTINGS.openmeteo_knmi_model),
         "arome_hd":     (SETTINGS.openmeteo_arome_hd_url, SETTINGS.openmeteo_arome_hd_model),
@@ -199,6 +212,42 @@ async def windmap_frames(
         return Response(content=str(exc), status_code=503, media_type="text/plain")
 
     return Response(content=json.dumps({"frames": frames}), media_type="application/json")
+
+
+_ALLOWED_GRIB_SUFFIXES = {".grib", ".grb", ".grib2", ".grb2"}
+
+
+@app.post("/api/upload-grib")
+async def upload_grib(file: UploadFile = File(...)) -> dict:
+    """Accept a GRIB file upload, validate it contains 10 m wind, return an upload_id."""
+    suffix = Path(file.filename or "upload.grib").suffix.lower()
+    if suffix not in _ALLOWED_GRIB_SUFFIXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'. Expected .grib/.grb/.grib2")
+    upload_id = uuid.uuid4().hex
+    dest = UPLOAD_DIR / f"{upload_id}{suffix}"
+    try:
+        with dest.open("wb") as fout:
+            shutil.copyfileobj(file.file, fout)
+    finally:
+        file.file.close()
+    try:
+        from .windmap import _cfgrib_wind  # noqa: PLC0415
+        u_da, v_da = _cfgrib_wind(str(dest))
+        del u_da, v_da
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Could not read 10 m wind from GRIB: {exc}")
+    _uploaded_gribs[upload_id] = dest
+    return {"upload_id": upload_id, "filename": file.filename, "model_id": f"upload_{upload_id}"}
+
+
+@app.delete("/api/upload-grib/{upload_id}")
+async def delete_grib(upload_id: str) -> dict:
+    """Remove a previously uploaded GRIB file."""
+    path = _uploaded_gribs.pop(upload_id, None)
+    if path and path.exists():
+        path.unlink()
+    return {"ok": True}
 
 
 @app.get("/api/ocean-current")

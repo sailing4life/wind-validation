@@ -875,6 +875,46 @@ document.getElementById('bfIncludeCurrent')?.addEventListener('change', () => {
 
 document.getElementById('bfIncludeEnsemble')?.addEventListener('change', renderBriefingEnsembleCharts);
 
+// ── GRIB import ────────────────────────────────────────────────────────────────
+document.getElementById('bfImportGribBtn')?.addEventListener('click', () => {
+  document.getElementById('bfGribFileInput')?.click();
+});
+
+document.getElementById('bfGribFileInput')?.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const btn = document.getElementById('bfImportGribBtn');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Uploading…';
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await fetch('/api/upload-grib', { method: 'POST', body: form });
+    if (!resp.ok) {
+      const msg = await resp.text();
+      throw new Error(msg || `HTTP ${resp.status}`);
+    }
+    const { model_id, filename } = await resp.json();
+    const sel = document.getElementById('bfModelOverride');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = model_id;
+      opt.textContent = `GRIB: ${filename}`;
+      opt.dataset.uploadId = model_id.replace('upload_', '');
+      sel.appendChild(opt);
+      sel.value = model_id;
+      sel.dispatchEvent(new Event('change'));
+    }
+  } catch (err) {
+    alert('GRIB import failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+    e.target.value = '';
+  }
+});
+
 // ── Save briefing as JSON ──────────────────────────────────────────────────────
 document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
   if (!forecastData) { alert('No forecast loaded.'); return; }

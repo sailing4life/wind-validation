@@ -160,6 +160,8 @@ def _dt_to_iso(dt: datetime) -> str:
 def _model_to_grib_source(model_param: str) -> str:
     """Map an Open-Meteo model_param string to a GRIB data source key."""
     p = model_param.lower()
+    if p.startswith("local_upload:"):
+        return "local_upload"
     if "knmi" in p or "harmonie" in p:
         return "harmonie_s3"
     if "icon" in p:
@@ -751,6 +753,19 @@ def _fetch_meteofetch(
     )
 
 
+# ── local upload ───────────────────────────────────────────────────────────────
+
+def _fetch_local_grib(
+    lat_min: float, lat_max: float,
+    lon_min: float, lon_max: float,
+    file_path: str,
+    max_hours: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
+    """Read U10/V10 from a user-uploaded GRIB file and clip to bbox."""
+    u_da, v_da = _cfgrib_wind(file_path)
+    return _clip_and_pack(u_da, v_da, lat_min, lat_max, lon_min, lon_max, max_hours)
+
+
 # ── dispatcher ─────────────────────────────────────────────────────────────────
 
 def _fetch_grib_grid(
@@ -767,6 +782,10 @@ def _fetch_grib_grid(
     """
     source = _model_to_grib_source(model_param)
     logger.info("GRIB source for '%s' → %s", model_param, source)
+
+    if source == "local_upload":
+        file_path = model_param[len("local_upload:"):]
+        return _fetch_local_grib(lat_min, lat_max, lon_min, lon_max, file_path, max_hours)
 
     if source == "harmonie_s3":
         return _fetch_harmonie_s3(lat_min, lat_max, lon_min, lon_max, max_hours)
@@ -1019,10 +1038,9 @@ def generate_wind_frames(
     lat_res = float(abs(lats[1] - lats[0])) if len(lats) > 1 else BARB_SPACING_DEG
     barb_stride = max(1, round(BARB_SPACING_DEG / lat_res))
 
-    # Smaller figures for embedded report snapshots (saves ~55 % memory vs GIF size)
-    FRAME_DPI    = 72
-    FRAME_W_PX   = 560
-    FRAME_H_PX   = 420
+    FRAME_DPI    = 96
+    FRAME_W_PX   = 900
+    FRAME_H_PX   = 680
 
     result: list[dict] = []
     for t_idx, (label, time_utc) in enumerate(zip(labels, times_utc)):

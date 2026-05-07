@@ -994,7 +994,7 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 /* Wind map snapshot grid */
 .bf-windmaps-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
   gap: 16px;
   margin-top: 8px;
 }
