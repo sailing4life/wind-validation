@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+logger = logging.getLogger("wind_validation")
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -250,6 +253,39 @@ async def upload_grib(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail=f"Could not read 10 m wind from GRIB: {exc}")
     _uploaded_gribs[upload_id] = dest
     return {"upload_id": upload_id, "filename": file.filename, "model_id": f"upload_{upload_id}"}
+
+
+@app.post("/api/validate-expedition-log")
+async def validate_expedition_log(
+    file: UploadFile = File(...),
+    interval_min: int = Query(10, ge=2, le=60),
+) -> dict:
+    """Parse a sailing expedition .proc.csv and compare wind against NWP models."""
+    from .expedition import parse_expedition_csv, validate_expedition  # noqa: PLC0415
+
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Expected a .csv file")
+
+    data = await file.read()
+
+    def _run() -> dict:
+        samples = parse_expedition_csv(data, interval_min)
+        if not samples:
+            raise ValueError(
+                "No valid wind samples found. "
+                "Check that the file has UtcDate, UtcTime, Lat, Lon, TWS, TWD columns."
+            )
+        return validate_expedition(samples, repo.models, forecast_broker.openmeteo, SETTINGS)
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Expedition log validation failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return result
 
 
 @app.delete("/api/upload-grib/{upload_id}")

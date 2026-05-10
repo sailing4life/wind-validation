@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=28" />
+  <link rel="stylesheet" href="/static/styles.css?v=29" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -62,10 +62,30 @@
       <div class="col-right">
         <section class="panel controls">
           <h2>Query</h2>
-          <label>Latitude <input id="lat" type="number" step="0.0001" value="52.1" /></label>
-          <label>Longitude <input id="lon" type="number" step="0.0001" value="5.1" /></label>
-          <label>Radius (km) <input id="radius" type="number" step="1" value="50" /></label>
-          <label>Hours back <input id="hoursBack" type="number" step="1" value="24" min="1" max="168" /></label>
+          <div class="source-toggle">
+            <label class="mode-pill"><input type="radio" name="querySource" value="point" checked><span>Wind points</span></label>
+            <label class="mode-pill"><input type="radio" name="querySource" value="expedition"><span>Expedition log</span></label>
+          </div>
+
+          <div id="pointInputs">
+            <label>Latitude <input id="lat" type="number" step="0.0001" value="52.1" /></label>
+            <label>Longitude <input id="lon" type="number" step="0.0001" value="5.1" /></label>
+            <label>Radius (km) <input id="radius" type="number" step="1" value="50" /></label>
+            <label>Hours back <input id="hoursBack" type="number" step="1" value="24" min="1" max="168" /></label>
+          </div>
+
+          <div id="expeditionInputs" style="display:none">
+            <label>Log file (.proc.csv) <input type="file" id="expeditionFile" accept=".csv" /></label>
+            <label>Sample interval
+              <select id="expeditionInterval">
+                <option value="2">Every 2 minutes</option>
+                <option value="10" selected>Every 10 minutes</option>
+                <option value="30">Every 30 minutes</option>
+              </select>
+            </label>
+            <p class="expedition-hint">Reads TWS&amp;TWD from the log and compares each GPS position + time against NWP models.</p>
+          </div>
+
           <button id="run">Validate</button>
           <div id="meta" class="meta-block"></div>
         </section>

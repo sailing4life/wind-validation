@@ -37,11 +37,13 @@ map.on("click", (e) => {
 });
 
 // ── state ────────────────────────────────────────────────────────────────────
-let latestSeries   = [];
-let selectedModels = new Set();
-let analysisMode   = "pin";  // "pin" | "obs"
-let errorMode      = false;
-let hoverIndex     = null;
+let latestSeries    = [];
+let selectedModels  = new Set();
+let analysisMode    = "pin";  // "pin" | "obs"
+let errorMode       = false;
+let hoverIndex      = null;
+let querySource     = "point";  // "point" | "expedition"
+let expeditionTrack = null;     // Leaflet polyline for expedition mode
 const modelColorMap = new Map();
 
 // ── tooltip ──────────────────────────────────────────────────────────────────
@@ -319,6 +321,7 @@ function drawScatterChart(canvas, cssH, obsVals, modelLines, times, { minY, maxY
 
 function updateChartStatus() {
   if (!latestSeries.length) return;
+  if (querySource === "expedition") { chartStatus.textContent = ""; chartStatus.className = "chart-status"; return; }
   const pts = latestSeries[0].points;
   const obsVals = pts.map(p => p.obs_ws_ms);
   const hasObs = obsVals.some(v => v != null);
@@ -447,6 +450,8 @@ function fmt2(v) { return v != null ? Number(v).toFixed(2) : "—"; }
 
 // ── main validation ──────────────────────────────────────────────────────────
 async function runValidation() {
+  if (querySource === "expedition") { return runExpeditionValidation(); }
+
   runBtn.disabled = true;
   runBtn.textContent = "Loading…";
   metaBlock.innerHTML = "";
@@ -607,7 +612,7 @@ function onChartMouseMove(e) {
   const wdField  = analysisMode === "pin" ? "model_wd_deg" : "model_wd_deg_obs";
   const pt = latestSeries[0].points[idx];
   const t  = new Date(pt.time_utc);
-  const ts = `${String(t.getUTCDate()).padStart(2,"0")}/${String(t.getUTCMonth()+1).padStart(2,"0")} ${String(t.getUTCHours()).padStart(2,"0")}:00 UTC`;
+  const ts = `${String(t.getUTCDate()).padStart(2,"0")}/${String(t.getUTCMonth()+1).padStart(2,"0")} ${String(t.getUTCHours()).padStart(2,"0")}:${String(t.getUTCMinutes()).padStart(2,"0")} UTC`;
 
   let html = `<b style="color:#94a3b8">${ts}</b>`;
   if (errorMode) {
@@ -683,5 +688,117 @@ document.getElementById("errorModeToggle").addEventListener("change", (e) => {
   drawCharts();
 });
 
+document.querySelectorAll('input[name="querySource"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    querySource = radio.value;
+    const isExp = querySource === "expedition";
+    document.getElementById("pointInputs").style.display      = isExp ? "none" : "";
+    document.getElementById("expeditionInputs").style.display = isExp ? ""     : "none";
+    document.querySelector(".mode-pills").style.display        = isExp ? "none" : "";
+  });
+});
+
 window.addEventListener("resize", () => drawCharts());
 runBtn.addEventListener("click", runValidation);
+
+// ── expedition log validation ─────────────────────────────────────────────────
+async function runExpeditionValidation() {
+  const fileInput = document.getElementById("expeditionFile");
+  if (!fileInput.files.length) {
+    metaBlock.innerHTML = '<span class="meta-error">Please select a .proc.csv expedition log file.</span>';
+    return;
+  }
+
+  runBtn.disabled = true;
+  runBtn.textContent = "Parsing…";
+  metaBlock.innerHTML = "";
+  rankingBody.innerHTML = "";
+  stationsList.innerHTML = "";
+  modelToggles.innerHTML = "";
+  chartStatus.textContent = "Fetching model data for expedition track…";
+  chartStatus.className = "chart-status";
+
+  const intervalMin = document.getElementById("expeditionInterval").value;
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+
+  let data;
+  try {
+    const resp = await fetch(`/api/validate-expedition-log?interval_min=${intervalMin}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!resp.ok) {
+      let detail = `Error ${resp.status}`;
+      try { const j = await resp.json(); detail += ": " + (j.detail || JSON.stringify(j)); }
+      catch { detail += ": " + (await resp.text()).slice(0, 200); }
+      metaBlock.innerHTML = `<span class="meta-error">${detail}</span>`;
+      return;
+    }
+    data = await resp.json();
+  } catch (err) {
+    metaBlock.innerHTML = `<span class="meta-error">Request failed: ${err.message}</span>`;
+    return;
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = "Validate";
+  }
+
+  // ── window info ──
+  windowInfo.textContent =
+    `${fmtUTC(data.window_start_utc)} → ${fmtUTC(data.window_end_utc)} · ${data.n_samples} log samples`;
+
+  // ── meta block ──
+  metaBlock.innerHTML = `
+    <div class="meta-row"><span class="meta-label">Winner:</span> ${data.winner_model_id ?? "—"}</div>
+    <div class="meta-row">
+      <span class="meta-label">Source:</span> expedition log (GPS+TWS+TWD) &nbsp;
+      <span class="meta-label">Samples:</span> ${data.n_samples} @ ${intervalMin} min
+    </div>
+  `;
+
+  // ── ranking table ──
+  data.models.forEach((row) => {
+    const tr = document.createElement("tr");
+    if (row.model_id === data.winner_model_id) tr.className = "winner-row";
+    const isWinner = row.model_id === data.winner_model_id;
+    const badgeCls = row.status === "ok" ? "badge-ok" : row.status === "excluded" ? "badge-excl" : "badge-insuf";
+    const note = (row.reasons || []).join(", ");
+    tr.innerHTML = `
+      <td class="model-cell ${isWinner ? "winner-cell" : ""}">${row.model_id}${isWinner ? " ★" : ""}</td>
+      <td>${fmt2(row.vector_rmse_uv)}</td>
+      <td>${fmt2(row.rmse_ws)}</td>
+      <td>${fmt2(row.bias_ws)}</td>
+      <td>${row.n_samples}</td>
+      <td><span class="badge ${badgeCls}" title="${note}">${row.status}</span></td>
+    `;
+    rankingBody.appendChild(tr);
+  });
+
+  // ── expedition track on map ──
+  stationLayer.clearLayers();
+  obsLayer.clearLayers();
+  if (expeditionTrack) { map.removeLayer(expeditionTrack); expeditionTrack = null; }
+
+  if (data.track && data.track.length > 0) {
+    const coords = data.track.map(p => [p.lat, p.lon]);
+    expeditionTrack = L.polyline(coords, { color: "#0369a1", weight: 2.5, opacity: 0.75 }).addTo(map);
+    L.circleMarker(coords[0], { radius: 6, color: "#15803d", fillColor: "#15803d", fillOpacity: 1 })
+      .bindPopup("Start: " + new Date(data.track[0].time_utc).toUTCString()).addTo(stationLayer);
+    L.circleMarker(coords[coords.length - 1], { radius: 6, color: "#dc2626", fillColor: "#dc2626", fillOpacity: 1 })
+      .bindPopup("End: " + new Date(data.track[data.track.length - 1].time_utc).toUTCString()).addTo(stationLayer);
+    map.fitBounds(expeditionTrack.getBounds(), { padding: [30, 30] });
+  }
+
+  // ── stations panel — show track summary instead ──
+  const li = document.createElement("li");
+  li.style.cssText = "color:#64748b;font-size:12px;padding:4px 0;list-style:none";
+  li.textContent = `Track: ${data.track?.length ?? 0} points, ${intervalMin} min interval`;
+  stationsList.appendChild(li);
+
+  // ── charts ──
+  latestSeries = data.time_series || [];
+  modelColorMap.clear();
+  populateModelToggles(latestSeries, data.winner_model_id, {});
+  drawCharts();
+}
