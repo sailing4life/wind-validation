@@ -32,7 +32,7 @@ def default_model_catalog() -> list[ModelDefinition]:
         ),
         ModelDefinition(
             model_id="icon_it",
-            provider="DWD",
+            provider="ItaliaMeteo/ARPAE",
             category="regional",
             coverage_bbox={"min_lat": 35.0, "max_lat": 48.0, "min_lon": 5.0, "max_lon": 20.0},
             priority_by_country={"IT": 1, "FR": 45, "NL": 60, "OTHER": 90},

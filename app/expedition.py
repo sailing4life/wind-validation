@@ -22,7 +22,7 @@ KNOTS_TO_MS = 0.514444
 
 # Models that fetch wind from their own GRIB source (not Open-Meteo).
 # These download the latest available run from the provider's open-data portal.
-_GRIB_MODEL_IDS = {"aladin_cz", "icon_it", "openwrf"}
+_GRIB_MODEL_IDS = {"aladin_cz", "openwrf"}
 
 
 def parse_expedition_csv(data: bytes, interval_min: int) -> list[dict]:
@@ -123,21 +123,16 @@ def _fetch_grib_fc_values(
             logger.info("OpenWRF GRIB fetch skipped: %s", exc)
             return []
 
-    # aladin_cz / icon_it — fetch spatial grid, then extract nearest points
-    if model_id not in ("aladin_cz", "icon_it"):
+    # aladin_cz — fetch spatial grid from ČHMÚ, then extract nearest points
+    if model_id != "aladin_cz":
         return []
 
     try:
-        if model_id == "aladin_cz":
-            from .windmap import _fetch_aladin_cz  # noqa: PLC0415
-            lats_g, lons_g, u_arr, v_arr, _, times_iso = \
-                _fetch_aladin_cz(lat_min, lat_max, lon_min, lon_max, max_hours)
-        else:  # icon_it → DWD ICON-D2
-            from .windmap import _fetch_icon_d2_dwd  # noqa: PLC0415
-            lats_g, lons_g, u_arr, v_arr, _, times_iso = \
-                _fetch_icon_d2_dwd(lat_min, lat_max, lon_min, lon_max, max_hours)
+        from .windmap import _fetch_aladin_cz  # noqa: PLC0415
+        lats_g, lons_g, u_arr, v_arr, _, times_iso = \
+            _fetch_aladin_cz(lat_min, lat_max, lon_min, lon_max, max_hours)
     except Exception as exc:
-        logger.info("%s GRIB fetch skipped: %s", model_id, exc)
+        logger.info("ALADIN-CZ GRIB fetch skipped: %s", exc)
         return []
 
     # Parse ISO times from windmap output
