@@ -109,8 +109,8 @@ def validate_expedition(
     def _overlaps(model: ModelDefinition) -> bool:
         b = model.coverage_bbox
         return not (
-            route_bbox["lat_max"] < b["lat_min"] or route_bbox["lat_min"] > b["lat_max"]
-            or route_bbox["lon_max"] < b["lon_min"] or route_bbox["lon_min"] > b["lon_max"]
+            route_bbox["lat_max"] < b["min_lat"] or route_bbox["lat_min"] > b["max_lat"]
+            or route_bbox["lon_max"] < b["min_lon"] or route_bbox["lon_min"] > b["max_lon"]
         )
 
     candidates = [m for m in catalog if m.status == "ACTIVE" and _overlaps(m)]
