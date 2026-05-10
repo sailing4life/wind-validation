@@ -3,12 +3,15 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import math
 import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
+
 from .config import Settings
-from .domain import ModelDefinition
+from .domain import ForecastValue, ModelDefinition
 from .forecast_adapters import OpenMeteoForecastAdapter
 from .geo import haversine_km, in_bbox
 from .scoring import compute_metrics, speed_dir_to_uv, uv_to_speed_dir
@@ -16,6 +19,10 @@ from .scoring import compute_metrics, speed_dir_to_uv, uv_to_speed_dir
 logger = logging.getLogger("wind_validation.expedition")
 
 KNOTS_TO_MS = 0.514444
+
+# Models that fetch wind from their own GRIB source (not Open-Meteo).
+# These download the latest available run from the provider's open-data portal.
+_GRIB_MODEL_IDS = {"aladin_cz", "openwrf"}
 
 
 def parse_expedition_csv(data: bytes, interval_min: int) -> list[dict]:
@@ -80,6 +87,103 @@ def parse_expedition_csv(data: bytes, interval_min: int) -> list[dict]:
     return [buckets[b][len(buckets[b]) // 2] for b in sorted(buckets)]
 
 
+def _fetch_grib_fc_values(
+    model_id: str,
+    samples: list[dict],
+    start: datetime,
+    end: datetime,
+) -> list[ForecastValue]:
+    """Download GRIB for *model_id* and extract ForecastValue objects at sample positions.
+
+    Uses the same GRIB fetchers as the windmap tab (latest available run from the
+    provider's open-data portal).  Only works for recent expeditions where the
+    run still exists on the server; older data silently returns an empty list.
+    """
+    # lazy import — windmap has heavy dependencies (matplotlib, etc.)
+    from .windmap import _fetch_aladin_cz  # noqa: PLC0415
+    from .openwrf_adapter import OpenWrfAdapter  # noqa: PLC0415
+
+    exp_lats = [s["lat"] for s in samples]
+    exp_lons = [s["lon"] for s in samples]
+    lat_min  = min(exp_lats) - 0.5
+    lat_max  = max(exp_lats) + 0.5
+    lon_min  = min(exp_lons) - 0.5
+    lon_max  = max(exp_lons) + 0.5
+    max_hours = int((end - start).total_seconds() // 3600) + 49
+
+    if model_id == "openwrf":
+        # OpenWrfAdapter already returns ForecastValue objects
+        try:
+            from .catalog import default_model_catalog  # noqa: PLC0415
+            model_def = next((m for m in default_model_catalog() if m.model_id == "openwrf"), None)
+            if model_def is None:
+                return []
+            coords = list({(round(s["lat"], 3), round(s["lon"], 3)) for s in samples})
+            return OpenWrfAdapter().fetch_model_at_coords(model_def, coords, start, end)
+        except Exception as exc:
+            logger.info("OpenWRF GRIB fetch skipped: %s", exc)
+            return []
+
+    # aladin_cz — fetch spatial grid, then extract nearest points
+    if model_id != "aladin_cz":
+        return []
+
+    try:
+        lats_g, lons_g, u_arr, v_arr, _, times_iso = \
+            _fetch_aladin_cz(lat_min, lat_max, lon_min, lon_max, max_hours)
+    except Exception as exc:
+        logger.info("ALADIN-CZ GRIB fetch skipped: %s", exc)
+        return []
+
+    # Parse ISO times from windmap output
+    grid_times: list[datetime | None] = []
+    for t_iso in times_iso:
+        try:
+            grid_times.append(datetime.fromisoformat(t_iso.replace("Z", "+00:00")))
+        except Exception:
+            grid_times.append(None)
+
+    rows: list[ForecastValue] = []
+    for s in samples:
+        sample_hour = s["time_utc"].replace(minute=0, second=0, microsecond=0)
+
+        # Find closest grid timestep (within 1.5 h)
+        best_i = best_diff = None
+        for i, gt in enumerate(grid_times):
+            if gt is None:
+                continue
+            diff = abs((gt - sample_hour).total_seconds())
+            if best_diff is None or diff < best_diff:
+                best_i, best_diff = i, diff
+
+        if best_i is None or best_diff > 5400:
+            continue
+
+        iy = int(np.argmin(np.abs(lats_g - s["lat"])))
+        ix = int(np.argmin(np.abs(lons_g - s["lon"])))
+
+        if best_i >= u_arr.shape[0]:
+            continue
+
+        u = float(u_arr[best_i, iy, ix])
+        v = float(v_arr[best_i, iy, ix])
+
+        if not (math.isfinite(u) and math.isfinite(v)):
+            continue
+
+        rows.append(ForecastValue(
+            model_id=model_id,
+            run_time_utc=grid_times[best_i],
+            valid_time_utc=grid_times[best_i],
+            lat=float(lats_g[iy]),
+            lon=float(lons_g[ix]),
+            u10=u,
+            v10=v,
+        ))
+
+    return rows
+
+
 def validate_expedition(
     samples: list[dict],
     catalog: list[ModelDefinition],
@@ -113,9 +217,14 @@ def validate_expedition(
             or route_bbox["lon_max"] < b["min_lon"] or route_bbox["lon_min"] > b["max_lon"]
         )
 
-    candidates = [m for m in catalog if m.status == "ACTIVE" and _overlaps(m)]
+    candidates = [
+        m for m in catalog
+        if m.status == "ACTIVE"
+        and _overlaps(m)
+        and (m.model_id in forecast_adapter.endpoint_map or m.model_id in _GRIB_MODEL_IDS)
+    ]
 
-    # One representative GPS position per hour for batch-fetching.
+    # One representative GPS position per hour for Open-Meteo batch fetching.
     hour_buckets: dict[datetime, list[dict]] = defaultdict(list)
     for s in samples:
         hour = s["time_utc"].replace(minute=0, second=0, microsecond=0)
@@ -130,25 +239,35 @@ def validate_expedition(
             seen.add(coord)
             rep_coords.append(coord)
 
-    # Cap to keep batch API requests manageable.
     if len(rep_coords) > 60:
         step = len(rep_coords) // 60 + 1
         rep_coords = rep_coords[::step]
 
-    # Fetch forecast data from each model.
+    # Fetch forecast data — Open-Meteo for standard models, GRIB for special ones.
     fc_index: dict[tuple[str, datetime], list] = defaultdict(list)
-    for i, model in enumerate(candidates):
-        if i > 0:
-            time.sleep(3.0)  # respect Open-Meteo rate limit
-        in_cov = [(lat, lon) for lat, lon in rep_coords if in_bbox(lat, lon, model.coverage_bbox)]
-        if not in_cov:
-            continue
-        try:
-            fvs = forecast_adapter.fetch_model_at_coords(model, in_cov, start, end)
-            for fv in fvs:
-                fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
-        except Exception as exc:
-            logger.warning("Expedition fetch failed for %s: %s", model.model_id, exc)
+    openmeteo_count = 0
+    for model in candidates:
+        if model.model_id in _GRIB_MODEL_IDS:
+            try:
+                fvs = _fetch_grib_fc_values(model.model_id, samples, start, end)
+            except Exception as exc:
+                logger.warning("GRIB fetch failed for %s: %s", model.model_id, exc)
+                fvs = []
+        else:
+            if openmeteo_count > 0:
+                time.sleep(3.0)  # respect Open-Meteo rate limit
+            openmeteo_count += 1
+            in_cov = [(lat, lon) for lat, lon in rep_coords if in_bbox(lat, lon, model.coverage_bbox)]
+            if not in_cov:
+                continue
+            try:
+                fvs = forecast_adapter.fetch_model_at_coords(model, in_cov, start, end)
+            except Exception as exc:
+                logger.warning("Expedition Open-Meteo fetch failed for %s: %s", model.model_id, exc)
+                fvs = []
+
+        for fv in fvs:
+            fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
 
     def nearest_fc(model_id: str, slat: float, slon: float, t: datetime):
         hour = t.replace(minute=0, second=0, microsecond=0)
