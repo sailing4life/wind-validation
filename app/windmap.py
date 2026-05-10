@@ -162,6 +162,8 @@ def _model_to_grib_source(model_param: str) -> str:
     p = model_param.lower()
     if p.startswith("local_upload:"):
         return "local_upload"
+    if "aladin" in p:
+        return "aladin_cz"
     if "knmi" in p or "harmonie" in p:
         return "harmonie_s3"
     if "icon" in p:
@@ -753,6 +755,180 @@ def _fetch_meteofetch(
     )
 
 
+# ── Czech ALADIN (ČHMÚ Lambert 2.3 km) ────────────────────────────────────────
+_ALADIN_CZ_BASE   = "https://opendata.chmi.cz/meteorology/weather/nwp_aladin/Lambert_2.3km"
+_ALADIN_CZ_PREFIX = "ALADLAMB4opendata"
+_ALADIN_WS_PARAM  = 32   # GRIB1 indicatorOfParameter — wind speed [m s⁻¹]
+_ALADIN_WD_PARAM  = 31   # GRIB1 indicatorOfParameter — wind direction [° from N]
+
+
+def _aladin_parse_clip(
+    path: str,
+    param_id: int,
+    lat_min: float, lat_max: float,
+    lon_min: float, lon_max: float,
+    max_hours: int,
+) -> tuple[list, np.ndarray, np.ndarray, np.ndarray]:
+    """Parse one ALADIN Lambert-grid GRIB file and clip to bbox.
+
+    Returns (sorted_valid_datetimes, lats_1d, lons_1d, data_3d[t, y, x]).
+    lats_1d / lons_1d are row/column means of the Lambert sub-grid — a good
+    approximation for the small (~50×80 km) clip windows used here.
+    """
+    import eccodes  # noqa: PLC0415
+
+    frames: dict[datetime, np.ndarray] = {}
+    ni = nj = r0 = c0 = r1 = c1 = None
+    lats_1d = lons_1d = None
+
+    with open(path, "rb") as fobj:
+        while len(frames) < max_hours:
+            gid = eccodes.codes_grib_new_from_file(fobj)
+            if gid is None:
+                break
+            try:
+                pid = eccodes.codes_get(gid, "indicatorOfParameter", ktype=int)
+                if pid != param_id:
+                    continue
+
+                if ni is None:
+                    ni   = eccodes.codes_get(gid, "Ni", ktype=int)
+                    nj   = eccodes.codes_get(gid, "Nj", ktype=int)
+                    lats2d = np.array(eccodes.codes_get_array(gid, "latitudes"), dtype=float).reshape(nj, ni)
+                    lons2d = np.array(eccodes.codes_get_array(gid, "longitudes"), dtype=float).reshape(nj, ni)
+                    lons2d = np.where(lons2d > 180, lons2d - 360, lons2d)
+                    in_box = (
+                        (lats2d >= lat_min) & (lats2d <= lat_max) &
+                        (lons2d >= lon_min) & (lons2d <= lon_max)
+                    )
+                    rows = np.where(in_box.any(axis=1))[0]
+                    cols = np.where(in_box.any(axis=0))[0]
+                    if not len(rows) or not len(cols):
+                        raise ValueError(
+                            f"No ALADIN-CZ data in bbox "
+                            f"({lat_min:.2f}–{lat_max:.2f} N, {lon_min:.2f}–{lon_max:.2f} E)"
+                        )
+                    r0, r1 = int(rows[0]), int(rows[-1]) + 1
+                    c0, c1 = int(cols[0]), int(cols[-1]) + 1
+                    lats_1d = lats2d[r0:r1, c0:c1].mean(axis=1)
+                    lons_1d = lons2d[r0:r1, c0:c1].mean(axis=0)
+                    del lats2d, lons2d, in_box, rows, cols
+
+                date_val = eccodes.codes_get(gid, "dataDate", ktype=int)
+                time_val = eccodes.codes_get(gid, "dataTime", ktype=int)
+                step_str = eccodes.codes_get(gid, "stepRange", ktype=str)
+                try:
+                    step_h = int(step_str.split("-")[-1])
+                except Exception:
+                    step_h = 0
+                run_local = datetime(
+                    date_val // 10000, (date_val // 100) % 100, date_val % 100,
+                    time_val // 100, time_val % 100, tzinfo=UTC,
+                )
+                valid_dt = run_local + timedelta(hours=step_h)
+                vals = (
+                    np.array(eccodes.codes_get_array(gid, "values"), dtype=float)
+                    .reshape(nj, ni)[r0:r1, c0:c1]
+                )
+                frames[valid_dt] = vals
+            finally:
+                eccodes.codes_release(gid)
+
+    if not frames or lats_1d is None:
+        raise ValueError(f"No data (indicatorOfParameter={param_id}) found in {path}")
+
+    sorted_times = sorted(frames.keys())
+    return sorted_times, lats_1d, lons_1d, np.stack([frames[t] for t in sorted_times])
+
+
+def _fetch_aladin_cz(
+    lat_min: float, lat_max: float,
+    lon_min: float, lon_max: float,
+    max_hours: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
+    """Fetch 10 m wind from Czech ALADIN Lambert_2.3 km GRIB (ČHMÚ open data).
+
+    Downloads CLSWIND_SPEED and CLSWIND_DIREC (bz2-compressed GRIB1), clips to
+    the request bbox, and converts meteorological direction → U/V components.
+    """
+    import bz2 as _bz2, os, tempfile  # noqa: PLC0415
+
+    # ── locate latest available run ────────────────────────────────────────────
+    now = datetime.now(UTC)
+    run_dt = speed_url = dir_url = None
+    for h_back in range(0, 25):
+        cand = (now - timedelta(hours=h_back)).replace(minute=0, second=0, microsecond=0)
+        if cand.hour not in (0, 6, 12, 18):
+            continue
+        run_str  = cand.strftime("%Y%m%d%H")
+        run_hour = f"{cand.hour:02d}"
+        s_url = f"{_ALADIN_CZ_BASE}/{run_hour}/{_ALADIN_CZ_PREFIX}_{run_str}_CLSWIND_SPEED.grb.bz2"
+        d_url = f"{_ALADIN_CZ_BASE}/{run_hour}/{_ALADIN_CZ_PREFIX}_{run_str}_CLSWIND_DIREC.grb.bz2"
+        try:
+            with httpx.Client(timeout=10) as c:
+                if c.head(s_url).status_code == 200:
+                    run_dt, speed_url, dir_url = cand, s_url, d_url
+                    break
+            logger.debug("ALADIN-CZ %s → not available", s_url)
+        except Exception as exc:
+            logger.debug("ALADIN-CZ probe %s: %s", s_url, exc)
+
+    if run_dt is None:
+        raise RuntimeError("No recent Czech ALADIN GRIB found on ČHMÚ open data (tried last 24 h)")
+
+    logger.info("ALADIN-CZ run %s — downloading speed + direction", run_dt)
+
+    # ── download, decompress, write to temp files ─────────────────────────────
+    tmp_spd = tmp_dir_f = None
+    try:
+        with httpx.Client(timeout=300) as c:
+            raw_spd = _bz2.decompress(c.get(speed_url).raise_for_status().content)
+            raw_dir = _bz2.decompress(c.get(dir_url).raise_for_status().content)
+        with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
+            f.write(raw_spd); tmp_spd = f.name
+        del raw_spd
+        with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
+            f.write(raw_dir); tmp_dir_f = f.name
+        del raw_dir
+        gc.collect()
+
+        logger.info("ALADIN-CZ: parsing GRIB clips")
+        times_s, lats, lons, spd = _aladin_parse_clip(
+            tmp_spd, _ALADIN_WS_PARAM, lat_min, lat_max, lon_min, lon_max, max_hours,
+        )
+        times_d, _, _, direction = _aladin_parse_clip(
+            tmp_dir_f, _ALADIN_WD_PARAM, lat_min, lat_max, lon_min, lon_max, max_hours,
+        )
+    finally:
+        for p in (tmp_spd, tmp_dir_f):
+            if p:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+    # ── align time axes (cap at shorter of the two) ───────────────────────────
+    n_t = min(len(times_s), len(times_d), max_hours)
+    spd, direction, times = spd[:n_t], direction[:n_t], times_s[:n_t]
+
+    # ── ascending latitude ────────────────────────────────────────────────────
+    if len(lats) > 1 and lats[0] > lats[-1]:
+        lats      = lats[::-1]
+        spd       = spd[:, ::-1, :]
+        direction = direction[:, ::-1, :]
+
+    # ── meteorological direction → U / V ─────────────────────────────────────
+    dir_rad = np.deg2rad(direction)
+    u_arr = -(spd * np.sin(dir_rad))
+    v_arr = -(spd * np.cos(dir_rad))
+    del spd, direction
+    gc.collect()
+
+    labels    = [_dt_to_label(t) for t in times]
+    times_utc = [_dt_to_iso(t)   for t in times]
+    return lats, lons, u_arr, v_arr, labels, times_utc
+
+
 # ── local upload ───────────────────────────────────────────────────────────────
 
 def _fetch_local_grib(
@@ -786,6 +962,9 @@ def _fetch_grib_grid(
     if source == "local_upload":
         file_path = model_param[len("local_upload:"):]
         return _fetch_local_grib(lat_min, lat_max, lon_min, lon_max, file_path, max_hours)
+
+    if source == "aladin_cz":
+        return _fetch_aladin_cz(lat_min, lat_max, lon_min, lon_max, max_hours)
 
     if source == "harmonie_s3":
         return _fetch_harmonie_s3(lat_min, lat_max, lon_min, lon_max, max_hours)

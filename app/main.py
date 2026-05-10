@@ -137,6 +137,8 @@ def _windmap_model_params(model_id: str) -> tuple[str, str]:
         if path is None:
             raise ValueError(f"Uploaded GRIB '{upload_id}' not found (may have been deleted).")
         return ("", f"local_upload:{path}")
+    if model_id == "aladin_cz":
+        return ("", "aladin_cz")
     model_map = {
         "harmonie_nl":  (SETTINGS.openmeteo_knmi_url,     SETTINGS.openmeteo_knmi_model),
         "arome_hd":     (SETTINGS.openmeteo_arome_hd_url, SETTINGS.openmeteo_arome_hd_model),

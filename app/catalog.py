@@ -67,6 +67,14 @@ def default_model_catalog() -> list[ModelDefinition]:
             priority_by_country={"IT": 2, "OTHER": 5},
             on_demand=True,   # fetched from GRIB on request, not stored in background repo
         ),
+        ModelDefinition(
+            model_id="aladin_cz",
+            provider="ČHMÚ",
+            category="regional",
+            coverage_bbox={"min_lat": 44.0, "max_lat": 56.0, "min_lon": 6.0, "max_lon": 28.0},
+            priority_by_country={"CZ": 1, "SK": 2, "AT": 3, "PL": 4, "DE": 10, "OTHER": 50},
+            on_demand=True,   # windmap-only — fetched from ČHMÚ GRIB on request
+        ),
     ]
 
 

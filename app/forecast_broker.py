@@ -9,7 +9,8 @@ from .forecast_adapters import OpenMeteoForecastAdapter
 from .openwrf_adapter import OpenWrfAdapter
 from .repositories import InMemoryRepository
 
-_OPENWRF_ID = "openwrf"
+_OPENWRF_ID   = "openwrf"
+_ALADIN_CZ_ID = "aladin_cz"   # windmap-only GRIB source — no point-forecast adapter
 
 
 class ForecastBroker:
@@ -31,9 +32,9 @@ class ForecastBroker:
         updated: dict[str, list[ForecastValue]] = {}
         om_index = 0
         for model in self.repo.models:
-            if model.model_id == _OPENWRF_ID:
-                # OpenWRF downloads large GRIB files — skip in background refresh;
-                # data is fetched on-demand in forecast_point / wind map requests.
+            if model.model_id in (_OPENWRF_ID, _ALADIN_CZ_ID):
+                # These are GRIB-based on-demand sources with no Open-Meteo backing.
+                # Skip in background refresh; wind maps fetch data on request.
                 continue
             if om_index > 0:
                 time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
