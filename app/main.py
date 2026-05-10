@@ -26,8 +26,14 @@ _windmap_sem = asyncio.Semaphore(1)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
-UPLOAD_DIR = BASE_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+# Use /tmp on Linux (always writable); fall back to app/uploads on Windows dev
+_tmp_base = Path("/tmp") if Path("/tmp").exists() else BASE_DIR
+UPLOAD_DIR = _tmp_base / "wind_validation_uploads"
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    UPLOAD_DIR = BASE_DIR / "uploads"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # upload_id -> absolute Path for locally uploaded GRIBs (in-memory, process lifetime)
 _uploaded_gribs: dict[str, Path] = {}
