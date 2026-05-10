@@ -11,7 +11,7 @@ from uuid import uuid4
 from .cache import TTLCache
 from .catalog import select_candidate_models
 from .config import Settings
-from .domain import Observation, ScoreRow
+from .domain import ForecastValue, Observation, ScoreRow
 from .forecast_adapters import OpenMeteoForecastAdapter
 from .openwrf_adapter import OpenWrfAdapter as _OpenWrfAdapter, MODEL_ID as _OPENWRF_ID
 from .geo import haversine_km
@@ -21,6 +21,74 @@ from .repositories import InMemoryRepository
 from .scoring import compute_metrics, speed_dir_to_uv, uv_to_speed_dir
 
 logger = logging.getLogger("wind_validation")
+
+_ALADIN_CZ_ID = "aladin_cz"
+
+
+def _fetch_aladin_cz_at_coords(
+    coords: list[tuple[float, float]],
+    start: datetime,
+    end: datetime,
+) -> list[ForecastValue]:
+    """Fetch ČHMÚ ALADIN-CZ GRIB and extract ForecastValues at the given coordinates."""
+    import math as _math  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    try:
+        from .windmap import _fetch_aladin_cz  # noqa: PLC0415
+    except Exception as exc:
+        logger.info("ALADIN-CZ import skipped: %s", exc)
+        return []
+
+    if not coords:
+        return []
+
+    lats_c = [c[0] for c in coords]
+    lons_c = [c[1] for c in coords]
+    lat_min = min(lats_c) - 0.5
+    lat_max = max(lats_c) + 0.5
+    lon_min = min(lons_c) - 0.5
+    lon_max = max(lons_c) + 0.5
+    max_hours = int((end - start).total_seconds() // 3600) + 49
+
+    try:
+        lats_g, lons_g, u_arr, v_arr, _, times_iso = _fetch_aladin_cz(
+            lat_min, lat_max, lon_min, lon_max, max_hours
+        )
+    except Exception as exc:
+        logger.info("ALADIN-CZ GRIB fetch skipped: %s", exc)
+        return []
+
+    grid_times: list[datetime | None] = []
+    for t_iso in times_iso:
+        try:
+            grid_times.append(datetime.fromisoformat(t_iso.replace("Z", "+00:00")))
+        except Exception:
+            grid_times.append(None)
+
+    rows: list[ForecastValue] = []
+    for lat, lon in coords:
+        iy = int(np.argmin(np.abs(lats_g - lat)))
+        ix = int(np.argmin(np.abs(lons_g - lon)))
+        for i, gt in enumerate(grid_times):
+            if gt is None or gt < start or gt > end:
+                continue
+            if i >= u_arr.shape[0]:
+                continue
+            u = float(u_arr[i, iy, ix])
+            v = float(v_arr[i, iy, ix])
+            if not (_math.isfinite(u) and _math.isfinite(v)):
+                continue
+            rows.append(ForecastValue(
+                model_id=_ALADIN_CZ_ID,
+                run_time_utc=gt,
+                valid_time_utc=gt,
+                lat=float(lats_g[iy]),
+                lon=float(lons_g[ix]),
+                u10=u,
+                v10=v,
+            ))
+    return rows
 
 
 class ValidationService:
@@ -152,6 +220,8 @@ class ValidationService:
                     fvs = self.openwrf.fetch_model_at_coords(
                         model, all_coords, window_start, forecast_end
                     )
+                elif model.model_id == _ALADIN_CZ_ID:
+                    fvs = _fetch_aladin_cz_at_coords(all_coords, window_start, forecast_end)
                 else:
                     if i > 0:
                         time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
@@ -404,6 +474,8 @@ class ValidationService:
             try:
                 if model.model_id == _OPENWRF_ID:
                     fvs = self.openwrf.fetch_forecast_with_extras(model, [(lat, lon)], now, end)
+                elif model.model_id == _ALADIN_CZ_ID:
+                    fvs = _fetch_aladin_cz_at_coords([(lat, lon)], now, end)
                 else:
                     if models_series:  # sleep only after a real HTTP call was made
                         time.sleep(4.0)
