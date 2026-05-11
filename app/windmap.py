@@ -764,7 +764,7 @@ _ALADIN_WD_PARAM  = 31   # GRIB1 indicatorOfParameter — wind direction [° fro
 
 def _aladin_parse_clip(
     path: str,
-    param_id: int,
+    param_id: int | None,
     lat_min: float, lat_max: float,
     lon_min: float, lon_max: float,
     max_hours: int,
@@ -774,6 +774,7 @@ def _aladin_parse_clip(
     Returns (sorted_valid_datetimes, lats_1d, lons_1d, data_3d[t, y, x]).
     lats_1d / lons_1d are row/column means of the Lambert sub-grid — a good
     approximation for the small (~50×80 km) clip windows used here.
+    Pass param_id=None to accept every parameter in the file (for single-param files).
     """
     import eccodes  # noqa: PLC0415
 
@@ -788,7 +789,7 @@ def _aladin_parse_clip(
                 break
             try:
                 pid = eccodes.codes_get(gid, "indicatorOfParameter", ktype=int)
-                if pid != param_id:
+                if param_id is not None and pid != param_id:
                     continue
 
                 if ni is None:
@@ -841,22 +842,14 @@ def _aladin_parse_clip(
     return sorted_times, lats_1d, lons_1d, np.stack([frames[t] for t in sorted_times])
 
 
-def _fetch_aladin_cz(
-    lat_min: float, lat_max: float,
-    lon_min: float, lon_max: float,
-    max_hours: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
-    """Fetch 10 m wind from Czech ALADIN Lambert_2.3 km GRIB (ČHMÚ open data).
+def _probe_aladin_runs(hours_back: int = 50) -> list[tuple[datetime, str, str]]:
+    """Return (run_dt, speed_url, dir_url) for all available ČHMÚ runs in the last hours_back hours.
 
-    Downloads CLSWIND_SPEED and CLSWIND_DIREC (bz2-compressed GRIB1), clips to
-    the request bbox, and converts meteorological direction → U/V components.
+    Results are ordered newest → oldest.
     """
-    import bz2 as _bz2, os, tempfile  # noqa: PLC0415
-
-    # ── locate latest available run ────────────────────────────────────────────
     now = datetime.now(UTC)
-    run_dt = speed_url = dir_url = None
-    for h_back in range(0, 25):
+    available: list[tuple[datetime, str, str]] = []
+    for h_back in range(0, hours_back + 1):
         cand = (now - timedelta(hours=h_back)).replace(minute=0, second=0, microsecond=0)
         if cand.hour not in (0, 6, 12, 18):
             continue
@@ -867,29 +860,51 @@ def _fetch_aladin_cz(
         try:
             with httpx.Client(timeout=10) as c:
                 if c.head(s_url).status_code == 200:
-                    run_dt, speed_url, dir_url = cand, s_url, d_url
-                    break
-            logger.debug("ALADIN-CZ %s → not available", s_url)
+                    available.append((cand, s_url, d_url))
+                else:
+                    logger.debug("ALADIN-CZ %s → not available", s_url)
         except Exception as exc:
             logger.debug("ALADIN-CZ probe %s: %s", s_url, exc)
+    return available
 
-    if run_dt is None:
-        raise RuntimeError("No recent Czech ALADIN GRIB found on ČHMÚ open data (tried last 24 h)")
 
-    logger.info("ALADIN-CZ run %s — downloading speed + direction", run_dt)
+def _download_aladin_run(
+    run_dt: datetime,
+    speed_url: str,
+    dir_url: str,
+    lat_min: float, lat_max: float,
+    lon_min: float, lon_max: float,
+    max_hours: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, list[str], list[str]]:
+    """Download one ČHMÚ ALADIN run and return (lats, lons, u_arr, v_arr, gust_arr, labels, times_iso).
 
-    # ── download, decompress, write to temp files ─────────────────────────────
-    tmp_spd = tmp_dir_f = None
+    gust_arr is None if the CLSGUST file is not available for this run.
+    """
+    import bz2 as _bz2, os, tempfile  # noqa: PLC0415
+
+    gust_url = speed_url.replace("_CLSWIND_SPEED.grb", "_CLSGUST.grb")
+    logger.info("ALADIN-CZ run %s — downloading speed + direction + gust", run_dt)
+
+    tmp_spd = tmp_dir_f = tmp_gst = None
     try:
         with httpx.Client(timeout=300) as c:
             raw_spd = _bz2.decompress(c.get(speed_url).raise_for_status().content)
             raw_dir = _bz2.decompress(c.get(dir_url).raise_for_status().content)
+            try:
+                gust_resp = c.get(gust_url)
+                raw_gst = _bz2.decompress(gust_resp.raise_for_status().content) if gust_resp.status_code == 200 else None
+            except Exception:
+                raw_gst = None
         with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
             f.write(raw_spd); tmp_spd = f.name
         del raw_spd
         with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
             f.write(raw_dir); tmp_dir_f = f.name
         del raw_dir
+        if raw_gst is not None:
+            with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
+                f.write(raw_gst); tmp_gst = f.name
+            del raw_gst
         gc.collect()
 
         logger.info("ALADIN-CZ: parsing GRIB clips")
@@ -899,33 +914,60 @@ def _fetch_aladin_cz(
         times_d, _, _, direction = _aladin_parse_clip(
             tmp_dir_f, _ALADIN_WD_PARAM, lat_min, lat_max, lon_min, lon_max, max_hours,
         )
+        gust_raw: np.ndarray | None = None
+        if tmp_gst:
+            try:
+                _, _, _, gust_raw = _aladin_parse_clip(
+                    tmp_gst, None, lat_min, lat_max, lon_min, lon_max, max_hours,
+                )
+            except Exception as exc:
+                logger.debug("ALADIN-CZ gust parse skipped: %s", exc)
     finally:
-        for p in (tmp_spd, tmp_dir_f):
+        for p in (tmp_spd, tmp_dir_f, tmp_gst):
             if p:
                 try:
                     os.unlink(p)
                 except OSError:
                     pass
 
-    # ── align time axes (cap at shorter of the two) ───────────────────────────
     n_t = min(len(times_s), len(times_d), max_hours)
     spd, direction, times = spd[:n_t], direction[:n_t], times_s[:n_t]
 
-    # ── ascending latitude ────────────────────────────────────────────────────
     if len(lats) > 1 and lats[0] > lats[-1]:
         lats      = lats[::-1]
         spd       = spd[:, ::-1, :]
         direction = direction[:, ::-1, :]
+        if gust_raw is not None:
+            gust_raw = gust_raw[:, ::-1, :]
 
-    # ── meteorological direction → U / V ─────────────────────────────────────
     dir_rad = np.deg2rad(direction)
     u_arr = -(spd * np.sin(dir_rad))
     v_arr = -(spd * np.cos(dir_rad))
     del spd, direction
+    if gust_raw is not None:
+        gust_arr: np.ndarray | None = gust_raw[:n_t]
+    else:
+        gust_arr = None
     gc.collect()
 
     labels    = [_dt_to_label(t) for t in times]
     times_utc = [_dt_to_iso(t)   for t in times]
+    return lats, lons, u_arr, v_arr, gust_arr, labels, times_utc
+
+
+def _fetch_aladin_cz(
+    lat_min: float, lat_max: float,
+    lon_min: float, lon_max: float,
+    max_hours: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
+    """Fetch the latest available ČHMÚ ALADIN run and return wind grids (no gusts)."""
+    runs = _probe_aladin_runs(hours_back=25)
+    if not runs:
+        raise RuntimeError("No recent Czech ALADIN GRIB found on ČHMÚ open data (tried last 24 h)")
+    run_dt, speed_url, dir_url = runs[0]
+    lats, lons, u_arr, v_arr, _gust, labels, times_utc = _download_aladin_run(
+        run_dt, speed_url, dir_url, lat_min, lat_max, lon_min, lon_max, max_hours
+    )
     return lats, lons, u_arr, v_arr, labels, times_utc
 
 

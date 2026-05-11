@@ -30,12 +30,18 @@ def _fetch_aladin_cz_at_coords(
     start: datetime,
     end: datetime,
 ) -> list[ForecastValue]:
-    """Fetch ČHMÚ ALADIN-CZ GRIB and extract ForecastValues at the given coordinates."""
+    """Fetch ČHMÚ ALADIN-CZ GRIB and extract ForecastValues at the given coordinates.
+
+    Downloads up to two runs — the newest available plus the oldest that still
+    covers *start* — so the full [start, end] window is populated even when
+    start is 48 h in the past.  Newer-run data wins when both runs have the
+    same valid_time for a given coordinate.
+    """
     import math as _math  # noqa: PLC0415
     import numpy as np  # noqa: PLC0415
 
     try:
-        from .windmap import _fetch_aladin_cz  # noqa: PLC0415
+        from .windmap import _probe_aladin_runs, _download_aladin_run  # noqa: PLC0415
     except Exception as exc:
         logger.info("ALADIN-CZ import skipped: %s", exc)
         return []
@@ -49,46 +55,72 @@ def _fetch_aladin_cz_at_coords(
     lat_max = max(lats_c) + 0.5
     lon_min = min(lons_c) - 0.5
     lon_max = max(lons_c) + 0.5
-    max_hours = int((end - start).total_seconds() // 3600) + 49
 
-    try:
-        lats_g, lons_g, u_arr, v_arr, _, times_iso = _fetch_aladin_cz(
-            lat_min, lat_max, lon_min, lon_max, max_hours
-        )
-    except Exception as exc:
-        logger.info("ALADIN-CZ GRIB fetch skipped: %s", exc)
+    # Probe far enough back to find runs that cover start (each run covers +48 h)
+    now = datetime.now(timezone.utc)
+    hours_back = max(50, int((now - start).total_seconds() / 3600) + 6)
+    runs = _probe_aladin_runs(hours_back=hours_back)
+    if not runs:
+        logger.info("ALADIN-CZ: no runs found in last %d h", hours_back)
         return []
 
-    grid_times: list[datetime | None] = []
-    for t_iso in times_iso:
-        try:
-            grid_times.append(datetime.fromisoformat(t_iso.replace("Z", "+00:00")))
-        except Exception:
-            grid_times.append(None)
+    # Select: newest run (covers recent / future hours) +
+    #         oldest run whose forecast reaches back to start (run_time + 48 h >= start)
+    runs_to_use: list[tuple] = [runs[0]]  # newest first
+    for r in reversed(runs):
+        run_dt = r[0]
+        if run_dt + timedelta(hours=48) >= start and run_dt != runs[0][0]:
+            runs_to_use.append(r)
+            break
 
-    rows: list[ForecastValue] = []
-    for lat, lon in coords:
-        iy = int(np.argmin(np.abs(lats_g - lat)))
-        ix = int(np.argmin(np.abs(lons_g - lon)))
-        for i, gt in enumerate(grid_times):
-            if gt is None or gt < start or gt > end:
-                continue
-            if i >= u_arr.shape[0]:
-                continue
-            u = float(u_arr[i, iy, ix])
-            v = float(v_arr[i, iy, ix])
-            if not (_math.isfinite(u) and _math.isfinite(v)):
-                continue
-            rows.append(ForecastValue(
-                model_id=_ALADIN_CZ_ID,
-                run_time_utc=gt,
-                valid_time_utc=gt,
-                lat=float(lats_g[iy]),
-                lon=float(lons_g[ix]),
-                u10=u,
-                v10=v,
-            ))
-    return rows
+    # Merge: process oldest first so newer-run data overwrites for same key
+    merged: dict[tuple[float, float, datetime], ForecastValue] = {}
+    for run_dt, speed_url, dir_url in reversed(runs_to_use):
+        max_hours = int((end - run_dt).total_seconds() / 3600) + 2
+        try:
+            lats_g, lons_g, u_arr, v_arr, gust_arr, _, times_iso = _download_aladin_run(
+                run_dt, speed_url, dir_url,
+                lat_min, lat_max, lon_min, lon_max, max_hours,
+            )
+        except Exception as exc:
+            logger.info("ALADIN-CZ run %s skipped: %s", run_dt, exc)
+            continue
+
+        grid_times: list[datetime | None] = []
+        for t_iso in times_iso:
+            try:
+                grid_times.append(datetime.fromisoformat(t_iso.replace("Z", "+00:00")))
+            except Exception:
+                grid_times.append(None)
+
+        for lat, lon in coords:
+            iy = int(np.argmin(np.abs(lats_g - lat)))
+            ix = int(np.argmin(np.abs(lons_g - lon)))
+            for i, gt in enumerate(grid_times):
+                if gt is None or gt < start or gt > end:
+                    continue
+                if i >= u_arr.shape[0]:
+                    continue
+                u = float(u_arr[i, iy, ix])
+                v = float(v_arr[i, iy, ix])
+                if not (_math.isfinite(u) and _math.isfinite(v)):
+                    continue
+                gust_ms: float | None = None
+                if gust_arr is not None and i < gust_arr.shape[0]:
+                    g = float(gust_arr[i, iy, ix])
+                    gust_ms = g if _math.isfinite(g) else None
+                merged[(float(lats_g[iy]), float(lons_g[ix]), gt)] = ForecastValue(
+                    model_id=_ALADIN_CZ_ID,
+                    run_time_utc=run_dt,
+                    valid_time_utc=gt,
+                    lat=float(lats_g[iy]),
+                    lon=float(lons_g[ix]),
+                    u10=u,
+                    v10=v,
+                    gust_ms=gust_ms,
+                )
+
+    return list(merged.values())
 
 
 class ValidationService:

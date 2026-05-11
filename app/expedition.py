@@ -123,62 +123,93 @@ def _fetch_grib_fc_values(
             logger.info("OpenWRF GRIB fetch skipped: %s", exc)
             return []
 
-    # aladin_cz — fetch spatial grid from ČHMÚ, then extract nearest points
+    # aladin_cz — fetch multiple ČHMÚ runs to cover the full expedition window
     if model_id != "aladin_cz":
         return []
 
     try:
-        from .windmap import _fetch_aladin_cz  # noqa: PLC0415
-        lats_g, lons_g, u_arr, v_arr, _, times_iso = \
-            _fetch_aladin_cz(lat_min, lat_max, lon_min, lon_max, max_hours)
+        from .windmap import _probe_aladin_runs, _download_aladin_run  # noqa: PLC0415
     except Exception as exc:
-        logger.info("ALADIN-CZ GRIB fetch skipped: %s", exc)
+        logger.info("ALADIN-CZ import skipped: %s", exc)
         return []
 
-    # Parse ISO times from windmap output
-    grid_times: list[datetime | None] = []
-    for t_iso in times_iso:
+    now = datetime.now(UTC)
+    hours_back = max(50, int((now - start).total_seconds() / 3600) + 6)
+    runs = _probe_aladin_runs(hours_back=hours_back)
+    if not runs:
+        logger.info("ALADIN-CZ: no runs found in last %d h", hours_back)
+        return []
+
+    # Newest run + oldest run whose +48 h forecast still reaches back to start
+    runs_to_use: list[tuple] = [runs[0]]
+    for r in reversed(runs):
+        if r[0] + timedelta(hours=48) >= start and r[0] != runs[0][0]:
+            runs_to_use.append(r)
+            break
+
+    # Build a merged timestep map: valid_dt → (run_dt, lats_g, lons_g, u_2d, v_2d)
+    # Process oldest first so newer-run data overwrites for the same valid_time.
+    merged_frames: dict[datetime, tuple] = {}
+    for run_dt, speed_url, dir_url in reversed(runs_to_use):
+        run_max_h = int((end - run_dt).total_seconds() / 3600) + 2
         try:
-            grid_times.append(datetime.fromisoformat(t_iso.replace("Z", "+00:00")))
-        except Exception:
-            grid_times.append(None)
+            lats_g, lons_g, u_arr, v_arr, gust_arr, _, times_iso = _download_aladin_run(
+                run_dt, speed_url, dir_url,
+                lat_min, lat_max, lon_min, lon_max, run_max_h,
+            )
+        except Exception as exc:
+            logger.info("ALADIN-CZ run %s skipped: %s", run_dt, exc)
+            continue
+        for i, t_iso in enumerate(times_iso):
+            try:
+                gt = datetime.fromisoformat(t_iso.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if i >= u_arr.shape[0]:
+                continue
+            g_frame = gust_arr[i] if (gust_arr is not None and i < gust_arr.shape[0]) else None
+            merged_frames[gt] = (run_dt, lats_g, lons_g, u_arr[i], v_arr[i], g_frame)
 
     rows: list[ForecastValue] = []
+    sorted_frames = sorted(merged_frames.keys())
     for s in samples:
         sample_hour = s["time_utc"].replace(minute=0, second=0, microsecond=0)
 
-        # Find closest grid timestep (within 1.5 h)
-        best_i = best_diff = None
-        for i, gt in enumerate(grid_times):
-            if gt is None:
-                continue
+        best_gt = best_diff = None
+        for gt in sorted_frames:
             diff = abs((gt - sample_hour).total_seconds())
             if best_diff is None or diff < best_diff:
-                best_i, best_diff = i, diff
+                best_gt, best_diff = gt, diff
+            elif diff > best_diff:
+                break  # sorted, can stop early once we're moving away
 
-        if best_i is None or best_diff > 5400:
+        if best_gt is None or best_diff > 5400:
             continue
 
+        run_dt, lats_g, lons_g, u_frame, v_frame, g_frame = merged_frames[best_gt]
         iy = int(np.argmin(np.abs(lats_g - s["lat"])))
         ix = int(np.argmin(np.abs(lons_g - s["lon"])))
 
-        if best_i >= u_arr.shape[0]:
-            continue
-
-        u = float(u_arr[best_i, iy, ix])
-        v = float(v_arr[best_i, iy, ix])
+        u = float(u_frame[iy, ix])
+        v = float(v_frame[iy, ix])
 
         if not (math.isfinite(u) and math.isfinite(v)):
             continue
 
+        gust_ms: float | None = None
+        if g_frame is not None:
+            g = float(g_frame[iy, ix])
+            gust_ms = g if math.isfinite(g) else None
+
         rows.append(ForecastValue(
             model_id=model_id,
-            run_time_utc=grid_times[best_i],
-            valid_time_utc=grid_times[best_i],
+            run_time_utc=run_dt,
+            valid_time_utc=best_gt,
             lat=float(lats_g[iy]),
             lon=float(lons_g[ix]),
             u10=u,
             v10=v,
+            gust_ms=gust_ms,
         ))
 
     return rows
