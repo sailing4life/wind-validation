@@ -215,11 +215,109 @@ def _fetch_grib_fc_values(
     return rows
 
 
+def _extract_from_aladin_gribs(
+    speed_bytes: bytes,
+    dir_bytes: bytes,
+    samples: list[dict],
+    start: datetime,
+    end: datetime,
+    model_id: str = "custom_grib",
+) -> list[ForecastValue]:
+    """Parse uploaded ALADIN-format speed+direction GRIB pair (raw or bz2) and match to samples."""
+    import bz2 as _bz2, os, tempfile  # noqa: PLC0415
+
+    try:
+        from .windmap import _aladin_parse_clip  # noqa: PLC0415
+    except Exception as exc:
+        logger.info("ALADIN parse import skipped: %s", exc)
+        return []
+
+    def _maybe_decompress(data: bytes) -> bytes:
+        return _bz2.decompress(data) if data[:3] == b"BZh" else data
+
+    exp_lats = [s["lat"] for s in samples]
+    exp_lons = [s["lon"] for s in samples]
+    lat_min = min(exp_lats) - 0.5
+    lat_max = max(exp_lats) + 0.5
+    lon_min = min(exp_lons) - 0.5
+    lon_max = max(exp_lons) + 0.5
+    max_hours = int((end - start).total_seconds() // 3600) + 49
+
+    tmp_spd = tmp_dir_f = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
+            f.write(_maybe_decompress(speed_bytes)); tmp_spd = f.name
+        with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
+            f.write(_maybe_decompress(dir_bytes)); tmp_dir_f = f.name
+
+        # param_id=None accepts any parameter (files each contain a single variable)
+        times_s, lats_g, lons_g, spd = _aladin_parse_clip(
+            tmp_spd, None, lat_min, lat_max, lon_min, lon_max, max_hours,
+        )
+        times_d, _, _, direction = _aladin_parse_clip(
+            tmp_dir_f, None, lat_min, lat_max, lon_min, lon_max, max_hours,
+        )
+    except Exception as exc:
+        logger.warning("Uploaded GRIB parse failed: %s", exc)
+        return []
+    finally:
+        for p in (tmp_spd, tmp_dir_f):
+            if p:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+    n_t = min(len(times_s), len(times_d), max_hours)
+    spd, direction, times = spd[:n_t], direction[:n_t], times_s[:n_t]
+
+    if len(lats_g) > 1 and lats_g[0] > lats_g[-1]:
+        lats_g    = lats_g[::-1]
+        spd       = spd[:, ::-1, :]
+        direction = direction[:, ::-1, :]
+
+    dir_rad = np.deg2rad(direction)
+    u_arr = -(spd * np.sin(dir_rad))
+    v_arr = -(spd * np.cos(dir_rad))
+
+    sorted_times = sorted(range(len(times)), key=lambda i: times[i])
+    rows: list[ForecastValue] = []
+    for s in samples:
+        sample_hour = s["time_utc"].replace(minute=0, second=0, microsecond=0)
+        best_i = best_diff = None
+        for idx in sorted_times:
+            gt = times[idx]
+            diff = abs((gt - sample_hour).total_seconds())
+            if best_diff is None or diff < best_diff:
+                best_i, best_diff = idx, diff
+            elif diff > best_diff:
+                break
+        if best_i is None or best_diff > 5400 or best_i >= u_arr.shape[0]:
+            continue
+        iy = int(np.argmin(np.abs(lats_g - s["lat"])))
+        ix = int(np.argmin(np.abs(lons_g - s["lon"])))
+        u = float(u_arr[best_i, iy, ix])
+        v = float(v_arr[best_i, iy, ix])
+        if not (math.isfinite(u) and math.isfinite(v)):
+            continue
+        rows.append(ForecastValue(
+            model_id=model_id,
+            run_time_utc=times[best_i],
+            valid_time_utc=times[best_i],
+            lat=float(lats_g[iy]),
+            lon=float(lons_g[ix]),
+            u10=u,
+            v10=v,
+        ))
+    return rows
+
+
 def validate_expedition(
     samples: list[dict],
     catalog: list[ModelDefinition],
     forecast_adapter: OpenMeteoForecastAdapter,
     settings: Settings,
+    extra_fvs: dict[str, list[ForecastValue]] | None = None,
 ) -> dict:
     """Compare expedition log wind observations against NWP model forecasts.
 
@@ -299,6 +397,25 @@ def validate_expedition(
 
         for fv in fvs:
             fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
+
+    # Inject ForecastValues from user-uploaded GRIBs
+    if extra_fvs:
+        for mid, fvs in extra_fvs.items():
+            for fv in fvs:
+                fc_index[(mid, fv.valid_time_utc)].append(fv)
+            if not any(m.model_id == mid for m in candidates):
+                candidates.append(ModelDefinition(
+                    model_id=mid,
+                    provider="Uploaded GRIB",
+                    category="regional",
+                    coverage_bbox={
+                        "min_lat": min(lats) - 1.0,
+                        "max_lat": max(lats) + 1.0,
+                        "min_lon": min(lons) - 1.0,
+                        "max_lon": max(lons) + 1.0,
+                    },
+                    priority_by_country={},
+                ))
 
     def nearest_fc(model_id: str, slat: float, slon: float, t: datetime):
         hour = t.replace(minute=0, second=0, microsecond=0)

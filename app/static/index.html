@@ -83,6 +83,14 @@
                 <option value="30">Every 30 minutes</option>
               </select>
             </label>
+            <details class="grib-upload-section">
+              <summary class="expedition-hint" style="cursor:pointer;user-select:none">&#9658; Optional: compare against a custom GRIB</summary>
+              <div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">
+                <label style="font-size:12px">Speed GRIB (.grb / .bz2) <input type="file" id="gribSpeedFile" accept=".grb,.bz2" /></label>
+                <label style="font-size:12px">Direction GRIB (.grb / .bz2) <input type="file" id="gribDirFile" accept=".grb,.bz2" /></label>
+                <label style="font-size:12px">Model label <input type="text" id="gribLabel" value="custom_aladin" maxlength="40" style="width:14ch" /></label>
+              </div>
+            </details>
             <p class="expedition-hint">Reads TWS&amp;TWD from the log and compares each GPS position + time against NWP models.</p>
           </div>
 

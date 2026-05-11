@@ -719,15 +719,20 @@ async function runExpeditionValidation() {
   chartStatus.className = "chart-status";
 
   const intervalMin = document.getElementById("expeditionInterval").value;
+  const speedFile   = document.getElementById("gribSpeedFile");
+  const dirFile     = document.getElementById("gribDirFile");
+  const gribLabel   = (document.getElementById("gribLabel").value || "custom_aladin").trim();
   const formData = new FormData();
   formData.append("file", fileInput.files[0]);
+  if (speedFile.files.length) formData.append("grib_speed", speedFile.files[0]);
+  if (dirFile.files.length)   formData.append("grib_dir",   dirFile.files[0]);
 
   let data;
   try {
-    const resp = await fetch(`/api/validate-expedition-log?interval_min=${intervalMin}`, {
-      method: "POST",
-      body: formData,
-    });
+    const resp = await fetch(
+      `/api/validate-expedition-log?interval_min=${intervalMin}&grib_label=${encodeURIComponent(gribLabel)}`,
+      { method: "POST", body: formData },
+    );
     if (!resp.ok) {
       let detail = `Error ${resp.status}`;
       try { const j = await resp.json(); detail += ": " + (j.detail || JSON.stringify(j)); }

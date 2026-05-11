@@ -259,14 +259,23 @@ async def upload_grib(file: UploadFile = File(...)) -> dict:
 async def validate_expedition_log(
     file: UploadFile = File(...),
     interval_min: int = Query(10, ge=2, le=60),
+    grib_speed: UploadFile | None = File(default=None),
+    grib_dir: UploadFile | None = File(default=None),
+    grib_label: str = Query("custom_grib", max_length=40, pattern=r"^[\w\-]+$"),
 ) -> dict:
-    """Parse a sailing expedition .proc.csv and compare wind against NWP models."""
-    from .expedition import parse_expedition_csv, validate_expedition  # noqa: PLC0415
+    """Parse a sailing expedition .proc.csv and compare wind against NWP models.
+
+    Optionally supply a speed GRIB + direction GRIB pair (raw or bz2-compressed
+    ALADIN format) to include an additional custom model in the comparison.
+    """
+    from .expedition import parse_expedition_csv, validate_expedition, _extract_from_aladin_gribs  # noqa: PLC0415
 
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Expected a .csv file")
 
     data = await file.read()
+    speed_bytes = await grib_speed.read() if grib_speed else None
+    dir_bytes   = await grib_dir.read()   if grib_dir   else None
 
     def _run() -> dict:
         samples = parse_expedition_csv(data, interval_min)
@@ -275,7 +284,14 @@ async def validate_expedition_log(
                 "No valid wind samples found. "
                 "Check that the file has UtcDate, UtcTime, Lat, Lon, TWS, TWD columns."
             )
-        return validate_expedition(samples, repo.models, forecast_broker.openmeteo, SETTINGS)
+        extra: dict | None = None
+        if speed_bytes and dir_bytes:
+            start = samples[0]["time_utc"]
+            end   = samples[-1]["time_utc"]
+            fvs = _extract_from_aladin_gribs(speed_bytes, dir_bytes, samples, start, end, grib_label)
+            if fvs:
+                extra = {grib_label: fvs}
+        return validate_expedition(samples, repo.models, forecast_broker.openmeteo, SETTINGS, extra_fvs=extra)
 
     try:
         result = await asyncio.to_thread(_run)
