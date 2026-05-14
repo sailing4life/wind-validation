@@ -85,7 +85,7 @@ class Settings:
     openmeteo_arpege_url: str = os.getenv("OPENMETEO_ARPEGE_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_arpege_model: str = os.getenv("OPENMETEO_ARPEGE_MODEL", "meteofrance_arpege_europe")
     openmeteo_harmonie_eu_url: str = os.getenv("OPENMETEO_HARMONIE_EU_URL", "https://api.open-meteo.com/v1/forecast")
-    openmeteo_harmonie_eu_model: str = os.getenv("OPENMETEO_HARMONIE_EU_MODEL", "harmonie_arome_europe")
+    openmeteo_harmonie_eu_model: str = os.getenv("OPENMETEO_HARMONIE_EU_MODEL", "knmi_harmonie_arome_europe")
     openmeteo_elevation_url: str = os.getenv("OPENMETEO_ELEVATION_URL", "https://api.open-meteo.com/v1/elevation")
     openmeteo_marine_url: str = os.getenv("OPENMETEO_MARINE_URL", "https://marine-api.open-meteo.com/v1/marine")
     # Previous runs API — returns actual archived forecast runs (true forecast skill)
