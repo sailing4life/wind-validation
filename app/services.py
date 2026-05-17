@@ -225,16 +225,12 @@ class ValidationService:
         station_ids = {s.station_id for s in stations}
         observations, provenance = self.broker.get_observations(country, station_ids, window_start, window_end)
 
-        availability = {
-            model.model_id: self._availability_ratio(model.model_id, window_start, window_end)
-            for model in self.repo.models
-        }
         candidates, excluded_reasons = select_candidate_models(
             lat=lat,
             lon=lon,
             catalog=self.repo.models,
-            coverage_availability=availability,
-            missing_threshold=0.25,
+            coverage_availability={},
+            missing_threshold=1.0,
         )
 
         forecast_end = window_end
