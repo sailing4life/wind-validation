@@ -251,7 +251,7 @@ class ValidationService:
                 return _fetch_aladin_cz_at_coords(all_coords, window_start, forecast_end)
             return self.forecast_adapter.fetch_model_at_coords(model, all_coords, window_start, forecast_end)
 
-        with ThreadPoolExecutor(max_workers=len(candidates) or 1) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {pool.submit(_fetch_model, m): m for m in candidates}
             for future in as_completed(futures):
                 model = futures[future]
