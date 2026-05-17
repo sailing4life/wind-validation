@@ -5,6 +5,7 @@ import logging
 import math
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -242,24 +243,23 @@ class ValidationService:
 
         # On-demand fetch: augment index with exact pin + obs station coordinates
         all_coords = list({(lat, lon)} | {(s.lat, s.lon) for s in stations})
-        for i, model in enumerate(candidates):
-            try:
-                if model.model_id == _OPENWRF_ID:
-                    fvs = self.openwrf.fetch_model_at_coords(
-                        model, all_coords, window_start, forecast_end
-                    )
-                elif model.model_id == _ALADIN_CZ_ID:
-                    fvs = _fetch_aladin_cz_at_coords(all_coords, window_start, forecast_end)
-                else:
-                    if i > 0:
-                        time.sleep(3.0)  # stay within Open-Meteo free-tier rate limit
-                    fvs = self.forecast_adapter.fetch_model_at_coords(
-                        model, all_coords, window_start, forecast_end
-                    )
-                for fv in fvs:
-                    fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
-            except Exception as exc:
-                logger.warning("On-demand batch fetch failed for %s", model.model_id, exc_info=exc)
+
+        def _fetch_model(model):
+            if model.model_id == _OPENWRF_ID:
+                return self.openwrf.fetch_model_at_coords(model, all_coords, window_start, forecast_end)
+            if model.model_id == _ALADIN_CZ_ID:
+                return _fetch_aladin_cz_at_coords(all_coords, window_start, forecast_end)
+            return self.forecast_adapter.fetch_model_at_coords(model, all_coords, window_start, forecast_end)
+
+        with ThreadPoolExecutor(max_workers=len(candidates) or 1) as pool:
+            futures = {pool.submit(_fetch_model, m): m for m in candidates}
+            for future in as_completed(futures):
+                model = futures[future]
+                try:
+                    for fv in future.result():
+                        fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
+                except Exception as exc:
+                    logger.warning("On-demand batch fetch failed for %s", model.model_id, exc_info=exc)
 
         # Track latest run time per model (for display)
         latest_run: dict[str, datetime] = {}
