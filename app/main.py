@@ -306,6 +306,112 @@ async def validate_expedition_log(
     return result
 
 
+@app.get("/api/forecast-ensemble")
+async def forecast_ensemble(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lon: float = Query(..., ge=-180.0, le=180.0),
+    hours: int = Query(120, ge=6, le=240),
+) -> dict:
+    """Fetch ICON-EPS ensemble percentiles (p10/p25/p50/p75/p90) for TWS and TWD."""
+    import math
+
+    MS_TO_KT = 1.94384
+    N_MEMBERS = 40  # ICON-seamless has 40 members (member00–member39)
+
+    ws_vars = [f"wind_speed_10m_member{i:02d}" for i in range(N_MEMBERS)]
+    wd_vars = [f"wind_direction_10m_member{i:02d}" for i in range(N_MEMBERS)]
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ",".join(ws_vars + wd_vars),
+        "models": "icon_seamless",
+        "forecast_hours": min(hours, 240),
+        "timezone": "UTC",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(SETTINGS.openmeteo_ensemble_url, params=params)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Ensemble API unavailable: {exc}")
+
+    hourly = resp.json().get("hourly", {})
+    times = [t if t.endswith("Z") else t + "Z" for t in hourly.get("time", [])]
+
+    avail_ws = [k for k in ws_vars if k in hourly]
+    avail_wd = [k for k in wd_vars if k in hourly]
+
+    def _pct(sv: list, p: float) -> float:
+        n = len(sv)
+        idx = p / 100.0 * (n - 1)
+        lo = int(idx)
+        hi = min(lo + 1, n - 1)
+        return sv[lo] + (idx - lo) * (sv[hi] - sv[lo])
+
+    def _circ_mean(angles: list) -> float:
+        s = sum(math.sin(math.radians(a)) for a in angles)
+        c = sum(math.cos(math.radians(a)) for a in angles)
+        return math.degrees(math.atan2(s, c)) % 360
+
+    # TWS percentiles (kt)
+    tws: dict = {"times": times, "p10": [], "p25": [], "p50": [], "p75": [], "p90": []}
+    for i in range(len(times)):
+        vals = sorted(
+            hourly[k][i] * MS_TO_KT
+            for k in avail_ws
+            if hourly[k] and i < len(hourly[k]) and hourly[k][i] is not None
+        )
+        if not vals:
+            for p in ("p10", "p25", "p50", "p75", "p90"):
+                tws[p].append(None)
+        else:
+            tws["p10"].append(round(_pct(vals, 10), 2))
+            tws["p25"].append(round(_pct(vals, 25), 2))
+            tws["p50"].append(round(_pct(vals, 50), 2))
+            tws["p75"].append(round(_pct(vals, 75), 2))
+            tws["p90"].append(round(_pct(vals, 90), 2))
+
+    # TWD: circular mean + signed angular deviation percentiles
+    twd: dict = {"times": times, "p50": [], "p10_dev": [], "p25_dev": [], "p75_dev": [], "p90_dev": []}
+    for i in range(len(times)):
+        vals = [
+            hourly[k][i]
+            for k in avail_wd
+            if hourly[k] and i < len(hourly[k]) and hourly[k][i] is not None
+        ]
+        if not vals:
+            twd["p50"].append(None)
+            for d in ("p10_dev", "p25_dev", "p75_dev", "p90_dev"):
+                twd[d].append(None)
+        else:
+            cm = _circ_mean(vals)
+            twd["p50"].append(round(cm, 1))
+            diffs = sorted(((v - cm + 180) % 360 - 180) for v in vals)
+            twd["p10_dev"].append(round(_pct(diffs, 10), 1))
+            twd["p25_dev"].append(round(_pct(diffs, 25), 1))
+            twd["p75_dev"].append(round(_pct(diffs, 75), 1))
+            twd["p90_dev"].append(round(_pct(diffs, 90), 1))
+
+    spreads = [
+        tws["p90"][i] - tws["p10"][i]
+        for i in range(len(times))
+        if tws["p90"][i] is not None and tws["p10"][i] is not None
+    ]
+    mean_spread = round(sum(spreads) / len(spreads), 1) if spreads else 0.0
+    spread_label = "tight" if mean_spread < 4 else "wide" if mean_spread > 10 else "moderate"
+
+    return {
+        "model": "icon_seamless",
+        "n_members": len(avail_ws),
+        "tws": tws,
+        "twd": twd,
+        "spread_kt": mean_spread,
+        "spread_label": spread_label,
+    }
+
+
 @app.delete("/api/upload-grib/{upload_id}")
 async def delete_grib(upload_id: str) -> dict:
     """Remove a previously uploaded GRIB file."""

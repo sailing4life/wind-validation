@@ -408,6 +408,10 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 .badge-insuf { background: #fef9c3; color: #854d0e; }
 .badge-excl  { background: #fee2e2; color: #991b1b; }
 
+.badge-eps-tight    { background: #dcfce7; color: #15803d; }
+.badge-eps-moderate { background: #fef9c3; color: #854d0e; }
+.badge-eps-wide     { background: #fee2e2; color: #991b1b; }
+
 /* stations */
 #stations {
   list-style: none;
@@ -850,6 +854,15 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   color: var(--ink);
   margin-bottom: 6px;
 }
+
+.fc-chart-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.fc-chart-title-row .fc-chart-title { margin-bottom: 0; }
+.fc-chart-title-row .fc-status { margin-left: auto; font-size: 11px; }
 
 /* Forecast table */
 .fc-table-heading {

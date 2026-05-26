@@ -9,6 +9,7 @@ let _biasWsMs = 0;
 let _selectedModels = new Set();
 let _correctedOnly = false;
 let _relayoutHandler = null;   // for range-slider sync
+let _ensembleData = null;
 
 // â”€â”€ Model color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FC_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d'];
@@ -24,6 +25,7 @@ function setForecastParams(lat, lon, winnerModelId, biasWsMs) {
   _winnerModelId = winnerModelId || '';
   _biasWsMs = biasWsMs || 0;
   forecastData = null;
+  _ensembleData = null;
 }
 
 // â”€â”€ Read current lat/lon from validation inputs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -94,6 +96,7 @@ async function loadForecast() {
     renderModelToggles();
     renderAllCharts();
     if (typeof renderWeatherTab === 'function') renderWeatherTab(true);
+    loadEnsemble();
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   } finally {
@@ -185,8 +188,14 @@ function windSpeedColor(kt) {
 }
 
 // â”€â”€ Range sync: best-forecast slider â†’ all other charts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const _SYNC_CHART_IDS = [
+  'fcEnsembleChart', 'fcEnsembleDirChart',
+  'fcIconEpsTwsChart', 'fcIconEpsTwdChart',
+  'fcTempChart', 'fcPrecipChart',
+];
+
 function syncChartRanges(range) {
-  for (const id of ['fcEnsembleChart', 'fcEnsembleDirChart', 'fcTempChart', 'fcPrecipChart']) {
+  for (const id of _SYNC_CHART_IDS) {
     const el = document.getElementById(id);
     if (el && el._fullLayout) Plotly.relayout(el, { 'xaxis.range': range });
   }
@@ -313,7 +322,7 @@ function renderBestForecastChart() {
     if (ev['xaxis.range[0]'] != null) {
       syncChartRanges([ev['xaxis.range[0]'], ev['xaxis.range[1]']]);
     } else if (ev['xaxis.autorange']) {
-      for (const id of ['fcEnsembleChart', 'fcEnsembleDirChart', 'fcTempChart', 'fcPrecipChart']) {
+      for (const id of _SYNC_CHART_IDS) {
         const el = document.getElementById(id);
         if (el && el._fullLayout) Plotly.relayout(el, { 'xaxis.autorange': true });
       }
@@ -517,6 +526,7 @@ function renderAllCharts() {
   if (!forecastData) return;
   renderBestForecastChart();
   renderEnsembleChart();
+  renderIconEpsCharts();
   renderTempChart();
   renderPrecipChart();
   // Show temp+precip row if at least one panel is visible
@@ -527,6 +537,140 @@ function renderAllCharts() {
     row.style.display = (tempVis || precipVis) ? '' : 'none';
   }
   renderForecastTable();
+}
+
+// â”€â”€ ICON-EPS ensemble load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function loadEnsemble() {
+  const pos = currentLatLon();
+  if (!pos) return;
+
+  const statusEl = document.getElementById('fcEpsStatus');
+  const row = document.getElementById('fcIconEpsRow');
+  const badge = document.getElementById('fcEpsSpreadBadge');
+
+  if (statusEl) statusEl.textContent = 'Loading ICON-EPS…';
+  if (badge) badge.style.display = 'none';
+  if (row) row.style.display = '';
+
+  const hoursAhead = parseInt(document.getElementById('fcHoursAhead').value, 10) || 120;
+
+  try {
+    const resp = await fetch(
+      `/api/forecast-ensemble?lat=${pos.lat}&lon=${pos.lon}&hours=${Math.min(hoursAhead, 120)}`
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+    _ensembleData = await resp.json();
+
+    if (statusEl) statusEl.textContent = `${_ensembleData.n_members} members`;
+    if (badge) {
+      const lbl = _ensembleData.spread_label;
+      badge.textContent = `${lbl}  ·  ${_ensembleData.spread_kt} kt spread`;
+      badge.className = `badge badge-eps-${lbl}`;
+      badge.style.display = '';
+    }
+    _renderEpsTwsChart();
+    _renderEpsTwdChart();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `ICON-EPS unavailable: ${err.message}`;
+    if (row) row.style.display = 'none';
+  }
+}
+
+function renderIconEpsCharts() {
+  if (!_ensembleData) return;
+  _renderEpsTwsChart();
+  _renderEpsTwdChart();
+}
+
+function _renderEpsTwsChart() {
+  const el = document.getElementById('fcIconEpsTwsChart');
+  if (!el || !_ensembleData) return;
+  const { tws } = _ensembleData;
+  const { times } = tws;
+
+  const traces = [
+    // outer band: p90 anchor (invisible), then p10 fills tonexty
+    { x: times, y: tws.p90, type: 'scatter', mode: 'lines',
+      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { x: times, y: tws.p10, name: 'p10–p90', type: 'scatter', mode: 'lines',
+      fill: 'tonexty', fillcolor: 'rgba(99,102,241,0.10)',
+      line: { width: 0 }, hoverinfo: 'skip' },
+    // inner band: p75 anchor, p25 fills
+    { x: times, y: tws.p75, type: 'scatter', mode: 'lines',
+      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { x: times, y: tws.p25, name: 'p25–p75', type: 'scatter', mode: 'lines',
+      fill: 'tonexty', fillcolor: 'rgba(99,102,241,0.22)',
+      line: { width: 0 }, hoverinfo: 'skip' },
+    // median
+    { x: times, y: tws.p50, name: 'Median (p50)', type: 'scatter', mode: 'lines',
+      line: { color: '#4f46e5', width: 2.5 } },
+  ];
+
+  // overlay winner deterministic model
+  if (forecastData) {
+    const winner = forecastData.models.find(m => m.model_id === forecastData.winner_model_id)
+      || forecastData.models[0];
+    if (winner) {
+      traces.push({
+        x: winner.hours.map(h => h.time_utc),
+        y: winner.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null),
+        name: `${forecastData.winner_model_id || winner.model_id} (det.)`,
+        type: 'scatter', mode: 'lines',
+        line: { color: '#2563eb', width: 2, dash: 'dot' },
+      });
+    }
+  }
+
+  Plotly.newPlot(el, traces, {
+    ...LIGHT_LAYOUT,
+    height: 310,
+    margin: { t: 20, b: 50, l: 55, r: 20 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
+  }, { responsive: true, displayModeBar: false });
+}
+
+function _renderEpsTwdChart() {
+  const el = document.getElementById('fcIconEpsTwdChart');
+  if (!el || !_ensembleData) return;
+  const { twd } = _ensembleData;
+  const { times } = twd;
+
+  // Add signed deviations to circular mean so chart stays linear (no 0/360 wraparound)
+  const p90 = times.map((_, i) => twd.p50[i] != null && twd.p90_dev[i] != null ? twd.p50[i] + twd.p90_dev[i] : null);
+  const p75 = times.map((_, i) => twd.p50[i] != null && twd.p75_dev[i] != null ? twd.p50[i] + twd.p75_dev[i] : null);
+  const p25 = times.map((_, i) => twd.p50[i] != null && twd.p25_dev[i] != null ? twd.p50[i] + twd.p25_dev[i] : null);
+  const p10 = times.map((_, i) => twd.p50[i] != null && twd.p10_dev[i] != null ? twd.p50[i] + twd.p10_dev[i] : null);
+
+  const traces = [
+    { x: times, y: p90, type: 'scatter', mode: 'lines',
+      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { x: times, y: p10, name: 'p10–p90', type: 'scatter', mode: 'lines',
+      fill: 'tonexty', fillcolor: 'rgba(220,38,38,0.10)',
+      line: { width: 0 }, hoverinfo: 'skip' },
+    { x: times, y: p75, type: 'scatter', mode: 'lines',
+      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { x: times, y: p25, name: 'p25–p75', type: 'scatter', mode: 'lines',
+      fill: 'tonexty', fillcolor: 'rgba(220,38,38,0.20)',
+      line: { width: 0 }, hoverinfo: 'skip' },
+    { x: times, y: twd.p50, name: 'Circ. mean', type: 'scatter', mode: 'lines',
+      line: { color: '#dc2626', width: 2.5 } },
+  ];
+
+  Plotly.newPlot(el, traces, {
+    ...LIGHT_LAYOUT,
+    height: 310,
+    margin: { t: 20, b: 50, l: 70, r: 20 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: {
+      title: { text: 'TWD (deg)', standoff: 16 },
+      automargin: true,
+      gridcolor: '#e2e8f0',
+      tickfont: { color: '#64748b' },
+    },
+  }, { responsive: true, displayModeBar: false });
 }
 
 // â”€â”€ Hourly forecast table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

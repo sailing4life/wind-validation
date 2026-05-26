@@ -94,6 +94,9 @@ class Settings:
     )
     # ECMWF needs an explicit model param on the unified previous-runs endpoint
     openmeteo_ecmwf_previous_runs_model: str = os.getenv("OPENMETEO_ECMWF_PREVIOUS_RUNS_MODEL", "ecmwf_ifs04")
+    openmeteo_ensemble_url: str = os.getenv(
+        "OPENMETEO_ENSEMBLE_URL", "https://ensemble-api.open-meteo.com/v1/ensemble"
+    )
 
 
 SETTINGS = Settings()

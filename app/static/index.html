@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=30" />
+  <link rel="stylesheet" href="/static/styles.css?v=31" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -162,6 +162,22 @@
             <div class="fc-chart-panel panel" id="fcEnsembleDirPanel">
               <div class="fc-chart-title">Ensemble TWD &nbsp;&ndash;&nbsp; All Models</div>
               <div id="fcEnsembleDirChart"></div>
+            </div>
+          </div>
+
+          <!-- ICON-EPS uncertainty ribbon -->
+          <div class="fc-ensemble-row" id="fcIconEpsRow" style="display:none">
+            <div class="fc-chart-panel panel" id="fcIconEpsTwsPanel">
+              <div class="fc-chart-title-row">
+                <span class="fc-chart-title">ICON-EPS &ndash; TWS Uncertainty</span>
+                <span id="fcEpsSpreadBadge" class="badge" style="display:none"></span>
+                <span id="fcEpsStatus" class="fc-status"></span>
+              </div>
+              <div id="fcIconEpsTwsChart"></div>
+            </div>
+            <div class="fc-chart-panel panel">
+              <div class="fc-chart-title">ICON-EPS &ndash; TWD Spread</div>
+              <div id="fcIconEpsTwdChart"></div>
             </div>
           </div>
 
@@ -366,9 +382,9 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=30"></script>
-  <script src="/static/forecast.js?v=30"></script>
-  <script src="/static/weather.js?v=30"></script>
-  <script src="/static/briefing.js?v=30"></script>
+  <script src="/static/app.js?v=31"></script>
+  <script src="/static/forecast.js?v=31"></script>
+  <script src="/static/weather.js?v=31"></script>
+  <script src="/static/briefing.js?v=31"></script>
 </body>
 </html>
