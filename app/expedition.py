@@ -24,14 +24,144 @@ KNOTS_TO_MS = 0.514444
 # These download the latest available run from the provider's open-data portal.
 _GRIB_MODEL_IDS = {"aladin_cz", "openwrf"}
 
+# Excel OLE date epoch (accounts for Excel's fictional Feb 29 1900 leap year bug)
+_EXCEL_EPOCH = datetime(1899, 12, 30, tzinfo=UTC)
+
+
+def _excel_serial_to_utc(serial: float) -> datetime:
+    return _EXCEL_EPOCH + timedelta(days=serial)
+
+
+def _downsample(raw: list[dict], interval_min: int) -> list[dict]:
+    """Bucket samples into interval_min bins and take the middle entry per bucket."""
+    if not raw:
+        return []
+    raw.sort(key=lambda x: x["time_utc"])
+    interval_sec = interval_min * 60
+    buckets: dict[int, list[dict]] = {}
+    for s in raw:
+        b = int(s["time_utc"].timestamp()) // interval_sec
+        buckets.setdefault(b, []).append(s)
+    return [buckets[b][len(buckets[b]) // 2] for b in sorted(buckets)]
+
+
+def _parse_expedition_native(text: str, interval_min: int) -> list[dict]:
+    """Parse the native Expedition log format.
+
+    Format:
+      Line 1 (!Boat,...): column names
+      Line 2 (!boat,...): Expedition protocol field IDs for each column
+      Line 3 (!v...):     version string
+      Data rows:          boat_id, utc_serial, [field_id, value, ...]*
+
+    The UTC is an OLE/Excel serial date (days since 1899-12-30).
+    """
+    lines = text.splitlines()
+
+    # Build field_id → column_name map from the first two header lines.
+    header_names: list[str] = []
+    field_ids: list[int] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith("!boat,") and not stripped[1].isupper():
+            # index row: !boat,0,1,2,3,...
+            parts = stripped.split(",")
+            for p in parts[1:]:
+                try:
+                    field_ids.append(int(p.strip()))
+                except ValueError:
+                    pass
+        elif stripped.startswith("!Boat,") or stripped.startswith("!BOAT,"):
+            # header row: !Boat,Utc,BSP,...
+            parts = stripped.split(",")
+            header_names = [p.strip() for p in parts[1:]]
+
+    # Map column name → field_id so we can resolve Lat/Lon/TWS/TWD dynamically.
+    name_to_fid: dict[str, int] = {}
+    for name, fid in zip(header_names, field_ids):
+        name_to_fid[name] = fid
+
+    # Fall back to Expedition's standard protocol IDs if header is incomplete.
+    lat_fid = name_to_fid.get("Lat", 48)
+    lon_fid = name_to_fid.get("Lon", 49)
+    tws_fid = name_to_fid.get("TWS", 5)
+    twd_fid = name_to_fid.get("TWD", 6)
+
+    raw: list[dict] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("!"):
+            continue
+
+        parts = stripped.split(",")
+        if len(parts) < 4:
+            continue
+
+        try:
+            utc_serial = float(parts[1])
+        except (ValueError, IndexError):
+            continue
+
+        # Parse remaining values as (field_id, value) pairs.
+        kv: dict[int, float] = {}
+        i = 2
+        while i + 1 < len(parts):
+            try:
+                kv[int(parts[i])] = float(parts[i + 1])
+                i += 2
+            except (ValueError, IndexError):
+                i += 1
+
+        if lat_fid not in kv or lon_fid not in kv:
+            continue
+        if tws_fid not in kv or twd_fid not in kv:
+            continue
+
+        lat     = kv[lat_fid]
+        lon     = kv[lon_fid]
+        tws_kt  = kv[tws_fid]
+        twd_deg = kv[twd_fid]
+
+        if abs(lat) < 0.001 and abs(lon) < 0.001:
+            continue
+        if not (0 <= tws_kt <= 150):
+            continue
+
+        try:
+            dt = _excel_serial_to_utc(utc_serial)
+        except Exception:
+            continue
+
+        raw.append({
+            "time_utc": dt,
+            "lat":      lat,
+            "lon":      lon,
+            "tws_ms":   tws_kt * KNOTS_TO_MS,
+            "twd_deg":  twd_deg % 360,
+        })
+
+    return _downsample(raw, interval_min)
+
 
 def parse_expedition_csv(data: bytes, interval_min: int) -> list[dict]:
-    """Parse a sailing expedition .proc.csv and downsample to interval_min resolution.
+    """Parse a sailing expedition log and downsample to interval_min resolution.
 
-    Expects columns: UtcDate, UtcTime, Lat, Lon, TWS (knots), TWD (degrees).
+    Supports two formats:
+    - Native Expedition log (starts with '!Boat,...'): sparse key-value rows with
+      OLE/Excel serial UTC.
+    - Processed .proc.csv: standard CSV with UtcDate, UtcTime, Lat, Lon, TWS, TWD
+      columns.
+
     Returns list of {time_utc, lat, lon, tws_ms, twd_deg}.
     """
     text = data.decode("utf-8", errors="replace")
+
+    # Detect the native Expedition log format.
+    first_line = text.lstrip().split("\n")[0]
+    if first_line.startswith("!Boat,") or first_line.startswith("!BOAT,"):
+        return _parse_expedition_native(text, interval_min)
+
+    # Fall back to .proc.csv format with named columns.
     reader = csv.DictReader(io.StringIO(text))
 
     raw: list[dict] = []
@@ -72,19 +202,7 @@ def parse_expedition_csv(data: bytes, interval_min: int) -> list[dict]:
         except (ValueError, KeyError):
             continue
 
-    if not raw:
-        return []
-
-    raw.sort(key=lambda x: x["time_utc"])
-
-    # Bucket into interval_min bins; take the middle sample per bucket.
-    interval_sec = interval_min * 60
-    buckets: dict[int, list[dict]] = {}
-    for s in raw:
-        b = int(s["time_utc"].timestamp()) // interval_sec
-        buckets.setdefault(b, []).append(s)
-
-    return [buckets[b][len(buckets[b]) // 2] for b in sorted(buckets)]
+    return _downsample(raw, interval_min)
 
 
 def _fetch_grib_fc_values(

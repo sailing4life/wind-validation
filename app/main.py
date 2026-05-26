@@ -270,8 +270,9 @@ async def validate_expedition_log(
     """
     from .expedition import parse_expedition_csv, validate_expedition, _extract_from_aladin_gribs  # noqa: PLC0415
 
-    if not (file.filename or "").lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Expected a .csv file")
+    fname = (file.filename or "").lower()
+    if not (fname.endswith(".csv") or fname.endswith(".log")):
+        raise HTTPException(status_code=400, detail="Expected a .csv or .log file")
 
     data = await file.read()
     speed_bytes = await grib_speed.read() if grib_speed else None
@@ -282,7 +283,8 @@ async def validate_expedition_log(
         if not samples:
             raise ValueError(
                 "No valid wind samples found. "
-                "Check that the file has UtcDate, UtcTime, Lat, Lon, TWS, TWD columns."
+                "Supported formats: native Expedition log (starts with !Boat,...) "
+                "or processed .proc.csv with UtcDate, UtcTime, Lat, Lon, TWS, TWD columns."
             )
         extra: dict | None = None
         if speed_bytes and dir_bytes:
