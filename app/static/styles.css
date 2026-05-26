@@ -18,7 +18,10 @@ body {
   font-size: 14px;
   color: var(--ink);
   background: var(--bg);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 header {
@@ -51,7 +54,8 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .app-layout {
   display: grid;
   grid-template-columns: 290px 1fr;
-  height: calc(100vh - 41px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -97,6 +101,7 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   flex-direction: column;
   overflow: hidden;
   background: var(--bg);
+  min-height: 0;
 }
 
 /* ── Main tab nav (inside app-main) ───────────────────────────────────── */
