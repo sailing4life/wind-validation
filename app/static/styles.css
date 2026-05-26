@@ -54,6 +54,7 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .app-layout {
   display: grid;
   grid-template-columns: 290px 1fr;
+  grid-template-rows: 1fr;
   flex: 1;
   min-height: 0;
   overflow: hidden;
