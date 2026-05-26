@@ -77,7 +77,7 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 
 #map {
   width: 100%;
-  height: clamp(180px, 28vh, 300px);
+  aspect-ratio: 1;
   border-radius: 8px;
 }
 
@@ -112,6 +112,7 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .main-tab-body {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 /* ── Validation tab layout ────────────────────────────────────────────── */
@@ -135,11 +136,6 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   padding: 14px;
 }
 
-#map {
-  width: 100%;
-  height: clamp(380px, 52vh, 660px);
-  border-radius: 8px;
-}
 
 .map-legend {
   margin-top: 8px;
@@ -259,9 +255,11 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 #timePlot, #dirPlot {
   width: 100%;
   display: block;
+  background: #f8fafc;
+  border-radius: 6px;
 }
-#timePlot { height: 170px; }
-#dirPlot  { height: 130px; }
+#timePlot { height: 220px; }
+#dirPlot  { height: 160px; }
 
 .chart-footer {
   margin-top: 6px;

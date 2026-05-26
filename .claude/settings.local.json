@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:github.com)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''app/windmap.py''\\).read\\(\\)\\); ast.parse\\(open\\(''app/openwrf_adapter.py''\\).read\\(\\)\\); print\\(''ok''\\)\")"
     ]
   }
 }
