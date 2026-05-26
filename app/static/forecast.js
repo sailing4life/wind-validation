@@ -41,10 +41,8 @@ document.querySelectorAll('.tab').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
 
-    if (btn.dataset.tab === 'forecast') {
-      const pos = currentLatLon();
-      if (pos) updateWindyMap(pos.lat, pos.lon);
-      if (!forecastData) loadForecast();
+    if (btn.dataset.tab === 'forecast' && !forecastData) {
+      loadForecast();
     }
   });
 });
@@ -55,23 +53,13 @@ document.getElementById('fcCorrectedOnly').addEventListener('change', e => {
   if (forecastData) renderAllCharts();
 });
 
-// â”€â”€ Windy map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function updateWindyMap(lat, lon) {
-  const zoom = 7;
-  document.getElementById('fcMap').src =
-    `https://embed.windy.com/embed2.html?lat=${lat}&lon=${lon}&zoom=${zoom}` +
-    `&level=surface&overlay=wind&menu=&message=&marker=true&calendar=&pressure=` +
-    `&type=map&location=coordinates&detail=&detailLat=${lat}&detailLon=${lon}` +
-    `&metricWind=kt&metricTemp=%C2%B0C&radarRange=-1`;
-}
-
 // â”€â”€ API call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadForecast() {
   const pos = currentLatLon();
   const status = document.getElementById('fcStatus');
 
   if (!pos) {
-    status.textContent = 'Set coordinates in the Validation tab first.';
+    status.textContent = 'Set coordinates in the sidebar first.';
     return;
   }
 
@@ -103,12 +91,9 @@ async function loadForecast() {
       ? `Winner: ${_winnerModelId}   -   bias ${biasKt} kt`
       : 'Run Validation first for bias correction';
 
-    updateWindyMap(pos.lat, pos.lon);
     renderModelToggles();
     renderAllCharts();
-    if (typeof renderWeatherTab === 'function' && document.getElementById('tab-weather')?.classList.contains('active')) {
-      renderWeatherTab(true);
-    }
+    if (typeof renderWeatherTab === 'function') renderWeatherTab(true);
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   } finally {
@@ -142,9 +127,7 @@ function renderModelToggles() {
       }
       renderModelToggles();
       renderAllCharts();
-      if (typeof renderWeatherTab === 'function' && document.getElementById('tab-weather')?.classList.contains('active')) {
-        renderWeatherTab();
-      }
+      if (typeof renderWeatherTab === 'function') renderWeatherTab();
     });
     container.appendChild(btn);
   });

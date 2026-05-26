@@ -22,19 +22,20 @@ body {
 }
 
 header {
-  padding: 14px 20px 10px;
+  padding: 10px 20px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+  flex-shrink: 0;
 }
 
 .header-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 14px;
   flex-wrap: wrap;
 }
 
-h1 { font-size: 18px; font-weight: 700; }
+h1 { font-size: 17px; font-weight: 700; }
 h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 
 .window-info {
@@ -46,24 +47,85 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   border-radius: 4px;
 }
 
-.subtitle {
-  margin-top: 4px;
-  color: var(--ink-muted);
-  font-size: 12px;
+/* ── App layout ────────────────────────────────────────────────────────── */
+.app-layout {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  height: calc(100vh - 41px);
+  overflow: hidden;
 }
 
-main {
+.app-sidebar {
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel);
+}
+
+.sidebar-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sidebar-map-wrap {
+  flex-shrink: 0;
+}
+
+#map {
+  width: 100%;
+  height: clamp(180px, 28vh, 300px);
+  border-radius: 8px;
+}
+
+.sidebar-ranking h2 {
+  margin-bottom: 8px;
+}
+
+.grib-inputs {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── Main tab nav (inside app-main) ───────────────────────────────────── */
+.main-tab-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+
+.main-tab-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* ── Validation tab layout ────────────────────────────────────────────── */
+.val-page {
   display: grid;
-  grid-template-columns: minmax(480px, 2fr) 340px;
+  grid-template-columns: minmax(400px, 2fr) minmax(200px, 1fr);
   gap: 12px;
   padding: 12px;
   align-items: start;
 }
 
-.col-left, .col-right {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+@media (max-width: 1000px) {
+  .app-layout { grid-template-columns: 260px 1fr; }
+  .val-page { grid-template-columns: 1fr; }
 }
 
 .panel {
@@ -393,43 +455,34 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 .source-brightsky   { background: #ede9fe; color: #5b21b6; }
 .source-other       { background: #f1f5f9; color: #475569; }
 
-/* â”€â”€ Tab navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-.tab-nav {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
+/* ── Tab buttons ──────────────────────────────────────────────────────── */
 .tab {
-  padding: 4px 14px;
-  border-radius: 20px;
-  border: 1.5px solid var(--line);
-  background: var(--bg);
+  padding: 5px 16px;
+  border-radius: 8px 8px 0 0;
+  border: 1.5px solid transparent;
+  background: transparent;
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  transition: background 0.1s, color 0.1s;
+  margin-bottom: -1px;
 }
 
-.tab:hover { background: #e0e7ef; }
+.tab:hover { background: var(--bg); color: var(--ink); }
 
 .tab.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: var(--bg);
+  color: var(--accent);
+  border-color: var(--line);
+  border-bottom-color: var(--bg);
 }
 
 .tab-panel { display: none !important; }
 .tab-panel.active { display: block !important; }
 
-/* â”€â”€ Forecast layout  -  stacked â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-#tab-forecast.active {
-  display: flex !important;
-  flex-direction: column;
-}
-
-#tab-weather.active {
+#tab-forecast.active,
+#tab-briefing.active {
   display: flex !important;
   flex-direction: column;
 }
@@ -441,11 +494,65 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   padding: 12px;
 }
 
+.fc-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fc-ctrl-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.fc-ctrl-label input[type="number"] {
+  width: 80px;
+}
+
+/* ── Weather analysis collapsible ─────────────────────────────────────── */
+.wx-details {
+  padding: 0;
+  overflow: hidden;
+}
+
+.wx-details-summary {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wx-details-summary::before {
+  content: '▶';
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.wx-details[open] .wx-details-summary::before {
+  transform: rotate(90deg);
+}
+
+.wx-details-summary:hover { color: var(--ink); }
+
+.wx-details .wx-page {
+  padding: 0 14px 14px;
+}
+
 .wx-page {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
 }
 
 .wx-top {
@@ -712,40 +819,6 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   background: #0284c7;
 }
 
-/* Top row: map (left) + sidebar (right) */
-.fc-top {
-  display: grid;
-  grid-template-columns: 1fr 260px;
-  gap: 12px;
-  align-items: start;
-}
-
-.fc-map-wrap #fcMap {
-  width: 100%;
-  height: clamp(380px, 55vh, 640px);
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  display: block;
-}
-
-.fc-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.fc-sidebar label:not(.mode-pill) {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.fc-sidebar input[type="number"] {
-  width: 100%;
-  padding: 7px 9px;
-  font-size: 13px;
-}
-
 /* Model toggles bar */
 .fc-toggles-bar {
   padding: 10px 14px;
@@ -884,16 +957,10 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 }
 
 @media (max-width: 860px) {
-  main { grid-template-columns: 1fr; }
-  #map { height: 55vw; min-height: 320px; }
   .wx-facts { grid-template-columns: 1fr; }
 }
 
-/* â”€â”€ Briefing tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-#tab-briefing.active {
-  display: flex !important;
-  flex-direction: column;
-}
+/* ── Briefing tab ─────────────────────────────────────────────────────── */
 
 .bf-page {
   display: flex;
@@ -1142,8 +1209,11 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 }
 
 @media print {
-  /* â”€â”€ Visibility â”€â”€ */
-  header, .bf-actions, #tab-validation, #tab-forecast { display: none !important; }
+  /* ── Visibility ── */
+  header, .bf-actions, .app-sidebar, .main-tab-nav,
+  #tab-validation, #tab-forecast { display: none !important; }
+  .app-layout { display: block !important; }
+  .app-main { display: block !important; overflow: visible !important; }
   #tab-briefing { display: block !important; }
 
   /* â”€â”€ Base â”€â”€ */

@@ -692,9 +692,9 @@ document.querySelectorAll('input[name="querySource"]').forEach((radio) => {
   radio.addEventListener("change", () => {
     querySource = radio.value;
     const isExp = querySource === "expedition";
-    document.getElementById("pointInputs").style.display      = isExp ? "none" : "";
-    document.getElementById("expeditionInputs").style.display = isExp ? ""     : "none";
-    document.querySelector(".mode-pills").style.display        = isExp ? "none" : "";
+    document.getElementById("pointInputs").style.display        = isExp ? "none" : "";
+    document.getElementById("expeditionInputs").style.display   = isExp ? ""     : "none";
+    document.getElementById("analysisModeWrap").style.display   = isExp ? "none" : "";
   });
 });
 
