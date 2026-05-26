@@ -100,9 +100,7 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .app-main {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
   background: var(--bg);
 }
 
@@ -113,13 +111,13 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   padding: 8px 14px 0;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
-  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .main-tab-body {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
+  /* plain block container — .app-main handles scrolling */
 }
 
 /* ── Validation tab layout ────────────────────────────────────────────── */
@@ -489,12 +487,6 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 
 .tab-panel { display: none !important; }
 .tab-panel.active { display: block !important; }
-
-#tab-forecast.active,
-#tab-briefing.active {
-  display: flex !important;
-  flex-direction: column;
-}
 
 .fc-page {
   display: flex;
