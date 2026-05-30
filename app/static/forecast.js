@@ -572,7 +572,7 @@ async function loadEnsemble() {
     _renderEpsTwdChart();
   } catch (err) {
     if (statusEl) statusEl.textContent = `ICON-EPS unavailable: ${err.message}`;
-    if (row) row.style.display = 'none';
+    // keep row visible so the error message is readable
   }
 }
 

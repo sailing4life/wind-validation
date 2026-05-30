@@ -316,15 +316,13 @@ async def forecast_ensemble(
     import math
 
     MS_TO_KT = 1.94384
-    N_MEMBERS = 40  # ICON-seamless has 40 members (member00–member39)
 
-    ws_vars = [f"wind_speed_10m_member{i:02d}" for i in range(N_MEMBERS)]
-    wd_vars = [f"wind_direction_10m_member{i:02d}" for i in range(N_MEMBERS)]
-
+    # Request base variable names — the ensemble API returns all member columns
+    # automatically (wind_speed_10m_member00 … wind_speed_10m_memberN).
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": ",".join(ws_vars + wd_vars),
+        "hourly": "wind_speed_10m,wind_direction_10m",
         "models": "icon_seamless",
         "forecast_hours": min(hours, 240),
         "timezone": "UTC",
@@ -340,8 +338,9 @@ async def forecast_ensemble(
     hourly = resp.json().get("hourly", {})
     times = [t if t.endswith("Z") else t + "Z" for t in hourly.get("time", [])]
 
-    avail_ws = [k for k in ws_vars if k in hourly]
-    avail_wd = [k for k in wd_vars if k in hourly]
+    # Detect available member columns from the response
+    avail_ws = sorted(k for k in hourly if k.startswith("wind_speed_10m_member"))
+    avail_wd = sorted(k for k in hourly if k.startswith("wind_direction_10m_member"))
 
     def _pct(sv: list, p: float) -> float:
         n = len(sv)
