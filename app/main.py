@@ -324,6 +324,7 @@ async def forecast_ensemble(
         "longitude": lon,
         "hourly": "wind_speed_10m,wind_direction_10m",
         "models": "icon_seamless",
+        "wind_speed_unit": "ms",
         "forecast_hours": min(hours, 240),
         "timezone": "UTC",
     }
