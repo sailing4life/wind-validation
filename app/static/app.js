@@ -579,7 +579,7 @@ async function runValidation() {
   populateModelToggles(latestSeries, data.winner_model_id, runTimes);
   drawCharts();
 
-  // Pass params to forecast tab
+  // Pass params to forecast tab and pre-load forecast + ensemble in background
   const winnerRow = (data.models || []).find(m => m.model_id === data.winner_model_id);
   if (typeof setForecastParams === 'function') {
     setForecastParams(
@@ -589,6 +589,7 @@ async function runValidation() {
       winnerRow?.bias_ws ?? 0,
     );
   }
+  if (typeof loadForecast === 'function') loadForecast();
 }
 
 // ── chart hover (crosshair + tooltip) ────────────────────────────────────────
