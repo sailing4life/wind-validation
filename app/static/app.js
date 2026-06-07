@@ -702,6 +702,27 @@ document.querySelectorAll('input[name="querySource"]').forEach((radio) => {
 window.addEventListener("resize", () => drawCharts());
 runBtn.addEventListener("click", runValidation);
 
+// ── Mobile sidebar toggle ─────────────────────────────────────────────────────
+(function () {
+  const toggleBtn = document.getElementById('sidebarToggle');
+  const sidebar   = document.querySelector('.app-sidebar');
+  const overlay   = document.getElementById('sidebarOverlay');
+  if (!toggleBtn || !sidebar || !overlay) return;
+
+  function openSidebar()  { sidebar.classList.add('open');    overlay.classList.add('open'); }
+  function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('open'); }
+
+  toggleBtn.addEventListener('click', () =>
+    sidebar.classList.contains('open') ? closeSidebar() : openSidebar()
+  );
+  overlay.addEventListener('click', closeSidebar);
+
+  // Close sidebar after validate on mobile
+  runBtn.addEventListener('click', () => {
+    if (window.innerWidth <= 768) closeSidebar();
+  });
+})();
+
 // ── expedition log validation ─────────────────────────────────────────────────
 async function runExpeditionValidation() {
   const fileInput = document.getElementById("expeditionFile");

@@ -4,16 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=35" />
+  <link rel="stylesheet" href="/static/styles.css?v=36" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
   <header>
     <div class="header-row">
+      <button id="sidebarToggle" class="sidebar-toggle-btn" aria-label="Open sidebar">&#9776;</button>
       <h1>Wind Validation</h1>
       <div id="window-info" class="window-info">no data loaded yet</div>
     </div>
   </header>
+
+  <div id="sidebarOverlay" class="sidebar-overlay"></div>
 
   <div class="app-layout">
 
@@ -382,7 +385,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=32"></script>
+  <script src="/static/app.js?v=33"></script>
   <script src="/static/forecast.js?v=32"></script>
   <script src="/static/weather.js?v=31"></script>
   <script src="/static/briefing.js?v=31"></script>

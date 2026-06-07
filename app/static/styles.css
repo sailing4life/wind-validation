@@ -50,6 +50,29 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   border-radius: 4px;
 }
 
+/* ── Sidebar toggle button (mobile only) ──────────────────────────────── */
+.sidebar-toggle-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── Sidebar overlay (mobile only) ───────────────────────────────────── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 199;
+}
+.sidebar-overlay.open { display: block; }
+
 /* ── App layout ────────────────────────────────────────────────────────── */
 .app-layout {
   display: flex;
@@ -1212,7 +1235,62 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   gap: 12px;
 }
 
-/* â”€â”€ Print / PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Mobile ────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar-toggle-btn { display: flex; align-items: center; }
+
+  /* Sidebar: slide-in drawer from the left */
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 88vw);
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.25);
+  }
+  .app-sidebar.open { transform: translateX(0); }
+
+  /* Main takes full width */
+  .app-main { min-width: 0; }
+
+  /* Validation chart panel gets more vertical room */
+  #timePlot { height: 180px; }
+  #dirPlot  { height: 130px; }
+
+  /* Stack side-by-side grid rows */
+  .val-page,
+  .fc-ensemble-row,
+  .fc-top,
+  .wx-top,
+  .wx-charts,
+  .bf-top-row,
+  .bf-ensemble-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Forecast controls: wrap tightly */
+  .fc-controls { flex-direction: column; align-items: stretch; }
+  .fc-ctrl-label input[type=”number”] { width: 100%; }
+
+  /* Plotly charts: reduce fixed heights for narrow screens */
+  .fc-page .fc-chart-panel [id$=”Chart”] { min-width: 0; }
+
+  /* Briefing table: allow horizontal scroll */
+  .fc-table-scroll, .bf-table-panel .fc-table-scroll {
+    overflow-x: auto;
+    max-height: none;
+  }
+
+  /* WX grid */
+  .wx-slider-grid, .wx-facts, .wx-score-row {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Print / PDF ─────────────────────────────────────────────────────────── */
 @page {
   size: A4 portrait;
   margin: 18mm 18mm 15mm;
