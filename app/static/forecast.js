@@ -10,6 +10,7 @@ let _selectedModels = new Set();
 let _correctedOnly = false;
 let _relayoutHandler = null;   // for range-slider sync
 let _ensembleData = null;
+let _gradientData = null;
 
 // â”€â”€ Model color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FC_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d'];
@@ -26,6 +27,7 @@ function setForecastParams(lat, lon, winnerModelId, biasWsMs) {
   _biasWsMs = biasWsMs || 0;
   forecastData = null;
   _ensembleData = null;
+  _gradientData = null;
 }
 
 // â”€â”€ Read current lat/lon from validation inputs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -97,6 +99,7 @@ async function loadForecast() {
     renderAllCharts();
     if (typeof renderWeatherTab === 'function') renderWeatherTab(true);
     loadEnsemble();
+    loadGradientWind();
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   } finally {
@@ -191,6 +194,7 @@ function windSpeedColor(kt) {
 const _SYNC_CHART_IDS = [
   'fcEnsembleChart', 'fcEnsembleDirChart',
   'fcIconEpsTwsChart', 'fcIconEpsTwdChart',
+  'fcGradientChart',
   'fcTempChart', 'fcPrecipChart',
 ];
 
@@ -643,26 +647,47 @@ function _renderEpsTwdChart() {
   const { twd } = _ensembleData;
   const { times } = twd;
 
-  // Add signed deviations to circular mean so chart stays linear (no 0/360 wraparound)
-  const p90 = times.map((_, i) => twd.p50[i] != null && twd.p90_dev[i] != null ? twd.p50[i] + twd.p90_dev[i] : null);
-  const p75 = times.map((_, i) => twd.p50[i] != null && twd.p75_dev[i] != null ? twd.p50[i] + twd.p75_dev[i] : null);
-  const p25 = times.map((_, i) => twd.p50[i] != null && twd.p25_dev[i] != null ? twd.p50[i] + twd.p25_dev[i] : null);
-  const p10 = times.map((_, i) => twd.p50[i] != null && twd.p10_dev[i] != null ? twd.p50[i] + twd.p10_dev[i] : null);
+  // Hourly boxes up to 48h; 3-hourly beyond that (same cadence as the TWS chart).
+  // Signed deviations are added to the circular mean so the axis stays linear
+  // (no 0/360 wraparound inside a single box).
+  const stepH = times.length <= 49 ? 1 : 3;
+  const idxs = [];
+  for (let i = 0; i < times.length; i += stepH) {
+    if (twd.p50[i] != null && twd.p25_dev[i] != null && twd.p75_dev[i] != null) idxs.push(i);
+  }
 
-  const traces = [
-    { x: times, y: p90, type: 'scatter', mode: 'lines',
-      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
-    { x: times, y: p10, name: 'p10–p90', type: 'scatter', mode: 'lines',
-      fill: 'tonexty', fillcolor: 'rgba(220,38,38,0.10)',
-      line: { width: 0 }, hoverinfo: 'skip' },
-    { x: times, y: p75, type: 'scatter', mode: 'lines',
-      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
-    { x: times, y: p25, name: 'p25–p75', type: 'scatter', mode: 'lines',
-      fill: 'tonexty', fillcolor: 'rgba(220,38,38,0.20)',
-      line: { width: 0 }, hoverinfo: 'skip' },
-    { x: times, y: twd.p50, name: 'Circ. mean', type: 'scatter', mode: 'lines',
-      line: { color: '#dc2626', width: 2.5 } },
-  ];
+  const traces = [{
+    type: 'box',
+    x: idxs.map(i => times[i]),
+    lowerfence: idxs.map(i => twd.p10_dev[i] != null ? +(twd.p50[i] + twd.p10_dev[i]).toFixed(1) : null),
+    q1:         idxs.map(i => +(twd.p50[i] + twd.p25_dev[i]).toFixed(1)),
+    median:     idxs.map(i => twd.p50[i]),
+    q3:         idxs.map(i => +(twd.p50[i] + twd.p75_dev[i]).toFixed(1)),
+    upperfence: idxs.map(i => twd.p90_dev[i] != null ? +(twd.p50[i] + twd.p90_dev[i]).toFixed(1) : null),
+    name: 'ICON-EPS (p10–p90)',
+    marker: { color: '#dc2626' },
+    line: { color: '#dc2626', width: 1.2 },
+    fillcolor: 'rgba(220,38,38,0.18)',
+    width: stepH * 3600e3 * 0.55,   // box width in ms on the date axis
+  }];
+
+  // ICON-EU deterministic TWD through the boxes (fallback: winner model)
+  if (forecastData) {
+    const overlay = forecastData.models.find(m => m.model_id === 'icon_eu')
+      || forecastData.models.find(m => m.model_id === forecastData.winner_model_id)
+      || forecastData.models[0];
+    if (overlay) {
+      traces.push({
+        x: overlay.hours.map(h => h.time_utc),
+        y: overlay.hours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null),
+        name: `${overlay.model_id} (det.)`,
+        type: 'scatter', mode: 'lines+markers',
+        line: { color: '#2563eb', width: 2 },
+        marker: { color: '#2563eb', size: 4 },
+        connectgaps: false,
+      });
+    }
+  }
 
   Plotly.newPlot(el, traces, {
     ...LIGHT_LAYOUT,
@@ -675,6 +700,71 @@ function _renderEpsTwdChart() {
       automargin: true,
       gridcolor: '#e2e8f0',
       tickfont: { color: '#64748b' },
+    },
+  }, { responsive: true, displayModeBar: false });
+}
+
+// ── Gradient wind (925 hPa) ──────────────────────────────────────────────────────
+async function loadGradientWind() {
+  const pos = currentLatLon();
+  const panel = document.getElementById('fcGradientPanel');
+  const statusEl = document.getElementById('fcGradientStatus');
+  if (!pos || !panel) return;
+
+  panel.style.display = '';
+  if (statusEl) statusEl.textContent = 'Loading…';
+
+  const hoursAhead = parseInt(document.getElementById('fcHoursAhead').value, 10) || 48;
+
+  try {
+    const resp = await fetch(
+      `/api/gradient-wind?lat=${pos.lat}&lon=${pos.lon}&hours=${Math.min(hoursAhead, 168)}`
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+    _gradientData = await resp.json();
+    if (statusEl) statusEl.textContent = _gradientData.model;
+    renderGradientChart();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `unavailable: ${err.message}`;
+  }
+}
+
+function renderGradientChart() {
+  const el = document.getElementById('fcGradientChart');
+  if (!el || !_gradientData) return;
+  const { times, ws925_kt, wd925_deg, ws10_kt } = _gradientData;
+
+  const traces = [
+    { x: times, y: ws925_kt, name: '925 hPa TWS (kt)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#7c3aed', width: 2 },
+      marker: { color: '#7c3aed', size: 4 },
+      yaxis: 'y1' },
+    { x: times, y: ws10_kt, name: '10 m TWS (kt)',
+      type: 'scatter', mode: 'lines',
+      line: { color: '#94a3b8', width: 1.5, dash: 'dash' },
+      yaxis: 'y1' },
+    { x: times, y: wd925_deg, name: '925 hPa TWD (deg)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#dc2626', width: 1.5 },
+      marker: { color: '#dc2626', size: 4 },
+      connectgaps: false,
+      yaxis: 'y2' },
+  ];
+
+  Plotly.newPlot(el, traces, {
+    ...LIGHT_LAYOUT,
+    height: 310,
+    margin: { t: 20, b: 50, l: 55, r: 65 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
+    yaxis2: {
+      title: ' deg', overlaying: 'y', side: 'right',
+      range: [0, 360], dtick: 90,
+      gridcolor: 'transparent',
+      tickfont: { color: '#dc2626' },
+      titlefont: { color: '#dc2626' },
     },
   }, { responsive: true, displayModeBar: false });
 }

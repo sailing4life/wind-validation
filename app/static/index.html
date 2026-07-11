@@ -184,6 +184,15 @@
             </div>
           </div>
 
+          <!-- Gradient wind: 925 hPa vs surface -->
+          <div class="fc-chart-panel panel" id="fcGradientPanel" style="display:none">
+            <div class="fc-chart-title-row">
+              <span class="fc-chart-title">Gradient Wind &ndash; 925 hPa (~800 m)</span>
+              <span id="fcGradientStatus" class="fc-status"></span>
+            </div>
+            <div id="fcGradientChart"></div>
+          </div>
+
           <div class="fc-ensemble-row" id="fcTempPrecipRow" style="display:none">
             <div class="fc-chart-panel panel" id="fcTempPanel">
               <div class="fc-chart-title">Temperature (&deg;C)</div>
@@ -386,7 +395,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script src="/static/app.js?v=33"></script>
-  <script src="/static/forecast.js?v=33"></script>
+  <script src="/static/forecast.js?v=34"></script>
   <script src="/static/weather.js?v=31"></script>
   <script src="/static/briefing.js?v=32"></script>
 </body>

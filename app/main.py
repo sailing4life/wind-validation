@@ -412,6 +412,49 @@ async def forecast_ensemble(
     }
 
 
+@app.get("/api/gradient-wind")
+async def gradient_wind(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lon: float = Query(..., ge=-180.0, le=180.0),
+    hours: int = Query(48, ge=6, le=168),
+) -> dict:
+    """925 hPa (gradient) wind + 10 m surface wind from ICON-EU for baseline/shear comparison."""
+    MS_TO_KT = 1.94384
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "wind_speed_925hPa,wind_direction_925hPa,wind_speed_10m,wind_direction_10m",
+        "models": SETTINGS.openmeteo_icon_eu_model,
+        "wind_speed_unit": "ms",
+        "forecast_hours": min(hours, 168),
+        "timezone": "UTC",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(SETTINGS.openmeteo_icon_eu_url, params=params)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Gradient wind API unavailable: {exc}")
+
+    hourly = resp.json().get("hourly", {})
+    times = [t if t.endswith("Z") else t + "Z" for t in hourly.get("time", [])]
+
+    def _kt(key: str) -> list:
+        vals = hourly.get(key) or []
+        return [round(v * MS_TO_KT, 1) if v is not None else None for v in vals]
+
+    return {
+        "model": SETTINGS.openmeteo_icon_eu_model,
+        "times": times,
+        "ws925_kt": _kt("wind_speed_925hPa"),
+        "wd925_deg": hourly.get("wind_direction_925hPa") or [],
+        "ws10_kt": _kt("wind_speed_10m"),
+        "wd10_deg": hourly.get("wind_direction_10m") or [],
+    }
+
+
 @app.delete("/api/upload-grib/{upload_id}")
 async def delete_grib(upload_id: str) -> dict:
     """Remove a previously uploaded GRIB file."""
