@@ -5,6 +5,7 @@ import logging
 import shutil
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger("wind_validation")
@@ -453,6 +454,119 @@ async def gradient_wind(
         "ws10_kt": _kt("wind_speed_10m"),
         "wd10_deg": hourly.get("wind_direction_10m") or [],
     }
+
+
+_pressure_charts_cache: dict = {"fetched_at": 0.0, "charts": []}
+
+
+@app.get("/api/pressure-charts")
+async def pressure_charts() -> dict:
+    """Met Office surface pressure chart URLs (analysis + forecast steps), scraped and cached."""
+    import re
+    import time
+
+    now = time.time()
+    if _pressure_charts_cache["charts"] and now - _pressure_charts_cache["fetched_at"] < 1800:
+        return {"charts": _pressure_charts_cache["charts"]}
+
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://www.metoffice.gov.uk/weather/maps-and-charts/surface-pressure",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            resp.raise_for_status()
+    except Exception as exc:
+        if _pressure_charts_cache["charts"]:   # stale cache beats an error
+            return {"charts": _pressure_charts_cache["charts"]}
+        raise HTTPException(status_code=503, detail=f"Met Office page unavailable: {exc}")
+
+    # e.g. https://data.consumer-digital.api.metoffice.gov.uk/v1/surface-pressure/colour/2026-07-11T1200/FSXX12T_24.gif
+    pat = re.compile(
+        r'src="(https://data\.consumer-digital\.api\.metoffice\.gov\.uk/v1/surface-pressure/'
+        r'colour/(\d{4}-\d{2}-\d{2})T(\d{2})\d{2}/FSXX\d{2}T_(\d{2})\.gif)"'
+    )
+    charts = []
+    seen = set()
+    for url, run_date, run_hour, step in pat.findall(resp.text):
+        if url in seen:
+            continue
+        seen.add(url)
+        step_h = int(step)
+        run_dt = datetime.fromisoformat(f"{run_date}T{run_hour}:00:00+00:00")
+        valid = run_dt + timedelta(hours=step_h)
+        charts.append({
+            "step_h": step_h,
+            "url": url,
+            "valid_utc": valid.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+    charts.sort(key=lambda c: c["step_h"])
+
+    if not charts:
+        raise HTTPException(status_code=503, detail="No pressure charts found on Met Office page")
+
+    _pressure_charts_cache["charts"] = charts
+    _pressure_charts_cache["fetched_at"] = now
+    return {"charts": charts}
+
+
+@app.get("/api/briefing-extras")
+async def briefing_extras(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lon: float = Query(..., ge=-180.0, le=180.0),
+    hours: int = Query(48, ge=6, le=168),
+) -> dict:
+    """Waves (marine API) + cloud cover / CAPE (ICON-EU) for the crew summary."""
+    fh = min(hours, 168)
+
+    marine_params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "wave_height,wave_direction,wave_period",
+        "forecast_hours": fh,
+        "timezone": "UTC",
+    }
+    sky_params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "cloud_cover,cape",
+        "models": SETTINGS.openmeteo_icon_eu_model,
+        "forecast_hours": fh,
+        "timezone": "UTC",
+    }
+
+    waves: dict | None = None
+    sky: dict | None = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Marine API 400s on land points — waves are optional
+        try:
+            resp = await client.get(SETTINGS.openmeteo_marine_url, params=marine_params)
+            resp.raise_for_status()
+            h = resp.json().get("hourly", {})
+            waves = {
+                "times": [t if t.endswith("Z") else t + "Z" for t in h.get("time", [])],
+                "height_m": h.get("wave_height") or [],
+                "direction_deg": h.get("wave_direction") or [],
+                "period_s": h.get("wave_period") or [],
+            }
+        except Exception:
+            waves = None
+        try:
+            resp = await client.get(SETTINGS.openmeteo_icon_eu_url, params=sky_params)
+            resp.raise_for_status()
+            h = resp.json().get("hourly", {})
+            sky = {
+                "times": [t if t.endswith("Z") else t + "Z" for t in h.get("time", [])],
+                "cloud_cover_pct": h.get("cloud_cover") or [],
+                "cape_jkg": h.get("cape") or [],
+            }
+        except Exception:
+            sky = None
+
+    if waves is None and sky is None:
+        raise HTTPException(status_code=503, detail="Briefing extras unavailable")
+
+    return {"waves": waves, "sky": sky}
 
 
 @app.delete("/api/upload-grib/{upload_id}")

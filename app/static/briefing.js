@@ -492,6 +492,278 @@ function _bfRenderCurrentChart(payload) {
   }, { responsive: true, displayModeBar: false });
 }
 
+// ── Briefing extras: waves + cloud/CAPE (cached per location/hours) ─────────────
+let _bfExtras = null;   // { lat, lon, hours, data }
+
+async function bfFetchExtras() {
+  const pos = currentLatLon();
+  if (!pos) return null;
+  const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  if (_bfExtras && _bfExtras.lat === pos.lat && _bfExtras.lon === pos.lon && _bfExtras.hours === hours) {
+    return _bfExtras.data;
+  }
+  try {
+    const resp = await fetch(`/api/briefing-extras?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    _bfExtras = { lat: pos.lat, lon: pos.lon, hours, data };
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+// ── 1 · Met Office pressure charts ──────────────────────────────────────────────
+let _bfPressure = null;   // [{ step_h, url, valid_utc }]
+
+async function bfFetchPressureCharts() {
+  if (_bfPressure) return _bfPressure;
+  try {
+    const resp = await fetch('/api/pressure-charts');
+    if (!resp.ok) return null;
+    _bfPressure = (await resp.json()).charts;
+    return _bfPressure;
+  } catch {
+    return null;
+  }
+}
+
+function bfVisiblePressureCharts() {
+  if (!_bfPressure?.length) return [];
+  const hoursAhead = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  return _bfPressure.filter(c => c.step_h <= Math.max(24, hoursAhead));
+}
+
+function bfRenderPressureCharts() {
+  const grid = document.getElementById('bfPressureGrid');
+  const meta = document.getElementById('bfPressureMeta');
+  if (!grid) return;
+  const show = bfVisiblePressureCharts();
+  if (!show.length) {
+    grid.innerHTML = '';
+    if (meta) meta.textContent = '— Met Office charts unavailable';
+    return;
+  }
+  grid.innerHTML = '';
+  show.forEach(c => {
+    const fig = document.createElement('figure');
+    const img = document.createElement('img');
+    img.src = c.url;
+    img.alt = `Surface pressure T+${c.step_h}h`;
+    img.loading = 'lazy';
+    const cap = document.createElement('figcaption');
+    cap.textContent = `T+${c.step_h}h — ${bfFmt(c.valid_utc)}:00`;
+    fig.append(img, cap);
+    grid.appendChild(fig);
+  });
+  if (meta) meta.textContent = '— Met Office surface pressure';
+}
+
+// ── 2 · Gradient wind (925 hPa) ─────────────────────────────────────────────────
+let _bfGradient = null;   // { lat, lon, hours, data }
+
+async function bfFetchGradient() {
+  const pos = currentLatLon();
+  if (!pos) return null;
+  const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  if (_bfGradient && _bfGradient.lat === pos.lat && _bfGradient.lon === pos.lon && _bfGradient.hours === hours) {
+    return _bfGradient.data;
+  }
+  try {
+    const resp = await fetch(`/api/gradient-wind?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    _bfGradient = { lat: pos.lat, lon: pos.lon, hours, data };
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function bfRenderGradientChart() {
+  const chartDiv = document.getElementById('bfGradientChart');
+  const meta = document.getElementById('bfGradientMeta');
+  if (!chartDiv) return;
+  const data = _bfGradient?.data;
+  if (!data?.times?.length) {
+    chartDiv.innerHTML = '';
+    if (meta) meta.textContent = '— unavailable';
+    return;
+  }
+  const idxs = bfInRangeIdx(data.times);
+  const t = idxs.map(i => bfLocalISO(data.times[i]));
+
+  const traces = [
+    { x: t, y: idxs.map(i => data.ws925_kt[i]), name: '925 hPa TWS (kt)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#7c3aed', width: 2 },
+      marker: { color: '#7c3aed', size: 4 },
+      yaxis: 'y1' },
+    { x: t, y: idxs.map(i => data.ws10_kt[i]), name: '10 m TWS (kt)',
+      type: 'scatter', mode: 'lines',
+      line: { color: '#94a3b8', width: 1.5, dash: 'dash' },
+      yaxis: 'y1' },
+    { x: t, y: idxs.map(i => data.wd925_deg[i]), name: '925 hPa TWD (deg)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#dc2626', width: 1.5 },
+      marker: { color: '#dc2626', size: 4 },
+      connectgaps: false,
+      yaxis: 'y2' },
+  ];
+
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 300,
+    margin: { t: 40, b: 40, l: 55, r: 65 },
+    legend: { orientation: 'h', x: 0, y: 1.14, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
+    yaxis2: {
+      title: ' deg', overlaying: 'y', side: 'right',
+      range: [0, 360], dtick: 90,
+      gridcolor: 'transparent',
+      tickfont: { color: '#dc2626' },
+      titlefont: { color: '#dc2626' },
+    },
+  }, { responsive: true, displayModeBar: false });
+  if (meta) meta.textContent = `— ${data.model}`;
+}
+
+// ── 4 · Local effects: cloud cover + CAPE ───────────────────────────────────────
+function bfRenderSkyChart() {
+  const section = document.getElementById('bfSkySection');
+  const chartDiv = document.getElementById('bfSkyChart');
+  if (!section || !chartDiv) return;
+  const sky = _bfExtras?.data?.sky;
+  if (!sky?.times?.length) { section.style.display = 'none'; return; }
+  const idxs = bfInRangeIdx(sky.times);
+  if (!idxs.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  const t = idxs.map(i => bfLocalISO(sky.times[i]));
+  const traces = [
+    { x: t, y: idxs.map(i => sky.cloud_cover_pct[i]), name: 'Cloud cover (%)',
+      type: 'scatter', mode: 'lines',
+      fill: 'tozeroy', fillcolor: 'rgba(100,116,139,0.18)',
+      line: { color: '#64748b', width: 1.5 },
+      yaxis: 'y1' },
+    { x: t, y: idxs.map(i => sky.cape_jkg[i]), name: 'CAPE (J/kg)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#d97706', width: 2 },
+      marker: { color: '#d97706', size: 4 },
+      yaxis: 'y2' },
+  ];
+
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 260,
+    margin: { t: 40, b: 40, l: 55, r: 65 },
+    legend: { orientation: 'h', x: 0, y: 1.16, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { title: 'Cloud (%)', range: [0, 100], gridcolor: '#e2e8f0', tickfont: { color: '#64748b' } },
+    yaxis2: {
+      title: 'CAPE', overlaying: 'y', side: 'right',
+      rangemode: 'tozero',
+      gridcolor: 'transparent',
+      tickfont: { color: '#d97706' },
+      titlefont: { color: '#d97706' },
+    },
+  }, { responsive: true, displayModeBar: false });
+  const meta = document.getElementById('bfSkyMeta');
+  if (meta) meta.textContent = '— icon_eu';
+}
+
+// ── 5 · Waves ───────────────────────────────────────────────────────────────────
+function bfRenderWavesChart() {
+  const panel = document.getElementById('bfWavesPanel');
+  const chartDiv = document.getElementById('bfWavesChart');
+  if (!panel || !chartDiv) return;
+  const waves = _bfExtras?.data?.waves;
+  if (!waves?.times?.length) { panel.style.display = 'none'; return; }
+  const idxs = bfInRangeIdx(waves.times).filter(i => waves.height_m[i] != null);
+  if (!idxs.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+
+  const t = idxs.map(i => bfLocalISO(waves.times[i]));
+  const traces = [
+    { x: t, y: idxs.map(i => waves.height_m[i]), name: 'Height (m)',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#0d9488', width: 2 },
+      marker: { color: '#0d9488', size: 4 },
+      yaxis: 'y1' },
+    { x: t, y: idxs.map(i => waves.period_s[i]), name: 'Period (s)',
+      type: 'scatter', mode: 'lines',
+      line: { color: '#94a3b8', width: 1.5, dash: 'dash' },
+      yaxis: 'y2' },
+  ];
+
+  Plotly.newPlot(chartDiv, traces, {
+    ...LIGHT_LAYOUT,
+    height: 260,
+    margin: { t: 40, b: 40, l: 55, r: 65 },
+    legend: { orientation: 'h', x: 0, y: 1.16, font: { size: 10 } },
+    xaxis: { ...LIGHT_XAXIS },
+    yaxis: { ...LIGHT_YAXIS('m') },
+    yaxis2: {
+      title: 's', overlaying: 'y', side: 'right',
+      rangemode: 'tozero',
+      gridcolor: 'transparent',
+      tickfont: { color: '#94a3b8' },
+    },
+  }, { responsive: true, displayModeBar: false });
+  const dirs = idxs.map(i => waves.direction_deg[i]).filter(v => v != null);
+  const meta = document.getElementById('bfWavesMeta');
+  if (meta && dirs.length) meta.textContent = `— mean direction ${Math.round(bfCircMeanDeg(dirs))}°`;
+}
+
+// ── 7 · Confidence: auto-suggestion from EPS TWS/TWD spread + model sigma ───────
+function bfConfidenceAuto() {
+  const parts = [];
+  let score = 0, n = 0;
+
+  if (_ensembleData?.spread_kt != null) {
+    const s = _ensembleData.spread_kt;
+    score += s < 4 ? 2 : s > 10 ? 0 : 1;
+    n++;
+    parts.push(`EPS TWS spread ${s} kn`);
+  }
+  const twd = _ensembleData?.twd;
+  if (twd?.times?.length) {
+    const idxs = bfInRangeIdx(twd.times);
+    const widths = idxs
+      .map(i => (twd.p90_dev[i] != null && twd.p10_dev[i] != null) ? twd.p90_dev[i] - twd.p10_dev[i] : null)
+      .filter(v => v != null);
+    if (widths.length) {
+      const meanW = widths.reduce((a, v) => a + v, 0) / widths.length;
+      score += meanW < 20 ? 2 : meanW > 60 ? 0 : 1;
+      n++;
+      parts.push(`EPS TWD spread ±${Math.round(meanW / 2)}°`);
+    }
+  }
+  const models = (forecastData?.models || []).filter(m => Array.isArray(m.hours) && m.hours.length);
+  if (models.length >= 2) {
+    const stats = computeEnsembleStats(models.map(m => ({ ...m, hours: bfFilterHours(m.hours) })));
+    const sigmas = stats.stds.filter(v => v != null);
+    if (sigmas.length) {
+      const meanSigma = sigmas.reduce((a, v) => a + v, 0) / sigmas.length;
+      score += meanSigma < 1.5 ? 2 : meanSigma > 3 ? 0 : 1;
+      n++;
+      parts.push(`model sigma ${meanSigma.toFixed(1)} kn (${models.length} models)`);
+    }
+  }
+  if (!n) return null;
+  const avg = score / n;
+  const level = avg >= 1.5 ? 'High' : avg >= 0.75 ? 'Medium' : 'Low';
+  return { level, detail: parts.join(' · ') };
+}
+
+function bfRenderConfidenceAuto() {
+  const el = document.getElementById('bfConfidenceAuto');
+  if (!el) return;
+  const a = bfConfidenceAuto();
+  el.textContent = a ? `Suggested: ${a.level} — ${a.detail}` : '';
+}
+
 // â”€â”€ Re-render charts + table (called by range selects) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function bfRerender() {
   renderBriefingBestChart();
@@ -501,9 +773,16 @@ function bfRerender() {
   if (_bfWindmapFramesCache) {
     _bfRenderWindmapFrames(_bfWindmapFramesCache.frames);
   }
+  bfRenderPressureCharts();
+  bfRenderGradientChart();
+  bfRenderSkyChart();
+  bfRenderWavesChart();
+  bfRenderConfidenceAuto();
 }
 
 // â”€â”€ Orchestrator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const BF_SCEN_TEMPLATE = 'Main: \nAlt 1: \nAlt 2: ';
+
 function renderBriefingTab() {
   const meta = document.getElementById('bfMetaText');
   if (!forecastData) {
@@ -514,11 +793,260 @@ function renderBriefingTab() {
   const now = new Date().toUTCString().replace(' GMT', ' UTC');
   if (meta) meta.textContent = `${pos ? `${pos.lat.toFixed(4)}N, ${pos.lon.toFixed(4)}E` : ''}  -  ${now}`;
 
+  // Pre-print the scenario lines once
+  const scenEl = document.getElementById('bfScenarios');
+  if (scenEl && !scenEl.value) scenEl.value = BF_SCEN_TEMPLATE;
+
   bfInitRange();
   bfPopulateModelOverride();
   bfRerender();
   bfFetchAndRenderCurrent();
+  bfFetchPressureCharts().then(bfRenderPressureCharts);
+  bfFetchGradient().then(bfRenderGradientChart);
+  bfFetchExtras().then(() => { bfRenderSkyChart(); bfRenderWavesChart(); });
 }
+
+// ── Crew summary auto-fill ───────────────────────────────────────────────────────
+// Bullet order (per navigator preference): wind + shifts, risks (rain/squalls
+// with gusts), current, waves, temperature + sun, confidence.
+const BF_CARDINALS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+function bfCardinal(deg) {
+  return BF_CARDINALS[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+}
+
+function bfAngDiff(a, b) {   // signed a-b in [-180, 180)
+  return ((a - b + 540) % 360) - 180;
+}
+
+function bfCircMeanDeg(vals) {
+  let s = 0, c = 0;
+  vals.forEach(v => { s += Math.sin(v * Math.PI / 180); c += Math.cos(v * Math.PI / 180); });
+  return ((Math.atan2(s, c) * 180 / Math.PI) + 360) % 360;
+}
+
+function bfHourLabel(isoStr) {   // local time "1300"
+  const d = bfParseUtc(isoStr);
+  return String(d.getHours()).padStart(2, '0') + '00';
+}
+
+// Indices of `times` (ISO strings) that fall inside the selected briefing range
+function bfInRangeIdx(times) {
+  const { startTime, endTime } = bfGetRangeTimes();
+  const sMs = startTime ? bfParseUtc(startTime).getTime() : null;
+  const eMs = endTime   ? bfParseUtc(endTime).getTime()   : null;
+  const idxs = [];
+  (times || []).forEach((t, i) => {
+    const ms = bfParseUtc(t).getTime();
+    if ((sMs == null || ms >= sMs) && (eMs == null || ms <= eMs)) idxs.push(i);
+  });
+  return idxs;
+}
+
+function bfWindBullets(fh, biasKt) {
+  const pts = fh
+    .filter(h => h.ws_ms != null && h.wd_deg != null)
+    .map(h => ({
+      t: h.time_utc,
+      kt: h.ws_ms * MS_TO_KT - biasKt,
+      deg: h.wd_deg,
+    }));
+  if (pts.length < 2) return [];
+
+  // Segment on sustained direction changes (> 25 deg from the running segment mean)
+  const segs = [];
+  let seg = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const meanDir = bfCircMeanDeg(seg.map(p => p.deg));
+    if (seg.length >= 2 && Math.abs(bfAngDiff(pts[i].deg, meanDir)) > 25) {
+      segs.push(seg);
+      seg = [pts[i]];
+    } else {
+      seg.push(pts[i]);
+    }
+  }
+  segs.push(seg);
+
+  const desc = s => {
+    const kts = s.map(p => p.kt);
+    return {
+      dir: bfCircMeanDeg(s.map(p => p.deg)),
+      lo: Math.round(Math.min(...kts)),
+      hi: Math.round(Math.max(...kts)),
+      start: s[0].t,
+    };
+  };
+  const spdTxt = d => d.lo === d.hi ? `${d.hi} kn` : `${d.lo}-${d.hi} kn`;
+
+  const bullets = [];
+  let prev = desc(segs[0]);
+  bullets.push(`Wind: ${bfCardinal(prev.dir)} (${Math.round(prev.dir)}°) ${spdTxt(prev)} from ${bfHourLabel(prev.start)}`);
+
+  for (let i = 1; i < segs.length; i++) {
+    const cur = desc(segs[i]);
+    const turnWord = bfAngDiff(cur.dir, prev.dir) > 0 ? 'veering' : 'backing';
+    const prevMid = (prev.lo + prev.hi) / 2;
+    const curMid  = (cur.lo + cur.hi) / 2;
+    const trend = curMid - prevMid > 2 ? `building to ${spdTxt(cur)}`
+                : prevMid - curMid > 2 ? `easing to ${spdTxt(cur)}`
+                : spdTxt(cur);
+    bullets.push(`Around ${bfHourLabel(cur.start)} ${turnWord} to ${bfCardinal(cur.dir)} (${Math.round(cur.dir)}°), ${trend}`);
+    prev = cur;
+  }
+  return bullets;
+}
+
+function bfRiskBullets(fh, sky) {
+  const bullets = [];
+
+  const rainy = fh.filter(h => (h.precip_mm ?? 0) >= 0.2);
+  if (rainy.length) {
+    const gusts = rainy.map(h => h.gust_ms != null ? h.gust_ms * MS_TO_KT : null).filter(v => v != null);
+    let b = `Rain possible between ${bfHourLabel(rainy[0].time_utc)} and ${bfHourLabel(rainy[rainy.length - 1].time_utc)}`;
+    if (gusts.length) b += `, gusts to ${Math.round(Math.max(...gusts))} kn`;
+    bullets.push(b);
+  }
+
+  if (sky?.times?.length && sky.cape_jkg?.length) {
+    const idxs = bfInRangeIdx(sky.times);
+    const capes = idxs.map(i => sky.cape_jkg[i]).filter(v => v != null);
+    const maxCape = capes.length ? Math.max(...capes) : 0;
+    if (maxCape >= 800) {
+      bullets.push(`Unstable air (CAPE up to ${Math.round(maxCape)} J/kg) — thunderstorms/squalls possible, expect big gusts near rain clouds`);
+    }
+  }
+  return bullets;
+}
+
+function bfCurrentBullet(hours) {
+  const idxs = bfInRangeIdx(hours.map(h => h.time_utc));
+  const pts = idxs.map(i => hours[i]).filter(h => h.speed_kt != null);
+  if (!pts.length) return [];
+  const speeds = pts.map(h => h.speed_kt);
+  const lo = Math.min(...speeds).toFixed(1);
+  const hi = Math.max(...speeds).toFixed(1);
+  const dirs = pts.map(h => h.direction_deg).filter(d => d != null);
+  const dir = dirs.length ? Math.round(bfCircMeanDeg(dirs)) : null;
+  if (+hi < 0.15) return ['Little to no current expected'];
+  const range = lo === hi ? `${hi} kn` : `${lo}-${hi} kn`;
+  return [`Current: ${range}${dir != null ? ` setting ${dir}°` : ''}`];
+}
+
+function bfWaveBullet(waves) {
+  const idxs = bfInRangeIdx(waves.times);
+  const hts = idxs.map(i => waves.height_m[i]).filter(v => v != null);
+  if (!hts.length) return [];
+  const hi = Math.max(...hts);
+  if (hi < 0.2) return ['Calm sea, waves below 0.2 m'];
+  const lo = Math.min(...hts);
+  const dirs = idxs.map(i => waves.direction_deg[i]).filter(v => v != null);
+  const pers = idxs.map(i => waves.period_s[i]).filter(v => v != null);
+  let b = `Waves: ${lo.toFixed(1)}-${hi.toFixed(1)} m`;
+  if (dirs.length) b += ` from ${Math.round(bfCircMeanDeg(dirs))}°`;
+  if (pers.length) b += `, period ~${Math.round(pers.reduce((a, v) => a + v, 0) / pers.length)} s`;
+  return [b];
+}
+
+function bfTempSunBullet(fh, sky) {
+  const temps = fh.map(h => h.temp_c).filter(v => v != null);
+  let skyLabel = null;
+  if (sky?.times?.length && sky.cloud_cover_pct?.length) {
+    const idxs = bfInRangeIdx(sky.times);
+    const clouds = idxs.map(i => sky.cloud_cover_pct[i]).filter(v => v != null);
+    if (clouds.length) {
+      const mean = clouds.reduce((a, v) => a + v, 0) / clouds.length;
+      skyLabel = mean < 25 ? 'Mostly sunny' : mean <= 70 ? 'Partly cloudy' : 'General overcast';
+    }
+  }
+  if (!temps.length && !skyLabel) return [];
+  const parts = [];
+  if (skyLabel) parts.push(skyLabel);
+  if (temps.length) parts.push(`max temp ~${Math.round(Math.max(...temps))}°C`);
+  return [parts.join(', ')];
+}
+
+function bfConfidenceBullet() {
+  const a = bfConfidenceAuto();
+  return a ? [`Confidence: ${a.level} — ${a.detail}`] : [];
+}
+
+async function bfGetCurrentHours() {
+  const pos = currentLatLon();
+  if (!pos) return null;
+  const hours = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
+  if (_bfCurrentData && _bfCurrentData.lat === pos.lat && _bfCurrentData.lon === pos.lon) {
+    return _bfCurrentData.payload.hours;
+  }
+  try {
+    const resp = await fetch(`/api/ocean-current?lat=${pos.lat}&lon=${pos.lon}&hours=${hours}`);
+    if (!resp.ok) return null;
+    const payload = await resp.json();
+    _bfCurrentData = { lat: pos.lat, lon: pos.lon, hours, payload };
+    return payload.hours;
+  } catch {
+    return null;
+  }
+}
+
+async function bfAutoFillSummary() {
+  const notesEl = document.getElementById('bfNotes');
+  const btn = document.getElementById('bfAutoFillBtn');
+  if (!notesEl || !btn) return;
+  if (!forecastData) { alert('Load a forecast first.'); return; }
+  if (notesEl.value.trim() && !confirm('Replace the current notes with an auto-generated summary?')) return;
+
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Generating…';
+  try {
+    const { models } = forecastData;
+    const winner = models.find(m => m.model_id === bfGetActiveModel()) || models[0];
+    const biasKt = bfGetActiveBias() * MS_TO_KT;
+    const fh = bfFilterHours(winner.hours);
+
+    const [extras, currentHours] = await Promise.all([
+      bfFetchExtras(),
+      bfGetCurrentHours(),
+    ]);
+
+    const bullets = [
+      ...bfWindBullets(fh, biasKt),
+      ...bfRiskBullets(fh, extras?.sky),
+      ...(currentHours ? bfCurrentBullet(currentHours) : []),
+      ...(extras?.waves ? bfWaveBullet(extras.waves) : []),
+      ...bfTempSunBullet(fh, extras?.sky),
+      ...bfConfidenceBullet(),
+    ];
+
+    notesEl.value = bullets.map(b => `• ${b}`).join('\n');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+document.getElementById('bfAutoFillBtn')?.addEventListener('click', bfAutoFillSummary);
+
+// ── Copy briefing as plain text (WhatsApp-ready) ────────────────────────────────
+document.getElementById('bfCopyTextBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('bfCopyTextBtn');
+  const parts = [
+    document.getElementById('bfTitle')?.value || 'Weather Briefing',
+    document.getElementById('bfSubtitle')?.value || '',
+    document.getElementById('bfMetaText')?.textContent || '',
+    '',
+    document.getElementById('bfNotes')?.value || '',
+  ];
+  const text = parts.filter((s, i) => s !== '' || i === 3).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch (err) {
+    alert('Copy failed: ' + err.message);
+  }
+});
 
 // â”€â”€ Tab click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.querySelector('.tab[data-tab="briefing"]')
@@ -584,8 +1112,11 @@ document.querySelectorAll('[data-note-insert]').forEach(btn => {
   });
 });
 
-document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
-  const btn = document.getElementById('bfPrintBtn');
+// crew=true → one-pager: header, summary bullets, wind chart, hourly table, wind maps.
+// crew=false → full briefing with every section in framework order.
+async function bfExportPrint(crew) {
+  const btn = document.getElementById(crew ? 'bfPrintCrewBtn' : 'bfPrintBtn');
+  const origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Preparing...';
 
@@ -598,17 +1129,44 @@ document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
   const win = window.open('', '_blank', 'width=1200,height=900');
   if (!win) {
     btn.disabled = false;
-    btn.textContent = 'Print / PDF';
+    btn.textContent = origLabel;
     alert('Popup blocked. Allow popups to export PDF.');
     return;
   }
-  const bestImg    = await bfChartAsImg('bfBestChart', 370);
-  const ensTwsImg  = await bfChartAsImg('bfEnsembleChart', 370);
-  const ensTwdImg  = await bfChartAsImg('bfEnsembleDirChart', 370);
-  const tableHtml  = document.getElementById('bfTableWrap')?.innerHTML || '';
-  const currentImg = document.getElementById('bfIncludeCurrent')?.checked
-    ? await bfChartAsImg('bfCurrentChart', 300) : null;
-  const includeWindmaps = document.getElementById('bfIncludeWindmaps')?.checked;
+
+  const bestImg   = await bfChartAsImg('bfBestChart', 370);
+  const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
+
+  // Full-only assets
+  let ensTwsImg = '', ensTwdImg = '', currentImg = '', gradientImg = '', skyImg = '', wavesImg = '';
+  if (!crew) {
+    ensTwsImg   = await bfChartAsImg('bfEnsembleChart', 370);
+    ensTwdImg   = await bfChartAsImg('bfEnsembleDirChart', 370);
+    gradientImg = await bfChartAsImg('bfGradientChart', 300);
+    skyImg      = await bfChartAsImg('bfSkyChart', 260);
+    wavesImg    = await bfChartAsImg('bfWavesChart', 260);
+    currentImg  = document.getElementById('bfIncludeCurrent')?.checked
+      ? await bfChartAsImg('bfCurrentChart', 300) : '';
+  }
+
+  // Section texts (full only; empty fields are skipped)
+  const synopticTxt   = crew ? '' : (document.getElementById('bfSynoptic')?.value || '').trim();
+  const gradientTxt   = crew ? '' : (document.getElementById('bfGradientNotes')?.value || '').trim();
+  const scenariosRaw  = crew ? '' : (document.getElementById('bfScenarios')?.value || '').trim();
+  const scenariosTxt  = scenariosRaw && scenariosRaw !== BF_SCEN_TEMPLATE.trim() ? scenariosRaw : '';
+  const confidenceTxt = crew ? '' : (document.getElementById('bfConfidenceNotes')?.value || '').trim();
+  const confAuto      = crew ? null : bfConfidenceAuto();
+
+  const pressureHtml = crew ? '' : bfVisiblePressureCharts().map(c => `
+    <figure style="margin:0">
+      <img src="${c.url}" alt="Surface pressure T+${c.step_h}h" style="border-radius:4px;border:1px solid #e2e8f0" />
+      <figcaption style="font-size:9px;color:#64748b;text-align:center;margin-top:2px;font-weight:600">T+${c.step_h}h — ${bfEscapeHtml(bfFmt(c.valid_utc))}:00</figcaption>
+    </figure>`).join('');
+
+  // Wind maps: full follows the checkbox; crew includes them whenever frames are loaded
+  const includeWindmaps = crew
+    ? !!_bfWindmapFramesCache?.frames?.length
+    : document.getElementById('bfIncludeWindmaps')?.checked;
   const { startTime: wStart, endTime: wEnd } = bfGetRangeTimes();
   const wStartMs = wStart ? bfParseUtc(wStart).getTime() : null;
   const wEndMs   = wEnd   ? bfParseUtc(wEnd).getTime()   : null;
@@ -686,20 +1244,46 @@ td[style*="background"]{background-clip:padding-box}
     <div class="meta">${bfEscapeHtml(meta)}</div>
   </div>
   ${notes ? `<div class="notes">${bfEscapeHtml(notes)}</div>` : ''}
+  ${(synopticTxt || pressureHtml) ? `
   <div class="section">
-    <div class="label">Wind Forecast</div>
+    <div class="label">1 · Synoptic Overview — Met Office surface pressure</div>
+    ${pressureHtml ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">${pressureHtml}</div>` : ''}
+    ${synopticTxt ? `<div class="notes">${bfEscapeHtml(synopticTxt)}</div>` : ''}
+  </div>` : ''}
+  ${(gradientImg || gradientTxt) ? `
+  <div class="section">
+    <div class="label">2 · Gradient Wind — 925 hPa (~800 m)</div>
+    ${gradientImg ? `<img src="${gradientImg}" alt="Gradient wind chart" />` : ''}
+    ${gradientTxt ? `<div class="notes" style="margin-top:6px">${bfEscapeHtml(gradientTxt)}</div>` : ''}
+  </div>` : ''}
+  <div class="section">
+    <div class="label">${crew ? 'Wind Forecast' : '3 · Wind Forecast'}</div>
     ${bestImg ? `<img src="${bestImg}" alt="Best forecast chart" />` : '<div>No chart</div>'}
   </div>
+  ${tableHtml ? `
   <div class="section">
     <div class="label">Hourly Forecast Table</div>
     <div class="table-wrap">${tableHtml}</div>
-  </div>
-  ${ensTwsImg ? `<div class="section"><div class="label">Ensemble TWS</div><img src="${ensTwsImg}" alt="Ensemble TWS" /></div>` : ''}
-  ${ensTwdImg ? `<div class="section"><div class="label">Ensemble TWD</div><img src="${ensTwdImg}" alt="Ensemble TWD" /></div>` : ''}
-  ${currentImg ? `<div class="section"><div class="label">Ocean Current</div><img src="${currentImg}" alt="Ocean current" /></div>` : ''}
+  </div>` : ''}
+  ${ensTwsImg ? `<div class="section"><div class="label">3 · Ensemble TWS</div><img src="${ensTwsImg}" alt="Ensemble TWS" /></div>` : ''}
+  ${ensTwdImg ? `<div class="section"><div class="label">3 · Ensemble TWD</div><img src="${ensTwdImg}" alt="Ensemble TWD" /></div>` : ''}
+  ${skyImg ? `<div class="section"><div class="label">4 · Local Effects — Cloud / CAPE</div><img src="${skyImg}" alt="Cloud and CAPE" /></div>` : ''}
+  ${currentImg ? `<div class="section"><div class="label">5 · Ocean Current</div><img src="${currentImg}" alt="Ocean current" /></div>` : ''}
+  ${wavesImg ? `<div class="section"><div class="label">5 · Waves</div><img src="${wavesImg}" alt="Waves" /></div>` : ''}
+  ${scenariosTxt ? `
+  <div class="section">
+    <div class="label">6 · Scenarios</div>
+    <div class="notes">${bfEscapeHtml(scenariosTxt)}</div>
+  </div>` : ''}
+  ${(confAuto || confidenceTxt) ? `
+  <div class="section">
+    <div class="label">7 · Confidence &amp; Review</div>
+    ${confAuto ? `<div class="notes" style="color:#475569;font-size:11px">Suggested: ${bfEscapeHtml(confAuto.level)} — ${bfEscapeHtml(confAuto.detail)}</div>` : ''}
+    ${confidenceTxt ? `<div class="notes" style="margin-top:4px">${bfEscapeHtml(confidenceTxt)}</div>` : ''}
+  </div>` : ''}
   ${windmapFrames.length ? `
   <div class="section">
-    <div class="label">Wind Maps</div>
+    <div class="label">${crew ? 'Wind Maps' : '8 · Wind Maps'}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
       ${windmapFrames.map(f => `
         <figure style="margin:0">
@@ -722,8 +1306,11 @@ td[style*="background"]{background-clip:padding-box}
   };
 
   btn.disabled = false;
-  btn.textContent = 'Print / PDF';
-});
+  btn.textContent = origLabel;
+}
+
+document.getElementById('bfPrintBtn')?.addEventListener('click', () => bfExportPrint(false));
+document.getElementById('bfPrintCrewBtn')?.addEventListener('click', () => bfExportPrint(true));
 
 // â”€â”€ Wind Map GIF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.getElementById('bfWindmapBtn')?.addEventListener('click', async () => {
@@ -949,6 +1536,10 @@ document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
     title:    document.getElementById('bfTitle')?.value ?? '',
     subtitle: document.getElementById('bfSubtitle')?.value ?? '',
     notes:    document.getElementById('bfNotes')?.value ?? '',
+    synoptic:         document.getElementById('bfSynoptic')?.value ?? '',
+    gradient_notes:   document.getElementById('bfGradientNotes')?.value ?? '',
+    scenarios:        document.getElementById('bfScenarios')?.value ?? '',
+    confidence_notes: document.getElementById('bfConfidenceNotes')?.value ?? '',
     forecastData,
   };
 
@@ -995,6 +1586,10 @@ document.getElementById('bfFileInput')?.addEventListener('change', e => {
       if (payload.title    != null) document.getElementById('bfTitle').value    = payload.title;
       if (payload.subtitle != null) document.getElementById('bfSubtitle').value = payload.subtitle;
       if (payload.notes    != null) document.getElementById('bfNotes').value    = payload.notes;
+      if (payload.synoptic         != null) document.getElementById('bfSynoptic').value         = payload.synoptic;
+      if (payload.gradient_notes   != null) document.getElementById('bfGradientNotes').value    = payload.gradient_notes;
+      if (payload.scenarios        != null) document.getElementById('bfScenarios').value        = payload.scenarios;
+      if (payload.confidence_notes != null) document.getElementById('bfConfidenceNotes').value  = payload.confidence_notes;
 
       // Switch to briefing tab and render
       document.querySelector('.tab[data-tab="briefing"]')?.click();

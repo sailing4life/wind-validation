@@ -339,7 +339,8 @@
               <div id="bfModelChecks" class="bf-model-checks" title="Select which models appear in the ensemble charts"></div>
               <input type="file" id="bfGribFileInput" accept=".grib,.grb,.grib2,.grb2" style="display:none">
               <button id="bfImportGribBtn" class="btn-secondary" title="Import a local GRIB file as a wind map source">Import GRIB</button>
-              <button id="bfPrintBtn">Print / PDF</button>
+              <button id="bfPrintCrewBtn" class="btn-secondary" title="One-pager for the crew: header, summary bullets, wind chart, hourly table and wind maps">Print Crew</button>
+              <button id="bfPrintBtn" title="Full briefing: all sections, charts and notes">Print Full</button>
             </div>
           </div>
 
@@ -348,17 +349,35 @@
             <div class="panel bf-section bf-header-section">
               <input  id="bfTitle"    class="bf-title-input"    type="text" placeholder="Weather Briefing" />
               <input  id="bfSubtitle" class="bf-subtitle-input" type="text" placeholder="Location  -  Date  -  Event" />
+              <div class="fc-chart-title" style="margin-top:6px">Crew Summary</div>
               <div class="bf-notes-tools">
                 <button type="button" class="btn-secondary bf-note-btn" data-note-insert="bullet">Bullet</button>
                 <button type="button" class="btn-secondary bf-note-btn" data-note-insert="numbered">Numbered</button>
                 <button type="button" class="btn-secondary bf-note-btn" data-note-insert="check">Checklist</button>
+                <button type="button" class="btn-secondary bf-note-btn" id="bfAutoFillBtn" title="Generate crew summary bullets from the forecast data: wind + shifts, risks, current, waves, temp and confidence">Auto-fill summary</button>
+                <button type="button" class="btn-secondary bf-note-btn" id="bfCopyTextBtn" title="Copy title + summary as plain text (WhatsApp-ready)">Copy text</button>
               </div>
-              <textarea id="bfNotes" class="bf-notes" placeholder="Write your weather briefing here...&#10;&#10;• Wind: ...&#10;• Conditions: ...&#10;• Outlook: ..."></textarea>
+              <textarea id="bfNotes" class="bf-notes" placeholder="What happens today, in a few bullets — use Auto-fill summary as a starting point.&#10;&#10;• Wind + shifts: ...&#10;• Risks (rain/squalls): ...&#10;• Current / waves: ...&#10;• Temp / sun: ...&#10;• Confidence: ..."></textarea>
             </div>
 
+            <!-- 1 · Synoptic overview: Met Office pressure charts + big-picture text -->
+            <div class="panel bf-section" id="bfSynopticSection">
+              <div class="fc-chart-title">1 &middot; Synoptic Overview <span id="bfPressureMeta" class="bf-inline-meta"></span></div>
+              <div id="bfPressureGrid" class="bf-pressure-grid"></div>
+              <textarea id="bfSynoptic" class="bf-notes bf-step-notes" placeholder="Big picture: highs/lows and drivers, fronts, evolution over the race window..."></textarea>
+            </div>
+
+            <!-- 2 · Gradient wind baseline -->
+            <div class="panel bf-section" id="bfGradientSection">
+              <div class="fc-chart-title">2 &middot; Gradient Wind &ndash; 925 hPa (~800 m) <span id="bfGradientMeta" class="bf-inline-meta"></span></div>
+              <div id="bfGradientChart"></div>
+              <textarea id="bfGradientNotes" class="bf-notes bf-step-notes" placeholder="Baseline: direction, strength and trend..."></textarea>
+            </div>
+
+            <!-- 3 · Surface wind & timing (charts + table only — interpretation goes in summary/scenarios) -->
             <div class="bf-top-row">
               <div class="panel bf-section" id="bfBestPanel" style="display:none">
-                <div class="fc-chart-title">Wind Forecast  -  <span id="bfBestTitle"></span></div>
+                <div class="fc-chart-title">3 &middot; Wind Forecast  -  <span id="bfBestTitle"></span></div>
                 <div id="bfBestChart"></div>
               </div>
               <div class="panel bf-section bf-table-panel" id="bfTableWrap"></div>
@@ -375,13 +394,38 @@
               </div>
             </div>
 
+            <!-- 4 · Local effects & risks: convection / cloud (evidence only) -->
+            <div class="panel bf-section" id="bfSkySection" style="display:none">
+              <div class="fc-chart-title">4 &middot; Local Effects &amp; Risks &ndash; Cloud / CAPE <span id="bfSkyMeta" class="bf-inline-meta"></span></div>
+              <div id="bfSkyChart"></div>
+            </div>
+
+            <!-- 5 · Current & waves (evidence only) -->
             <div class="panel bf-section" id="bfCurrentPanel" style="display:none">
-              <div class="fc-chart-title">Ocean Current  <span id="bfCurrentMeta" style="font-weight:400;font-size:11px;color:#64748b"></span></div>
+              <div class="fc-chart-title">5 &middot; Ocean Current  <span id="bfCurrentMeta" style="font-weight:400;font-size:11px;color:#64748b"></span></div>
               <div id="bfCurrentChart"></div>
             </div>
 
+            <div class="panel bf-section" id="bfWavesPanel" style="display:none">
+              <div class="fc-chart-title">5 &middot; Waves <span id="bfWavesMeta" class="bf-inline-meta"></span></div>
+              <div id="bfWavesChart"></div>
+            </div>
+
+            <!-- 6 · Scenarios: what CAN happen — the only place for interpretation below the data -->
+            <div class="panel bf-section">
+              <div class="fc-chart-title">6 &middot; Scenarios</div>
+              <textarea id="bfScenarios" class="bf-notes bf-step-notes bf-scenarios" placeholder="Main: most likely evolution and the plan it supports...&#10;Alt 1: what changes, what breaks...&#10;Alt 2: low-probability / high-impact..."></textarea>
+            </div>
+
+            <!-- 7 · Confidence: auto-suggested from spreads, override + why below -->
+            <div class="panel bf-section">
+              <div class="fc-chart-title">7 &middot; Confidence &amp; Review</div>
+              <div id="bfConfidenceAuto" class="bf-confidence-auto"></div>
+              <textarea id="bfConfidenceNotes" class="bf-notes bf-step-notes" placeholder="Low / Medium / High — why: model agreement, timing uncertainty, review moments..."></textarea>
+            </div>
+
             <div class="panel bf-section" id="bfWindmapsPanel" style="display:none">
-              <div class="fc-chart-title">Wind Maps  <span id="bfWindmapsMeta" style="font-weight:400;font-size:11px;color:#64748b"></span></div>
+              <div class="fc-chart-title">8 &middot; Wind Maps  <span id="bfWindmapsMeta" style="font-weight:400;font-size:11px;color:#64748b"></span></div>
               <div id="bfWindmapsGrid" class="bf-windmaps-grid"></div>
             </div>
 
@@ -397,6 +441,6 @@
   <script src="/static/app.js?v=33"></script>
   <script src="/static/forecast.js?v=34"></script>
   <script src="/static/weather.js?v=31"></script>
-  <script src="/static/briefing.js?v=32"></script>
+  <script src="/static/briefing.js?v=34"></script>
 </body>
 </html>
