@@ -588,35 +588,41 @@ function _renderEpsTwsChart() {
   const { tws } = _ensembleData;
   const { times } = tws;
 
-  const traces = [
-    // outer band: p90 anchor (invisible), then p10 fills tonexty
-    { x: times, y: tws.p90, type: 'scatter', mode: 'lines',
-      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
-    { x: times, y: tws.p10, name: 'p10–p90', type: 'scatter', mode: 'lines',
-      fill: 'tonexty', fillcolor: 'rgba(99,102,241,0.10)',
-      line: { width: 0 }, hoverinfo: 'skip' },
-    // inner band: p75 anchor, p25 fills
-    { x: times, y: tws.p75, type: 'scatter', mode: 'lines',
-      line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
-    { x: times, y: tws.p25, name: 'p25–p75', type: 'scatter', mode: 'lines',
-      fill: 'tonexty', fillcolor: 'rgba(99,102,241,0.22)',
-      line: { width: 0 }, hoverinfo: 'skip' },
-    // median
-    { x: times, y: tws.p50, name: 'Median (p50)', type: 'scatter', mode: 'lines',
-      line: { color: '#4f46e5', width: 2.5 } },
-  ];
+  // Hourly boxes up to 48h; 3-hourly beyond that to keep the chart readable
+  const stepH = times.length <= 49 ? 1 : 3;
+  const idxs = [];
+  for (let i = 0; i < times.length; i += stepH) {
+    if (tws.p25[i] != null && tws.p50[i] != null && tws.p75[i] != null) idxs.push(i);
+  }
 
-  // overlay winner deterministic model
+  const traces = [{
+    type: 'box',
+    x: idxs.map(i => times[i]),
+    lowerfence: idxs.map(i => tws.p10[i]),
+    q1:         idxs.map(i => tws.p25[i]),
+    median:     idxs.map(i => tws.p50[i]),
+    q3:         idxs.map(i => tws.p75[i]),
+    upperfence: idxs.map(i => tws.p90[i]),
+    name: 'ICON-EPS (p10–p90)',
+    marker: { color: '#4f46e5' },
+    line: { color: '#4f46e5', width: 1.2 },
+    fillcolor: 'rgba(99,102,241,0.20)',
+    width: stepH * 3600e3 * 0.55,   // box width in ms on the date axis
+  }];
+
+  // ICON-EU deterministic line through the boxes (fallback: winner model)
   if (forecastData) {
-    const winner = forecastData.models.find(m => m.model_id === forecastData.winner_model_id)
+    const overlay = forecastData.models.find(m => m.model_id === 'icon_eu')
+      || forecastData.models.find(m => m.model_id === forecastData.winner_model_id)
       || forecastData.models[0];
-    if (winner) {
+    if (overlay) {
       traces.push({
-        x: winner.hours.map(h => h.time_utc),
-        y: winner.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null),
-        name: `${forecastData.winner_model_id || winner.model_id} (det.)`,
-        type: 'scatter', mode: 'lines',
-        line: { color: '#2563eb', width: 2, dash: 'dot' },
+        x: overlay.hours.map(h => h.time_utc),
+        y: overlay.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null),
+        name: `${overlay.model_id} (det.)`,
+        type: 'scatter', mode: 'lines+markers',
+        line: { color: '#2563eb', width: 2 },
+        marker: { color: '#2563eb', size: 4 },
       });
     }
   }

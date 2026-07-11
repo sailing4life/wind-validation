@@ -197,9 +197,9 @@ function renderBriefingBestChart() {
 
   Plotly.newPlot(chartDiv, traces, {
     ...LIGHT_LAYOUT,
-    height: 340,
-    margin: { t: 60, b: 30, l: 50, r: 55 },
-    legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 10 } },
+    height: 370,
+    margin: { t: 50, b: 50, l: 55, r: 65 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
     xaxis: { ...LIGHT_XAXIS },
     yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
     yaxis2: {
@@ -242,10 +242,12 @@ function renderBriefingEnsembleCharts() {
       const color = modelColor(series.model_id);
       const times = series.hours.map(h => bfLocalISO(h.time_utc));
       const ws_kt = series.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null);
+      const isWinner = series.model_id === winner_model_id;
       traces.push({
         x: times, y: ws_kt, name: series.model_id,
-        type: 'scatter', mode: 'lines',
-        line: { color, width: series.model_id === winner_model_id ? 2 : 1.5 },
+        type: 'scatter', mode: 'lines+markers',
+        line: { color, width: isWinner ? 2 : 1.5 },
+        marker: { color, size: isWinner ? 5 : 4 },
         opacity: 0.85,
       });
     });
@@ -258,9 +260,9 @@ function renderBriefingEnsembleCharts() {
     traces.push({ x: statTimes, y: stats.means, name: 'Ensemble mean', type: 'scatter', mode: 'lines', line: { color: '#000', width: 2, dash: 'dash' } });
     Plotly.newPlot(twsDiv, traces, {
       ...LIGHT_LAYOUT,
-      height: 300,
-      margin: { t: 40, b: 30, l: 50, r: 20 },
-      legend: { orientation: 'h', x: 0, y: 1.15, font: { size: 10 } },
+      height: 370,
+      margin: { t: 50, b: 50, l: 55, r: 20 },
+      legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
       xaxis: { ...LIGHT_XAXIS },
       yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
     }, { responsive: true, displayModeBar: false });
@@ -276,10 +278,12 @@ function renderBriefingEnsembleCharts() {
       const times = series.hours.map(h => bfLocalISO(h.time_utc));
       const wd    = series.hours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null);
       wd.forEach(v => { if (v != null) allWd.push(v); });
+      const isWinner = series.model_id === winner_model_id;
       traces.push({
         x: times, y: wd, name: series.model_id,
-        type: 'scatter', mode: 'lines',
-        line: { color, width: series.model_id === winner_model_id ? 2 : 1.5 },
+        type: 'scatter', mode: 'lines+markers',
+        line: { color, width: isWinner ? 2 : 1.5 },
+        marker: { color, size: isWinner ? 5 : 4 },
         opacity: 0.85, showlegend: false,
       });
     });
@@ -302,8 +306,8 @@ function renderBriefingEnsembleCharts() {
 
     Plotly.newPlot(twdDiv, traces, {
       ...LIGHT_LAYOUT,
-      height: 300,
-      margin: { t: 20, b: 30, l: 70, r: 20 },
+      height: 370,
+      margin: { t: 20, b: 50, l: 70, r: 20 },
       showlegend: false,
       xaxis: { ...LIGHT_XAXIS },
       yaxis: {
@@ -456,8 +460,8 @@ function _bfRenderCurrentChart(payload) {
       x: times, y: speeds, name: 'Speed (kt)',
       type: 'scatter', mode: 'lines+markers+text',
       line: { color: '#0891b2', width: 2 },
-      marker: { color: '#0891b2', size: 4 },
-      text: speeds.map(v => v != null ? v.toFixed(1) : ''),
+      marker: { color: '#0891b2', size: 5 },
+      text: allPointText(speeds, v => v.toFixed(1)),
       textposition: 'top center',
       textfont: { size: 8, color: '#0e7490' },
       yaxis: 'y1',
@@ -466,16 +470,16 @@ function _bfRenderCurrentChart(payload) {
       x: times, y: dirs, name: 'Direction (°)',
       type: 'scatter', mode: 'lines+markers',
       line: { color: '#7c3aed', width: 1.5 },
-      marker: { color: '#7c3aed', size: 3 },
+      marker: { color: '#7c3aed', size: 4 },
       yaxis: 'y2',
     },
   ];
 
   Plotly.newPlot(chartDiv, traces, {
     ...LIGHT_LAYOUT,
-    height: 260,
-    margin: { t: 20, b: 30, l: 50, r: 60 },
-    legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 10 } },
+    height: 300,
+    margin: { t: 50, b: 50, l: 55, r: 60 },
+    legend: { orientation: 'h', x: 0, y: 1.12, font: { size: 10 } },
     xaxis: { ...LIGHT_XAXIS },
     yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false, rangemode: 'tozero' },
     yaxis2: {
@@ -598,12 +602,12 @@ document.getElementById('bfPrintBtn')?.addEventListener('click', async () => {
     alert('Popup blocked. Allow popups to export PDF.');
     return;
   }
-  const bestImg    = await bfChartAsImg('bfBestChart', 340);
-  const ensTwsImg  = await bfChartAsImg('bfEnsembleChart', 300);
-  const ensTwdImg  = await bfChartAsImg('bfEnsembleDirChart', 300);
+  const bestImg    = await bfChartAsImg('bfBestChart', 370);
+  const ensTwsImg  = await bfChartAsImg('bfEnsembleChart', 370);
+  const ensTwdImg  = await bfChartAsImg('bfEnsembleDirChart', 370);
   const tableHtml  = document.getElementById('bfTableWrap')?.innerHTML || '';
   const currentImg = document.getElementById('bfIncludeCurrent')?.checked
-    ? await bfChartAsImg('bfCurrentChart', 260) : null;
+    ? await bfChartAsImg('bfCurrentChart', 300) : null;
   const includeWindmaps = document.getElementById('bfIncludeWindmaps')?.checked;
   const { startTime: wStart, endTime: wEnd } = bfGetRangeTimes();
   const wStartMs = wStart ? bfParseUtc(wStart).getTime() : null;
