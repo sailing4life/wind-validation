@@ -107,6 +107,7 @@ class OpenMeteoForecastAdapter:
                 CORE_HOURLY_VARS + EXTRA_BASE_HOURLY_VARS + EXTRA_DIAG_HOURLY_VARS,
                 CORE_HOURLY_VARS + EXTRA_BASE_HOURLY_VARS + EXTRA_SAFE_HOURLY_VARS,
                 CORE_HOURLY_VARS + EXTRA_BASE_HOURLY_VARS,
+                CORE_HOURLY_VARS,  # last resort — model has no gust/temp support
             ]
 
         payload = None
