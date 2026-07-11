@@ -732,7 +732,7 @@ async function loadGradientWind() {
 function renderGradientChart() {
   const el = document.getElementById('fcGradientChart');
   if (!el || !_gradientData) return;
-  const { times, ws925_kt, wd925_deg, ws10_kt } = _gradientData;
+  const { times, ws925_kt, wd925_deg, ws10_kt, wd10_deg } = _gradientData;
 
   const traces = [
     { x: times, y: ws925_kt, name: '925 hPa TWS (kt)',
@@ -748,6 +748,11 @@ function renderGradientChart() {
       type: 'scatter', mode: 'lines+markers',
       line: { color: '#dc2626', width: 1.5 },
       marker: { color: '#dc2626', size: 4 },
+      connectgaps: false,
+      yaxis: 'y2' },
+    { x: times, y: wd10_deg, name: '10 m TWD (deg)',
+      type: 'scatter', mode: 'lines',
+      line: { color: '#f87171', width: 1.5, dash: 'dash' },
       connectgaps: false,
       yaxis: 'y2' },
   ];

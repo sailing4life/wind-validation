@@ -426,22 +426,23 @@ async def gradient_wind(
     lon: float = Query(..., ge=-180.0, le=180.0),
     hours: int = Query(48, ge=6, le=168),
 ) -> dict:
-    """925 hPa (gradient) wind + 10 m surface wind from ICON-EU for baseline/shear comparison."""
+    """925 hPa (gradient) wind + 10 m surface wind from ECMWF for baseline/shear comparison."""
     MS_TO_KT = 1.94384
 
     params = {
         "latitude": lat,
         "longitude": lon,
         "hourly": "wind_speed_925hPa,wind_direction_925hPa,wind_speed_10m,wind_direction_10m",
-        "models": SETTINGS.openmeteo_icon_eu_model,
         "wind_speed_unit": "ms",
         "forecast_hours": min(hours, 168),
         "timezone": "UTC",
     }
+    if SETTINGS.openmeteo_ecmwf_model:
+        params["models"] = SETTINGS.openmeteo_ecmwf_model
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(SETTINGS.openmeteo_icon_eu_url, params=params)
+            resp = await client.get(SETTINGS.openmeteo_ecmwf_url, params=params)
             resp.raise_for_status()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Gradient wind API unavailable: {exc}")
@@ -454,7 +455,7 @@ async def gradient_wind(
         return [round(v * MS_TO_KT, 1) if v is not None else None for v in vals]
 
     return {
-        "model": SETTINGS.openmeteo_icon_eu_model,
+        "model": SETTINGS.openmeteo_ecmwf_model or "ecmwf",
         "times": times,
         "ws925_kt": _kt("wind_speed_925hPa"),
         "wd925_deg": hourly.get("wind_direction_925hPa") or [],

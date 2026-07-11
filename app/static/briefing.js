@@ -530,8 +530,8 @@ async function bfFetchPressureCharts() {
 
 function bfVisiblePressureCharts() {
   if (!_bfPressure?.length) return [];
-  const hoursAhead = parseInt(document.getElementById('fcHoursAhead')?.value || '48', 10);
-  return _bfPressure.filter(c => c.step_h <= Math.max(24, hoursAhead));
+  // Analysis + T+12 give the synoptic picture; more steps just add noise
+  return _bfPressure.filter(c => c.step_h <= 12);
 }
 
 function bfRenderPressureCharts() {
@@ -607,6 +607,11 @@ function bfRenderGradientChart() {
       type: 'scatter', mode: 'lines+markers',
       line: { color: '#dc2626', width: 1.5 },
       marker: { color: '#dc2626', size: 4 },
+      connectgaps: false,
+      yaxis: 'y2' },
+    { x: t, y: idxs.map(i => data.wd10_deg[i]), name: '10 m TWD (deg)',
+      type: 'scatter', mode: 'lines',
+      line: { color: '#f87171', width: 1.5, dash: 'dash' },
       connectgaps: false,
       yaxis: 'y2' },
   ];
@@ -692,8 +697,9 @@ function bfRenderWavesChart() {
       marker: { color: '#0d9488', size: 4 },
       yaxis: 'y1' },
     { x: t, y: idxs.map(i => waves.period_s[i]), name: 'Period (s)',
-      type: 'scatter', mode: 'lines',
-      line: { color: '#94a3b8', width: 1.5, dash: 'dash' },
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#7c3aed', width: 1.5, dash: 'dash' },
+      marker: { color: '#7c3aed', size: 4 },
       yaxis: 'y2' },
   ];
 
@@ -703,17 +709,135 @@ function bfRenderWavesChart() {
     margin: { t: 40, b: 40, l: 55, r: 65 },
     legend: { orientation: 'h', x: 0, y: 1.16, font: { size: 10 } },
     xaxis: { ...LIGHT_XAXIS },
-    yaxis: { ...LIGHT_YAXIS('m') },
+    yaxis: { ...LIGHT_YAXIS('Height (m)') },
     yaxis2: {
-      title: 's', overlaying: 'y', side: 'right',
+      title: 'Period (s)', overlaying: 'y', side: 'right',
       rangemode: 'tozero',
       gridcolor: 'transparent',
-      tickfont: { color: '#94a3b8' },
+      tickfont: { color: '#7c3aed' },
+      titlefont: { color: '#7c3aed' },
     },
   }, { responsive: true, displayModeBar: false });
   const dirs = idxs.map(i => waves.direction_deg[i]).filter(v => v != null);
   const meta = document.getElementById('bfWavesMeta');
   if (meta && dirs.length) meta.textContent = `— mean direction ${Math.round(bfCircMeanDeg(dirs))}°`;
+}
+
+// ── 3 · ICON-EPS box plots (uses _ensembleData loaded by the forecast tab) ──────
+function bfEpsOverlayModel() {
+  if (!forecastData) return null;
+  return forecastData.models.find(m => m.model_id === 'icon_eu')
+    || forecastData.models.find(m => m.model_id === forecastData.winner_model_id)
+    || forecastData.models[0]
+    || null;
+}
+
+function bfRenderEpsCharts() {
+  const row = document.getElementById('bfEpsRow');
+  if (!row) return;
+  if (!document.getElementById('bfIncludeEnsemble')?.checked || !_ensembleData) {
+    row.style.display = 'none';
+    return;
+  }
+
+  const { tws, twd } = _ensembleData;
+  const twsIdxAll = bfInRangeIdx(tws.times)
+    .filter(i => tws.p25[i] != null && tws.p50[i] != null && tws.p75[i] != null);
+  if (!twsIdxAll.length) { row.style.display = 'none'; return; }
+  row.style.display = '';
+
+  // Hourly boxes up to 48h in range; 3-hourly beyond
+  const stepH = twsIdxAll.length <= 49 ? 1 : 3;
+  const boxW = stepH * 3600e3 * 0.55;
+  const pick = arr => arr.filter((_, k) => k % stepH === 0);
+
+  const overlay = bfEpsOverlayModel();
+  const overlayHours = overlay ? bfFilterHours(overlay.hours) : [];
+  const overlayX = overlayHours.map(h => bfLocalISO(h.time_utc));
+
+  // ── TWS ──
+  const ti = pick(twsIdxAll);
+  const twsTraces = [{
+    type: 'box',
+    x: ti.map(i => bfLocalISO(tws.times[i])),
+    lowerfence: ti.map(i => tws.p10[i]),
+    q1:         ti.map(i => tws.p25[i]),
+    median:     ti.map(i => tws.p50[i]),
+    q3:         ti.map(i => tws.p75[i]),
+    upperfence: ti.map(i => tws.p90[i]),
+    name: 'ICON-EPS (p10–p90)',
+    marker: { color: '#4f46e5' },
+    line: { color: '#4f46e5', width: 1.2 },
+    fillcolor: 'rgba(99,102,241,0.20)',
+    width: boxW,
+  }];
+  if (overlay) {
+    twsTraces.push({
+      x: overlayX,
+      y: overlayHours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null),
+      name: `${overlay.model_id} (det.)`,
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#2563eb', width: 2 },
+      marker: { color: '#2563eb', size: 4 },
+    });
+  }
+  const twsDiv = document.getElementById('bfEpsTwsChart');
+  if (twsDiv) {
+    Plotly.newPlot(twsDiv, twsTraces, {
+      ...LIGHT_LAYOUT,
+      height: 300,
+      margin: { t: 40, b: 40, l: 55, r: 20 },
+      legend: { orientation: 'h', x: 0, y: 1.14, font: { size: 10 } },
+      xaxis: { ...LIGHT_XAXIS },
+      yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
+    }, { responsive: true, displayModeBar: false });
+  }
+
+  // ── TWD ──
+  const twdIdxAll = bfInRangeIdx(twd.times)
+    .filter(i => twd.p50[i] != null && twd.p25_dev[i] != null && twd.p75_dev[i] != null);
+  const di = pick(twdIdxAll);
+  const twdTraces = [{
+    type: 'box',
+    x: di.map(i => bfLocalISO(twd.times[i])),
+    lowerfence: di.map(i => twd.p10_dev[i] != null ? +(twd.p50[i] + twd.p10_dev[i]).toFixed(1) : null),
+    q1:         di.map(i => +(twd.p50[i] + twd.p25_dev[i]).toFixed(1)),
+    median:     di.map(i => twd.p50[i]),
+    q3:         di.map(i => +(twd.p50[i] + twd.p75_dev[i]).toFixed(1)),
+    upperfence: di.map(i => twd.p90_dev[i] != null ? +(twd.p50[i] + twd.p90_dev[i]).toFixed(1) : null),
+    name: 'ICON-EPS (p10–p90)',
+    marker: { color: '#dc2626' },
+    line: { color: '#dc2626', width: 1.2 },
+    fillcolor: 'rgba(220,38,38,0.18)',
+    width: boxW,
+  }];
+  if (overlay) {
+    twdTraces.push({
+      x: overlayX,
+      y: overlayHours.map(h => h.wd_deg != null ? +h.wd_deg.toFixed(0) : null),
+      name: `${overlay.model_id} (det.)`,
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: '#2563eb', width: 2 },
+      marker: { color: '#2563eb', size: 4 },
+      connectgaps: false,
+    });
+  }
+  const twdDiv = document.getElementById('bfEpsTwdChart');
+  if (twdDiv) {
+    Plotly.newPlot(twdDiv, twdTraces, {
+      ...LIGHT_LAYOUT,
+      height: 300,
+      margin: { t: 40, b: 40, l: 70, r: 20 },
+      legend: { orientation: 'h', x: 0, y: 1.14, font: { size: 10 } },
+      xaxis: { ...LIGHT_XAXIS },
+      yaxis: {
+        title: { text: 'TWD (deg)', standoff: 16 },
+        automargin: true,
+        gridcolor: '#e2e8f0',
+        tickfont: { color: '#64748b' },
+      },
+    }, { responsive: true, displayModeBar: false });
+  }
 }
 
 // ── 7 · Confidence: auto-suggestion from EPS TWS/TWD spread + model sigma ───────
@@ -768,6 +892,7 @@ function bfRenderConfidenceAuto() {
 function bfRerender() {
   renderBriefingBestChart();
   renderBriefingEnsembleCharts();
+  bfRenderEpsCharts();
   renderBriefingWindTable();
   if (_bfCurrentData) _bfRenderCurrentChart(_bfCurrentData.payload);
   if (_bfWindmapFramesCache) {
@@ -1139,10 +1264,13 @@ async function bfExportPrint(crew) {
   const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
 
   // Full-only assets
-  let ensTwsImg = '', ensTwdImg = '', currentImg = '', gradientImg = '', skyImg = '', wavesImg = '';
+  let ensTwsImg = '', ensTwdImg = '', epsTwsImg = '', epsTwdImg = '',
+      currentImg = '', gradientImg = '', skyImg = '', wavesImg = '';
   if (!crew) {
     ensTwsImg   = await bfChartAsImg('bfEnsembleChart', 370);
     ensTwdImg   = await bfChartAsImg('bfEnsembleDirChart', 370);
+    epsTwsImg   = await bfChartAsImg('bfEpsTwsChart', 300);
+    epsTwdImg   = await bfChartAsImg('bfEpsTwdChart', 300);
     gradientImg = await bfChartAsImg('bfGradientChart', 300);
     skyImg      = await bfChartAsImg('bfSkyChart', 260);
     wavesImg    = await bfChartAsImg('bfWavesChart', 260);
@@ -1268,6 +1396,8 @@ td[style*="background"]{background-clip:padding-box}
   </div>` : ''}
   ${ensTwsImg ? `<div class="section"><div class="label">3 · Ensemble TWS</div><img src="${ensTwsImg}" alt="Ensemble TWS" /></div>` : ''}
   ${ensTwdImg ? `<div class="section"><div class="label">3 · Ensemble TWD</div><img src="${ensTwdImg}" alt="Ensemble TWD" /></div>` : ''}
+  ${epsTwsImg ? `<div class="section"><div class="label">3 · ICON-EPS TWS Uncertainty</div><img src="${epsTwsImg}" alt="ICON-EPS TWS" /></div>` : ''}
+  ${epsTwdImg ? `<div class="section"><div class="label">3 · ICON-EPS TWD Spread</div><img src="${epsTwdImg}" alt="ICON-EPS TWD" /></div>` : ''}
   ${skyImg ? `<div class="section"><div class="label">4 · Local Effects — Cloud / CAPE</div><img src="${skyImg}" alt="Cloud and CAPE" /></div>` : ''}
   ${currentImg ? `<div class="section"><div class="label">5 · Ocean Current</div><img src="${currentImg}" alt="Ocean current" /></div>` : ''}
   ${wavesImg ? `<div class="section"><div class="label">5 · Waves</div><img src="${wavesImg}" alt="Waves" /></div>` : ''}
@@ -1473,7 +1603,10 @@ document.getElementById('bfIncludeCurrent')?.addEventListener('change', () => {
   }
 });
 
-document.getElementById('bfIncludeEnsemble')?.addEventListener('change', renderBriefingEnsembleCharts);
+document.getElementById('bfIncludeEnsemble')?.addEventListener('change', () => {
+  renderBriefingEnsembleCharts();
+  bfRenderEpsCharts();
+});
 
 // ── GRIB import ────────────────────────────────────────────────────────────────
 document.getElementById('bfImportGribBtn')?.addEventListener('click', () => {
