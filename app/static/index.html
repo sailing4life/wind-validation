@@ -311,8 +311,13 @@
             </div>
             <div class="bf-btn-group">
               <input type="file" id="bfFileInput" accept=".json" style="display:none">
-              <button id="bfLoadBtn" class="btn-secondary">Load</button>
-              <button id="bfSaveBtn" class="btn-secondary">Save</button>
+              <button id="bfLoadBtn" class="btn-secondary" title="Load a briefing from a JSON file">Load</button>
+              <button id="bfSaveBtn" class="btn-secondary" title="Download this briefing as a JSON file">Save</button>
+              <button id="bfArchiveBtn" class="btn-secondary" title="Save this briefing on the server so you can look it up later">Save online</button>
+              <select id="bfArchiveSelect" title="Open a previously saved briefing">
+                <option value="">Saved briefings…</option>
+              </select>
+              <button id="bfArchiveDeleteBtn" class="btn-secondary" title="Delete the selected saved briefing">✕</button>
               <button id="bfWindmapBtn" class="btn-secondary" title="Generate animated wind map GIF">Wind Map GIF</button>
               <label class="bf-include-label" title="Embed wind map snapshots in the printed report">
                 <input type="checkbox" id="bfIncludeWindmaps">
@@ -441,6 +446,6 @@
   <script src="/static/app.js?v=33"></script>
   <script src="/static/forecast.js?v=34"></script>
   <script src="/static/weather.js?v=31"></script>
-  <script src="/static/briefing.js?v=34"></script>
+  <script src="/static/briefing.js?v=35"></script>
 </body>
 </html>

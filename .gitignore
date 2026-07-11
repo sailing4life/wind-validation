@@ -1,6 +1,8 @@
 ﻿.env
 __pycache__/
 *.pyc
+briefings/
+app/uploads/
 .pytest_cache/
 .pytest_tmp/
 pytest-cache-files-*/

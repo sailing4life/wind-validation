@@ -804,6 +804,7 @@ function renderBriefingTab() {
   bfFetchPressureCharts().then(bfRenderPressureCharts);
   bfFetchGradient().then(bfRenderGradientChart);
   bfFetchExtras().then(() => { bfRenderSkyChart(); bfRenderWavesChart(); });
+  bfRefreshArchiveList();
 }
 
 // ── Crew summary auto-fill ───────────────────────────────────────────────────────
@@ -1520,11 +1521,9 @@ document.getElementById('bfGribFileInput')?.addEventListener('change', async (e)
 });
 
 // ── Save briefing as JSON ──────────────────────────────────────────────────────
-document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
-  if (!forecastData) { alert('No forecast loaded.'); return; }
-
+function bfBuildPayload() {
   const pos = currentLatLon();
-  const payload = {
+  return {
     _version: 1,
     lat: pos?.lat ?? null,
     lon: pos?.lon ?? null,
@@ -1542,6 +1541,12 @@ document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
     confidence_notes: document.getElementById('bfConfidenceNotes')?.value ?? '',
     forecastData,
   };
+}
+
+document.getElementById('bfSaveBtn')?.addEventListener('click', () => {
+  if (!forecastData) { alert('No forecast loaded.'); return; }
+
+  const payload = bfBuildPayload();
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
@@ -1558,49 +1563,51 @@ document.getElementById('bfLoadBtn')?.addEventListener('click', () => {
   document.getElementById('bfFileInput')?.click();
 });
 
+function bfApplyPayload(payload) {
+  if (!payload.forecastData) throw new Error('Invalid briefing file');
+
+  // Restore global forecast state (variables defined in forecast.js)
+  forecastData      = payload.forecastData;
+  _winnerModelId    = payload.winner_model_id ?? forecastData.winner_model_id;
+  _biasWsMs         = payload.bias_ws_ms      ?? forecastData.bias_ws_ms;
+  _selectedModels   = new Set(forecastData.models.map(m => m.model_id));
+  bfPopulateModelOverride();
+
+  // Restore coordinates
+  if (payload.lat != null) document.getElementById('lat').value = payload.lat;
+  if (payload.lon != null) document.getElementById('lon').value = payload.lon;
+  if (payload.hours_ahead) {
+    const el = document.getElementById('fcHoursAhead');
+    if (el) el.value = payload.hours_ahead;
+  }
+
+  // Restore text fields
+  if (payload.title    != null) document.getElementById('bfTitle').value    = payload.title;
+  if (payload.subtitle != null) document.getElementById('bfSubtitle').value = payload.subtitle;
+  if (payload.notes    != null) document.getElementById('bfNotes').value    = payload.notes;
+  if (payload.synoptic         != null) document.getElementById('bfSynoptic').value         = payload.synoptic;
+  if (payload.gradient_notes   != null) document.getElementById('bfGradientNotes').value    = payload.gradient_notes;
+  if (payload.scenarios        != null) document.getElementById('bfScenarios').value        = payload.scenarios;
+  if (payload.confidence_notes != null) document.getElementById('bfConfidenceNotes').value  = payload.confidence_notes;
+
+  // Switch to briefing tab and render
+  document.querySelector('.tab[data-tab="briefing"]')?.click();
+
+  // Restore range selects after init (bfInitRange runs inside renderBriefingTab)
+  setTimeout(() => {
+    if (payload.range_start != null) document.getElementById('bfRangeStart').value = payload.range_start;
+    if (payload.range_end   != null) document.getElementById('bfRangeEnd').value   = payload.range_end;
+    bfRerender();
+  }, 50);
+}
+
 document.getElementById('bfFileInput')?.addEventListener('change', e => {
   const file = e.target.files?.[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      const payload = JSON.parse(ev.target.result);
-      if (!payload.forecastData) throw new Error('Invalid briefing file');
-
-      // Restore global forecast state (variables defined in forecast.js)
-      forecastData      = payload.forecastData;
-      _winnerModelId    = payload.winner_model_id ?? forecastData.winner_model_id;
-      _biasWsMs         = payload.bias_ws_ms      ?? forecastData.bias_ws_ms;
-      _selectedModels   = new Set(forecastData.models.map(m => m.model_id));
-      bfPopulateModelOverride();
-
-      // Restore coordinates
-      if (payload.lat != null) document.getElementById('lat').value = payload.lat;
-      if (payload.lon != null) document.getElementById('lon').value = payload.lon;
-      if (payload.hours_ahead) {
-        const el = document.getElementById('fcHoursAhead');
-        if (el) el.value = payload.hours_ahead;
-      }
-
-      // Restore text fields
-      if (payload.title    != null) document.getElementById('bfTitle').value    = payload.title;
-      if (payload.subtitle != null) document.getElementById('bfSubtitle').value = payload.subtitle;
-      if (payload.notes    != null) document.getElementById('bfNotes').value    = payload.notes;
-      if (payload.synoptic         != null) document.getElementById('bfSynoptic').value         = payload.synoptic;
-      if (payload.gradient_notes   != null) document.getElementById('bfGradientNotes').value    = payload.gradient_notes;
-      if (payload.scenarios        != null) document.getElementById('bfScenarios').value        = payload.scenarios;
-      if (payload.confidence_notes != null) document.getElementById('bfConfidenceNotes').value  = payload.confidence_notes;
-
-      // Switch to briefing tab and render
-      document.querySelector('.tab[data-tab="briefing"]')?.click();
-
-      // Restore range selects after init (bfInitRange runs inside renderBriefingTab)
-      setTimeout(() => {
-        if (payload.range_start != null) document.getElementById('bfRangeStart').value = payload.range_start;
-        if (payload.range_end   != null) document.getElementById('bfRangeEnd').value   = payload.range_end;
-        bfRerender();
-      }, 50);
-
+      bfApplyPayload(JSON.parse(ev.target.result));
     } catch (err) {
       alert('Failed to load briefing file: ' + err.message);
     }
@@ -1608,6 +1615,78 @@ document.getElementById('bfFileInput')?.addEventListener('change', e => {
   reader.readAsText(file);
   // Reset so same file can be re-loaded
   e.target.value = '';
+});
+
+// ── Briefing archive: save on the server, look back later ──────────────────────
+async function bfRefreshArchiveList(selectedId) {
+  const sel = document.getElementById('bfArchiveSelect');
+  if (!sel) return;
+  try {
+    const resp = await fetch('/api/briefings');
+    if (!resp.ok) return;
+    const { briefings } = await resp.json();
+    sel.innerHTML = '<option value="">Saved briefings…</option>';
+    briefings.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      const when = b.saved_at ? b.saved_at.slice(0, 16).replace('T', ' ') : b.id;
+      const label = `${when} — ${b.title}${b.subtitle ? ' · ' + b.subtitle : ''}`;
+      opt.textContent = label.length > 70 ? label.slice(0, 69) + '…' : label;
+      sel.appendChild(opt);
+    });
+    if (selectedId) sel.value = selectedId;
+  } catch { /* archive unavailable — leave the select as is */ }
+}
+
+document.getElementById('bfArchiveBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('bfArchiveBtn');
+  if (!forecastData) { alert('No forecast loaded.'); return; }
+  btn.disabled = true;
+  const orig = btn.textContent;
+  try {
+    const resp = await fetch('/api/briefings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bfBuildPayload()),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+    const { id } = await resp.json();
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+    bfRefreshArchiveList(id);
+  } catch (err) {
+    alert('Save online failed: ' + err.message);
+    btn.textContent = orig;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('bfArchiveSelect')?.addEventListener('change', async e => {
+  const id = e.target.value;
+  if (!id) return;
+  try {
+    const resp = await fetch(`/api/briefings/${encodeURIComponent(id)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    bfApplyPayload(await resp.json());
+  } catch (err) {
+    alert('Failed to load saved briefing: ' + err.message);
+  }
+});
+
+document.getElementById('bfArchiveDeleteBtn')?.addEventListener('click', async () => {
+  const sel = document.getElementById('bfArchiveSelect');
+  const id = sel?.value;
+  if (!id) { alert('Select a saved briefing first.'); return; }
+  const label = sel.options[sel.selectedIndex]?.textContent || id;
+  if (!confirm(`Delete saved briefing?\n\n${label}`)) return;
+  try {
+    const resp = await fetch(`/api/briefings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    bfRefreshArchiveList();
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
 });
 
 

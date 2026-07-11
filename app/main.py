@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import re
 import shutil
 import uuid
 from contextlib import asynccontextmanager
@@ -11,7 +14,7 @@ from pathlib import Path
 logger = logging.getLogger("wind_validation")
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -41,6 +44,10 @@ except OSError:
 
 # upload_id -> absolute Path for locally uploaded GRIBs (in-memory, process lifetime)
 _uploaded_gribs: dict[str, Path] = {}
+
+# Briefing archive — durable storage (unlike /tmp uploads) so briefings survive restarts
+BRIEFINGS_DIR = Path(os.getenv("BRIEFINGS_DIR", str(BASE_DIR.parent / "briefings")))
+BRIEFINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 repo = InMemoryRepository()
 forecast_broker = ForecastBroker(repo, SETTINGS)
@@ -567,6 +574,75 @@ async def briefing_extras(
         raise HTTPException(status_code=503, detail="Briefing extras unavailable")
 
     return {"waves": waves, "sky": sky}
+
+
+_BRIEFING_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _briefing_path(briefing_id: str) -> Path:
+    if not _BRIEFING_ID_RE.match(briefing_id):
+        raise HTTPException(status_code=400, detail="Invalid briefing id")
+    return BRIEFINGS_DIR / f"{briefing_id}.json"
+
+
+@app.post("/api/briefings")
+async def save_briefing(payload: dict = Body(...)) -> dict:
+    """Archive a briefing (same payload as the Save-JSON download) on the server."""
+    if not isinstance(payload, dict) or "forecastData" not in payload:
+        raise HTTPException(status_code=400, detail="Not a briefing payload")
+
+    saved_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload["saved_at"] = saved_at
+
+    briefing_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    path = _briefing_path(briefing_id)
+    n = 1
+    while path.exists():
+        path = _briefing_path(f"{briefing_id}_{n}")
+        n += 1
+
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return {"id": path.stem, "saved_at": saved_at}
+
+
+@app.get("/api/briefings")
+async def list_briefings() -> dict:
+    """List archived briefings, newest first."""
+    items = []
+    for p in sorted(BRIEFINGS_DIR.glob("*.json"), reverse=True):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        items.append({
+            "id": p.stem,
+            "title": data.get("title") or "Weather Briefing",
+            "subtitle": data.get("subtitle") or "",
+            "saved_at": data.get("saved_at") or "",
+            "lat": data.get("lat"),
+            "lon": data.get("lon"),
+        })
+    return {"briefings": items}
+
+
+@app.get("/api/briefings/{briefing_id}")
+async def get_briefing(briefing_id: str) -> dict:
+    path = _briefing_path(briefing_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Briefing not found")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Corrupt briefing file: {exc}")
+
+
+@app.delete("/api/briefings/{briefing_id}")
+async def delete_briefing(briefing_id: str) -> dict:
+    path = _briefing_path(briefing_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Briefing not found")
+    path.unlink()
+    return {"deleted": briefing_id}
 
 
 @app.delete("/api/upload-grib/{upload_id}")
