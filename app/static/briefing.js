@@ -1672,6 +1672,7 @@ function bfBuildPayload() {
     gradient_notes:   document.getElementById('bfGradientNotes')?.value ?? '',
     scenarios:        document.getElementById('bfScenarios')?.value ?? '',
     confidence_notes: document.getElementById('bfConfidenceNotes')?.value ?? '',
+    ensembleData: _ensembleData ?? null,
     forecastData,
   };
 }
@@ -1704,6 +1705,7 @@ function bfApplyPayload(payload) {
   _winnerModelId    = payload.winner_model_id ?? forecastData.winner_model_id;
   _biasWsMs         = payload.bias_ws_ms      ?? forecastData.bias_ws_ms;
   _selectedModels   = new Set(forecastData.models.map(m => m.model_id));
+  _ensembleData     = payload.ensembleData ?? null;   // older files: EPS charts stay hidden
   bfPopulateModelOverride();
 
   // Restore coordinates
