@@ -27,6 +27,20 @@ EXTRA_DIAG_HOURLY_VARS = [
 EXTRA_SAFE_HOURLY_VARS = ["cloud_cover", "pressure_msl", "shortwave_radiation"]
 
 
+def _get_with_retry(client: httpx.Client, url: str, params: dict) -> httpx.Response:
+    """GET with exponential backoff on transient statuses (429 rate limit, 5xx hiccups)."""
+    resp = client.get(url, params=params)
+    for attempt in range(3):
+        if resp.status_code not in (429, 502, 503, 504):
+            break
+        # 429: long waits to respect the rate limit; 5xx: short waits, usually momentary
+        wait = (20 if resp.status_code == 429 else 3) * (2 ** attempt)
+        logger.debug("HTTP %d from %s, retrying after %ds", resp.status_code, url, wait)
+        time.sleep(wait)
+        resp = client.get(url, params=params)
+    return resp
+
+
 def _parse_optional_float(values: list, index: int) -> float | None:
     if index >= len(values):
         return None
@@ -128,14 +142,7 @@ class OpenMeteoForecastAdapter:
                     params["models"] = model_param
 
                 try:
-                    resp = client.get(url, params=params)
-                    for _attempt in range(3):
-                        if resp.status_code != 429:
-                            break
-                        wait = 20 * (2 ** _attempt)   # 20s, 40s, 80s
-                        logger.debug("429 from %s, retrying after %ds", url, wait)
-                        time.sleep(wait)
-                        resp = client.get(url, params=params)
+                    resp = _get_with_retry(client, url, params)
                     resp.raise_for_status()
                     payload = resp.json()
                     break
@@ -342,7 +349,7 @@ class OpenMeteoForecastAdapter:
                 if prev_model_param:
                     params["models"] = prev_model_param
                 try:
-                    resp = client.get(self.previous_runs_url, params=params)
+                    resp = _get_with_retry(client, self.previous_runs_url, params)
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     logger.warning(
