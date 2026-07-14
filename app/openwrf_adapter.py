@@ -16,6 +16,7 @@ import math
 import os
 import tempfile
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
@@ -129,12 +130,27 @@ def _cache_key(region_name: str, resolution: str, run_dt: datetime) -> tuple[str
 
 # ── Download + parse ──────────────────────────────────────────────────────────
 
+# After a connect failure / timeout, skip all OpenWRF downloads for a while.
+# _get_grid tries up to ~5 runs in sequence, so without this a dead
+# openskiron.org stalls validation for minutes.
+_SOURCE_COOLDOWN_S = 600
+_source_down_until: float = 0.0
+
+
 def _download_grib(region: _Region, resolution: str, run_dt: datetime) -> bytes | None:
+    global _source_down_until
+    if time.monotonic() < _source_down_until:
+        logger.info("OpenWRF %s run %s skipped — source in cooldown after recent timeout",
+                    region.name, run_dt)
+        return None
+
     date_sfx = run_dt.strftime("%y%m%d")   # YYMMDD e.g. 260325 for 2026-03-25
     base = _BASE_4KM if resolution == "4km" else _BASE_12KM
     url = f"{base}/{region.name}_{resolution}_WRF_WAM_{date_sfx}-{run_dt.hour:02d}.grb.bz2"
     try:
-        with httpx.Client(timeout=120) as c:
+        # Short connect timeout: a down server fails in seconds instead of
+        # eating the full read timeout meant for the large GRIB download.
+        with httpx.Client(timeout=httpx.Timeout(connect=8.0, read=120.0, write=30.0, pool=10.0)) as c:
             r = c.get(url)
         if r.status_code == 200:
             logger.info("OpenWRF %s (%s) run %s downloaded (%d B)",
@@ -142,6 +158,10 @@ def _download_grib(region: _Region, resolution: str, run_dt: datetime) -> bytes 
             raw = bz2.decompress(r.content)
             return raw
         logger.info("OpenWRF %s %s → HTTP %d", region.name, url, r.status_code)
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        _source_down_until = time.monotonic() + _SOURCE_COOLDOWN_S
+        logger.warning("OpenWRF %s %s: %s — skipping OpenWRF for %ds",
+                       region.name, url, exc, _SOURCE_COOLDOWN_S)
     except Exception as exc:
         logger.warning("OpenWRF %s %s: %s", region.name, url, exc)
     return None
