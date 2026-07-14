@@ -1403,7 +1403,7 @@ td[style*="background"]{background-clip:padding-box}
   ${wavesImg ? `<div class="section"><div class="label">5 · Waves</div><img src="${wavesImg}" alt="Waves" /></div>` : ''}
   ${scenariosTxt ? `
   <div class="section">
-    <div class="label">6 · Scenarios</div>
+    <div class="label">6 · Forecast</div>
     <div class="notes">${bfEscapeHtml(scenariosTxt)}</div>
   </div>` : ''}
   ${(confAuto || confidenceTxt) ? `
