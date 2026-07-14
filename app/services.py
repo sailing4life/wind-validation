@@ -6,8 +6,11 @@ import math
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+
+import httpx
 
 from .cache import TTLCache
 from .catalog import select_candidate_models
@@ -25,6 +28,11 @@ logger = logging.getLogger("wind_validation")
 
 _ALADIN_CZ_ID = "aladin_cz"
 
+# After a slow/failed ALADIN download, skip the source for a while so repeat
+# validations don't burn the whole fetch budget on a crawling ČHMÚ server.
+_ALADIN_COOLDOWN_S = 600
+_aladin_down_until: float = 0.0
+
 
 def _fetch_aladin_cz_at_coords(
     coords: list[tuple[float, float]],
@@ -38,8 +46,13 @@ def _fetch_aladin_cz_at_coords(
     start is 48 h in the past.  Newer-run data wins when both runs have the
     same valid_time for a given coordinate.
     """
+    global _aladin_down_until
     import math as _math  # noqa: PLC0415
     import numpy as np  # noqa: PLC0415
+
+    if time.monotonic() < _aladin_down_until:
+        logger.info("ALADIN-CZ skipped — cooldown after recent slow/failed download")
+        return []
 
     try:
         from .windmap import _probe_aladin_runs, _download_aladin_run  # noqa: PLC0415
@@ -83,6 +96,12 @@ def _fetch_aladin_cz_at_coords(
                 run_dt, speed_url, dir_url,
                 lat_min, lat_max, lon_min, lon_max, max_hours,
             )
+        except (TimeoutError, httpx.TimeoutException, httpx.ConnectError) as exc:
+            # Server is down or crawling — the other run will fare no better
+            _aladin_down_until = time.monotonic() + _ALADIN_COOLDOWN_S
+            logger.warning("ALADIN-CZ run %s too slow (%s) — skipping ALADIN for %ds",
+                           run_dt, exc, _ALADIN_COOLDOWN_S)
+            break
         except Exception as exc:
             logger.info("ALADIN-CZ run %s skipped: %s", run_dt, exc)
             continue
@@ -251,15 +270,25 @@ class ValidationService:
                 return _fetch_aladin_cz_at_coords(all_coords, window_start, forecast_end)
             return self.forecast_adapter.fetch_model_at_coords(model, all_coords, window_start, forecast_end)
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {pool.submit(_fetch_model, m): m for m in candidates}
-            for future in as_completed(futures):
+        # Hard budget on the whole fetch phase: one slow source (e.g. a GRIB
+        # server trickling bytes) must not stall the request past the proxy
+        # timeout. Models that miss the budget are skipped for this run.
+        pool = ThreadPoolExecutor(max_workers=3)
+        futures = {pool.submit(_fetch_model, m): m for m in candidates}
+        try:
+            for future in as_completed(futures, timeout=150):
                 model = futures[future]
                 try:
                     for fv in future.result():
                         fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
                 except Exception as exc:
                     logger.warning("On-demand batch fetch failed for %s", model.model_id, exc_info=exc)
+        except FuturesTimeoutError:
+            pending = [m.model_id for f, m in futures.items() if not f.done()]
+            logger.warning("Model fetch budget (150s) exceeded — skipping: %s", pending)
+        finally:
+            # Don't wait for stragglers; their threads finish in the background
+            pool.shutdown(wait=False, cancel_futures=True)
 
         # Track latest run time per model (for display)
         latest_run: dict[str, datetime] = {}

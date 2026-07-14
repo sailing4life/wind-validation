@@ -29,6 +29,7 @@ import gc
 import io
 import math
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 
@@ -885,14 +886,27 @@ def _download_aladin_run(
     gust_url = speed_url.replace("_CLSWIND_SPEED.grb", "_CLSGUST.grb")
     logger.info("ALADIN-CZ run %s — downloading speed + direction + gust", run_dt)
 
+    def _fetch_bz2(c: httpx.Client, url: str, deadline_s: float = 90.0) -> bytes:
+        # Stream with a hard wall-clock deadline: httpx's read timeout is per
+        # socket read, so a server that keeps trickling bytes never trips it
+        # and one download can stall a validation request indefinitely.
+        t0 = time.monotonic()
+        chunks: list[bytes] = []
+        with c.stream("GET", url) as r:
+            r.raise_for_status()
+            for chunk in r.iter_bytes():
+                chunks.append(chunk)
+                if time.monotonic() - t0 > deadline_s:
+                    raise TimeoutError(f"download exceeded {deadline_s:.0f}s: {url}")
+        return b"".join(chunks)
+
     tmp_spd = tmp_dir_f = tmp_gst = None
     try:
-        with httpx.Client(timeout=300) as c:
-            raw_spd = _bz2.decompress(c.get(speed_url).raise_for_status().content)
-            raw_dir = _bz2.decompress(c.get(dir_url).raise_for_status().content)
+        with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as c:
+            raw_spd = _bz2.decompress(_fetch_bz2(c, speed_url))
+            raw_dir = _bz2.decompress(_fetch_bz2(c, dir_url))
             try:
-                gust_resp = c.get(gust_url)
-                raw_gst = _bz2.decompress(gust_resp.raise_for_status().content) if gust_resp.status_code == 200 else None
+                raw_gst = _bz2.decompress(_fetch_bz2(c, gust_url))
             except Exception:
                 raw_gst = None
         with tempfile.NamedTemporaryFile(suffix=".grb", delete=False) as f:
