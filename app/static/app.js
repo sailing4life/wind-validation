@@ -486,7 +486,7 @@ async function runValidation() {
     return;
   } finally {
     runBtn.disabled = false;
-    runBtn.textContent = "Validate";
+    runBtn.textContent = "Validate + Forecast";
   }
 
   // ── window info ──
@@ -768,7 +768,7 @@ async function runExpeditionValidation() {
     return;
   } finally {
     runBtn.disabled = false;
-    runBtn.textContent = "Validate";
+    runBtn.textContent = "Validate + Forecast";
   }
 
   // ── window info ──
@@ -828,4 +828,12 @@ async function runExpeditionValidation() {
   modelColorMap.clear();
   populateModelToggles(latestSeries, data.winner_model_id, {});
   drawCharts();
+
+  // Pass winner + bias to the forecast tab and pre-load forecast + ensemble
+  // (same behaviour as point validation; uses the sidebar lat/lon inputs)
+  const winnerRow = (data.models || []).find(m => m.model_id === data.winner_model_id);
+  if (typeof setForecastParams === 'function') {
+    setForecastParams(null, null, data.winner_model_id ?? '', winnerRow?.bias_ws ?? 0);
+  }
+  if (typeof loadForecast === 'function') loadForecast();
 }
