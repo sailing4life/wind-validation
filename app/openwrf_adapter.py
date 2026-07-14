@@ -140,8 +140,8 @@ _source_down_until: float = 0.0
 def _download_grib(region: _Region, resolution: str, run_dt: datetime) -> bytes | None:
     global _source_down_until
     if time.monotonic() < _source_down_until:
-        logger.info("OpenWRF %s run %s skipped — source in cooldown after recent timeout",
-                    region.name, run_dt)
+        logger.debug("OpenWRF %s run %s skipped — source in cooldown after recent timeout",
+                     region.name, run_dt)
         return None
 
     date_sfx = run_dt.strftime("%y%m%d")   # YYMMDD e.g. 260325 for 2026-03-25
@@ -380,6 +380,7 @@ class OpenWrfAdapter:
             return []
 
         rows: list[ForecastValue] = []
+        warned_regions: set[str] = set()
         for lat, lon in coords:
             region_res = find_best_region(lat, lon)
             if region_res is None:
@@ -387,8 +388,10 @@ class OpenWrfAdapter:
             region, resolution = region_res
             grid = _get_grid(region, resolution)
             if grid is None:
-                logger.warning("OpenWRF: no grid available for (%.2f, %.2f) region=%s (%s)",
-                               lat, lon, region.name, resolution)
+                if region.name not in warned_regions:
+                    warned_regions.add(region.name)
+                    logger.info("OpenWRF: no grid available for region=%s (%s)",
+                                region.name, resolution)
                 continue
 
             iy, ix = _nearest_idx(grid.lats, grid.lons, lat, lon)
