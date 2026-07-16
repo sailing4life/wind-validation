@@ -1386,7 +1386,7 @@ td[style*="background"]{background-clip:padding-box}
     ${gradientTxt ? `<div class="notes" style="margin-top:6px">${bfEscapeHtml(gradientTxt)}</div>` : ''}
   </div>` : ''}
   <div class="section">
-    <div class="label">${crew ? 'Wind Forecast' : '3 · Wind Forecast'}</div>
+    <div class="label">${crew ? 'Wind Forecast' : '3 · Surface Wind'}</div>
     ${bestImg ? `<img src="${bestImg}" alt="Best forecast chart" />` : '<div>No chart</div>'}
   </div>
   ${tableHtml ? `

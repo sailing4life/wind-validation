@@ -461,6 +461,14 @@ async function runValidation() {
   chartStatus.textContent = "Fetching…";
   chartStatus.className = "chart-status";
 
+  // Elapsed ticker — slow sources can make this take minutes; show signs of life
+  const t0 = Date.now();
+  const ticker = setInterval(() => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    chartStatus.textContent = `Fetching observations + models… ${s}s` +
+      (s >= 60 ? "  (slow sources are skipped automatically)" : "");
+  }, 1000);
+
   const payload = {
     lat:        Number(latInput.value),
     lon:        Number(lonInput.value),
@@ -478,16 +486,22 @@ async function runValidation() {
     if (!resp.ok) {
       const txt = await resp.text();
       metaBlock.innerHTML = `<span class="meta-error">Error ${resp.status}: ${txt.slice(0, 200)}</span>`;
+      chartStatus.textContent = "Validation failed.";
+      chartStatus.className = "chart-status warn";
       return;
     }
     data = await resp.json();
   } catch (err) {
     metaBlock.innerHTML = `<span class="meta-error">Request failed: ${err.message}</span>`;
+    chartStatus.textContent = "Validation failed.";
+    chartStatus.className = "chart-status warn";
     return;
   } finally {
+    clearInterval(ticker);
     runBtn.disabled = false;
     runBtn.textContent = "Validate + Forecast";
   }
+  chartStatus.textContent = "";
 
   // ── window info ──
   windowInfo.textContent =
@@ -740,6 +754,14 @@ async function runExpeditionValidation() {
   chartStatus.textContent = "Fetching model data for expedition track…";
   chartStatus.className = "chart-status";
 
+  // Elapsed ticker — GRIB downloads can take a while; show signs of life
+  const t0 = Date.now();
+  const ticker = setInterval(() => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    chartStatus.textContent = `Fetching model data for expedition track… ${s}s` +
+      (s >= 60 ? "  (slow sources are skipped automatically)" : "");
+  }, 1000);
+
   const intervalMin = document.getElementById("expeditionInterval").value;
   const speedFile   = document.getElementById("gribSpeedFile");
   const dirFile     = document.getElementById("gribDirFile");
@@ -760,16 +782,22 @@ async function runExpeditionValidation() {
       try { const j = await resp.json(); detail += ": " + (j.detail || JSON.stringify(j)); }
       catch { detail += ": " + (await resp.text()).slice(0, 200); }
       metaBlock.innerHTML = `<span class="meta-error">${detail}</span>`;
+      chartStatus.textContent = "Validation failed.";
+      chartStatus.className = "chart-status warn";
       return;
     }
     data = await resp.json();
   } catch (err) {
     metaBlock.innerHTML = `<span class="meta-error">Request failed: ${err.message}</span>`;
+    chartStatus.textContent = "Validation failed.";
+    chartStatus.className = "chart-status warn";
     return;
   } finally {
+    clearInterval(ticker);
     runBtn.disabled = false;
     runBtn.textContent = "Validate + Forecast";
   }
+  chartStatus.textContent = "";
 
   // ── window info ──
   windowInfo.textContent =
