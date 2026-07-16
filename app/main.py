@@ -506,6 +506,70 @@ async def current_atlas_map(
     )
 
 
+async def _sea_level_extrema(lat: float, lon: float, start_date: str, end_date: str) -> tuple[list[dict], list[dict]]:
+    """Fetch marine sea level and return (highs, lows) as [{"time": naive UTC datetime, "height_m": float}].
+
+    Shared by the tide-clock endpoint and the SHOM current interpolation below.
+    """
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "sea_level_height_msl",
+        "start_date": start_date,
+        "end_date": end_date,
+        "timezone": "UTC",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(SETTINGS.openmeteo_marine_url, params=params)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Tide data unavailable: {exc}")
+
+    hourly = resp.json().get("hourly", {})
+    times = hourly.get("time") or []
+    levels = hourly.get("sea_level_height_msl") or []
+    if len(times) < 3 or len(levels) != len(times):
+        raise HTTPException(status_code=503, detail="Tide data incomplete")
+
+    def _extreme(i: int) -> tuple[datetime, float]:
+        """Parabolic refinement of an hourly extreme at index i."""
+        y0, y1, y2 = levels[i - 1], levels[i], levels[i + 1]
+        denom = y0 - 2 * y1 + y2
+        dt = 0.5 * (y0 - y2) / denom if denom else 0.0
+        t = datetime.fromisoformat(times[i]) + timedelta(hours=dt)
+        height = y1 - 0.25 * (y0 - y2) * dt
+        return t, round(height, 2)
+
+    highs, lows = [], []
+    for i in range(1, len(levels) - 1):
+        if levels[i] is None or levels[i - 1] is None or levels[i + 1] is None:
+            continue
+        if levels[i] >= levels[i - 1] and levels[i] > levels[i + 1]:
+            t, h = _extreme(i)
+            highs.append({"time": t, "height_m": h})
+        elif levels[i] <= levels[i - 1] and levels[i] < levels[i + 1]:
+            t, h = _extreme(i)
+            lows.append({"time": t, "height_m": h})
+
+    highs.sort(key=lambda x: x["time"])
+    lows.sort(key=lambda x: x["time"])
+    return highs, lows
+
+
+def _tide_coeff_alpha(hw: dict, lows: list[dict]) -> float:
+    """Blend factor 0 (neap/ME) .. 1 (spring/VE) from the tidal range around one high water."""
+    before = [x for x in lows if x["time"] <= hw["time"]]
+    after = [x for x in lows if x["time"] > hw["time"]]
+    if not before or not after:
+        return 0.5
+    low_avg = (before[-1]["height_m"] + after[0]["height_m"]) / 2
+    # Same neap(2.6m)..spring(5.2m) range calibration as the /tides coefficient estimate
+    rng = hw["height_m"] - low_avg
+    alpha = (rng - 2.6) / (5.2 - 2.6)
+    return max(0.0, min(1.0, alpha))
+
+
 @app.get("/api/current-atlas/tides")
 async def current_atlas_tides(
     date: str = Query(..., description="YYYY-MM-DD (local race day)"),
@@ -524,50 +588,11 @@ async def current_atlas_tides(
 
     start = (day - timedelta(days=1)).strftime("%Y-%m-%d")
     end = (day + timedelta(days=1)).strftime("%Y-%m-%d")
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "hourly": "sea_level_height_msl",
-        "start_date": start,
-        "end_date": end,
-        "timezone": "UTC",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(SETTINGS.openmeteo_marine_url, params=params)
-            resp.raise_for_status()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Tide data unavailable: {exc}")
-
-    hourly = resp.json().get("hourly", {})
-    times = hourly.get("time") or []
-    levels = hourly.get("sea_level_height_msl") or []
-    if len(times) < 3 or len(levels) != len(times):
-        raise HTTPException(status_code=503, detail="Tide data incomplete")
-
-    def _extreme(i: int) -> tuple[str, float]:
-        """Parabolic refinement of an hourly extreme at index i."""
-        y0, y1, y2 = levels[i - 1], levels[i], levels[i + 1]
-        denom = y0 - 2 * y1 + y2
-        dt = 0.5 * (y0 - y2) / denom if denom else 0.0
-        t = datetime.fromisoformat(times[i]) + timedelta(hours=dt)
-        height = y1 - 0.25 * (y0 - y2) * dt
-        return t.strftime("%Y-%m-%dT%H:%M:%SZ"), round(height, 2)
-
-    highs, lows = [], []
-    for i in range(1, len(levels) - 1):
-        if levels[i] is None or levels[i - 1] is None or levels[i + 1] is None:
-            continue
-        if levels[i] >= levels[i - 1] and levels[i] > levels[i + 1]:
-            t, h = _extreme(i)
-            highs.append({"time_utc": t, "height_m": h})
-        elif levels[i] <= levels[i - 1] and levels[i] < levels[i + 1]:
-            t, h = _extreme(i)
-            lows.append({"time_utc": t, "height_m": h})
+    highs, lows = await _sea_level_extrema(lat, lon, start, end)
 
     day_str = day.strftime("%Y-%m-%d")
-    day_highs = [h for h in highs if h["time_utc"].startswith(day_str)]
-    day_lows = [x for x in lows if x["time_utc"].startswith(day_str)]
+    day_highs = [h for h in highs if h["time"].strftime("%Y-%m-%d") == day_str]
+    day_lows = [x for x in lows if x["time"].strftime("%Y-%m-%d") == day_str]
 
     tidal_range = None
     coeff = None
@@ -582,11 +607,14 @@ async def current_atlas_tides(
         coeff = max(20, min(120, coeff))
         regime_suggestion = "VE" if coeff >= 70 else "ME"
 
+    def _fmt(entries: list[dict]) -> list[dict]:
+        return [{"time_utc": e["time"].strftime("%Y-%m-%dT%H:%M:%SZ"), "height_m": e["height_m"]} for e in entries]
+
     return {
         "date": day_str,
-        "highs": day_highs,
-        "lows": day_lows,
-        "all_highs": highs,
+        "highs": _fmt(day_highs),
+        "lows": _fmt(day_lows),
+        "all_highs": _fmt(highs),
         "range_m": tidal_range,
         "coeff_estimate": coeff,
         "regime_suggestion": regime_suggestion,
@@ -781,13 +809,80 @@ async def delete_grib(upload_id: str) -> dict:
     return {"ok": True}
 
 
+async def _ocean_current_shom(lat: float, lon: float, hours: int) -> dict:
+    """Hourly current time series from the SHOM tidal atlas, interpolated between
+    PM-6..PM+6 snapshots (by real elapsed time from the nearest high water) and
+    between the ME/VE regimes (by that tide's coefficient). Nearest mesh point.
+    """
+    import math
+
+    from .currents_atlas import point_regime_uv  # noqa: PLC0415
+
+    point = await asyncio.to_thread(point_regime_uv, lat, lon)
+
+    now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    # Pad 13h either side so every requested hour has a PM-6..PM+6 bracket
+    pad_start = (now - timedelta(hours=13)).strftime("%Y-%m-%d")
+    pad_end = (now + timedelta(hours=hours + 13)).strftime("%Y-%m-%d")
+    highs, lows = await _sea_level_extrema(lat, lon, pad_start, pad_end)
+    if not highs:
+        raise ValueError("no tide highs found for window")
+
+    hours_out = []
+    alphas = []
+    for i in range(hours):
+        t = now + timedelta(hours=i)
+        nearest_hw = min(highs, key=lambda h: abs((h["time"] - t).total_seconds()))
+        offset_h = max(-6.0, min(6.0, (t - nearest_hw["time"]).total_seconds() / 3600))
+        lo = max(-6, min(6, int(math.floor(offset_h))))
+        hi = min(lo + 1, 6)
+        frac = (offset_h - lo) if hi > lo else 0.0
+        lo_idx, hi_idx = lo + 6, hi + 6
+
+        alpha = _tide_coeff_alpha(nearest_hw, lows)
+        alphas.append(alpha)
+
+        u_lo = (1 - alpha) * point["ME"]["u"][lo_idx] + alpha * point["VE"]["u"][lo_idx]
+        u_hi = (1 - alpha) * point["ME"]["u"][hi_idx] + alpha * point["VE"]["u"][hi_idx]
+        v_lo = (1 - alpha) * point["ME"]["v"][lo_idx] + alpha * point["VE"]["v"][lo_idx]
+        v_hi = (1 - alpha) * point["ME"]["v"][hi_idx] + alpha * point["VE"]["v"][hi_idx]
+        u = u_lo + frac * (u_hi - u_lo)
+        v = v_lo + frac * (v_hi - v_lo)
+
+        hours_out.append({
+            "time_utc": t.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "speed_kt": round(math.hypot(u, v), 2),
+            "direction_deg": round(math.degrees(math.atan2(u, v)) % 360, 1),
+        })
+
+    mean_coeff = round(45 + 50 * (sum(alphas) / len(alphas))) if alphas else None
+    return {
+        "hours": hours_out,
+        "source": f"SHOM C3D (tidal, coeff~{mean_coeff})" if mean_coeff else "SHOM C3D (tidal)",
+    }
+
+
 @app.get("/api/ocean-current")
 async def ocean_current(
     lat:   float = Query(..., ge=-90.0,  le=90.0),
     lon:   float = Query(..., ge=-180.0, le=180.0),
     hours: int   = Query(48,  ge=1,      le=120),
 ) -> dict:
-    """Fetch hourly ocean current (speed in kt + direction) from Open-Meteo marine API."""
+    """Fetch hourly ocean current (speed in kt + direction).
+
+    Uses the high-resolution SHOM tidal atlas when the point falls inside its
+    coverage (Le Croisic - Loire estuary); falls back to Open-Meteo's global
+    ocean model everywhere else, and if the SHOM path itself fails.
+    """
+    from .currents_atlas import in_coverage  # noqa: PLC0415
+
+    if in_coverage(lat, lon):
+        try:
+            return await _ocean_current_shom(lat, lon, hours)
+        except Exception as exc:
+            logger.warning("SHOM current path failed for (%.3f,%.3f), falling back to Open-Meteo: %s",
+                           lat, lon, exc)
+
     params = {
         "latitude":  lat,
         "longitude": lon,
@@ -814,4 +909,4 @@ async def ocean_current(
             "direction_deg": round(float(d), 1) if d is not None else None,
         })
 
-    return {"hours": hours_out}
+    return {"hours": hours_out, "source": "Open-Meteo (ocean model)"}

@@ -164,6 +164,34 @@ def get_meta() -> dict:
     }
 
 
+def in_coverage(lat: float, lon: float) -> bool:
+    """Whether (lat, lon) falls inside the SHOM mesh's saved extent."""
+    bbox = VIEWS["area"]["bbox"]
+    return bbox["lon_min"] <= lon <= bbox["lon_max"] and bbox["lat_min"] <= lat <= bbox["lat_max"]
+
+
+def point_regime_uv(lat: float, lon: float) -> dict:
+    """Nearest mesh point's current as u/v (kt, east/north) for both tidal
+    regimes across all 13 PM hours — index 0..12 maps to PM-6..PM+6.
+    """
+    d = _load()
+    dlat = d["_lat"] - lat
+    dlon = (d["_lon"] - lon) * math.cos(math.radians(lat))   # rough equirectangular correction
+    i = int(np.argmin(dlat * dlat + dlon * dlon))
+
+    out: dict = {"lat": float(d["_lat"][i]), "lon": float(d["_lon"][i])}
+    for regime in ("ME", "VE"):
+        us, vs = [], []
+        for h in range(-6, 7):
+            entry = d["regimes"][regime][str(h)]
+            vit_kt = entry["vit"][i] * MS_TO_KT
+            dir_to = math.radians(entry["dir"][i])
+            us.append(vit_kt * math.sin(dir_to))
+            vs.append(vit_kt * math.cos(dir_to))
+        out[regime] = {"u": us, "v": vs}
+    return out
+
+
 def _pm_label(hour: int) -> str:
     return f"PM{hour:+d}" if hour else "PM"
 

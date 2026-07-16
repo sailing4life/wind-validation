@@ -420,7 +420,8 @@ async function bfFetchAndRenderCurrent() {
     const payload = await resp.json();
     _bfCurrentData = { lat: pos.lat, lon: pos.lon, hours, payload };
     _bfRenderCurrentChart(payload);
-    if (metaEl) metaEl.textContent = `— ${pos.lat.toFixed(3)}N ${pos.lon.toFixed(3)}E`;
+    const srcTxt = payload.source ? `  ·  ${payload.source}` : '';
+    if (metaEl) metaEl.textContent = `— ${pos.lat.toFixed(3)}N ${pos.lon.toFixed(3)}E${srcTxt}`;
   } catch (err) {
     if (metaEl) metaEl.textContent = `— unavailable (${err.message})`;
     panel.style.display = 'none';
