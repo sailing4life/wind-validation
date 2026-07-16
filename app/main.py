@@ -467,6 +467,44 @@ async def gradient_wind(
 _pressure_charts_cache: dict = {"fetched_at": 0.0, "charts": []}
 
 
+@app.get("/currents")
+def currents_page() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "currents.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/api/current-atlas/meta")
+async def current_atlas_meta() -> dict:
+    from .currents_atlas import get_meta  # noqa: PLC0415
+
+    try:
+        return await asyncio.to_thread(get_meta)
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="Current atlas data not prepared")
+
+
+@app.get("/api/current-atlas/map")
+async def current_atlas_map(
+    regime: str = Query("VE"),
+    hour: int = Query(0, ge=-6, le=6),
+) -> Response:
+    from .currents_atlas import render_map  # noqa: PLC0415
+
+    try:
+        png = await asyncio.to_thread(render_map, regime, hour)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="Current atlas data not prepared")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/api/pressure-charts")
 async def pressure_charts() -> dict:
     """Met Office surface pressure chart URLs (analysis + forecast steps), scraped and cached."""

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tidal Currents — Pornichet</title>
+  <style>
+    :root {
+      --ink: #1e293b; --ink-muted: #64748b; --line: #e2e8f0;
+      --bg: #f8fafc; --accent: #0369a1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px;
+    }
+    header {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 10px 18px; background: #fff; border-bottom: 1px solid var(--line);
+    }
+    header h1 { font-size: 17px; margin: 0; }
+    header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+    .meta { color: var(--ink-muted); font-size: 12px; }
+    .controls {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 10px 18px; background: #fff; border-bottom: 1px solid var(--line);
+      position: sticky; top: 0; z-index: 5;
+    }
+    .regime-toggle button {
+      padding: 6px 14px; border: 1px solid var(--line); background: #fff;
+      cursor: pointer; font-size: 13px;
+    }
+    .regime-toggle button:first-child { border-radius: 6px 0 0 6px; }
+    .regime-toggle button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+    .regime-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .hour-ctl { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 260px; max-width: 520px; }
+    .hour-ctl input[type=range] { flex: 1; }
+    .hour-label { font-weight: 700; font-size: 15px; min-width: 52px; text-align: center; }
+    .btn {
+      padding: 6px 14px; border: 1px solid var(--line); background: #fff;
+      border-radius: 6px; cursor: pointer; font-size: 13px;
+    }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    main { padding: 14px 18px; max-width: 1280px; margin: 0 auto; }
+    .single-view img, .grid-view img {
+      width: 100%; display: block; border: 1px solid var(--line);
+      border-radius: 8px; background: #fff;
+    }
+    .grid-view { display: none; grid-template-columns: 1fr; gap: 14px; }
+    .grid-view figure { margin: 0; }
+    .grid-view figcaption {
+      font-size: 12px; font-weight: 700; color: var(--ink-muted);
+      margin: 2px 0 4px 2px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .status { color: var(--ink-muted); font-size: 12px; padding: 6px 0; }
+    .print-head { display: none; }
+
+    @media print {
+      header, .controls, .status { display: none !important; }
+      body { background: #fff; }
+      main { padding: 0; max-width: none; }
+      .single-view { display: none !important; }
+      .grid-view { display: grid !important; gap: 6mm; }
+      .grid-view figure { break-inside: avoid; page-break-inside: avoid; }
+      .grid-view img { border: 1px solid #cbd5e1; border-radius: 0; }
+      .print-head { display: block; border-bottom: 2px solid #1e3a8a; margin-bottom: 6mm; padding-bottom: 3mm; }
+      .print-head h1 { font-size: 20px; color: #1e3a8a; margin: 0; }
+      .print-head .meta { font-size: 11px; }
+      @page { size: A4 portrait; margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">&larr; Weather app</a>
+    <h1>Tidal Currents &mdash; Pornichet / La Baule / Le Pouliguen</h1>
+    <span class="meta" id="metaText">Loading&hellip;</span>
+  </header>
+
+  <div class="controls">
+    <div class="regime-toggle">
+      <button id="btnVE" class="active" title="Vive-eau, coefficient 95">Spring (VE)</button>
+      <button id="btnME" title="Morte-eau, coefficient 45">Neap (ME)</button>
+    </div>
+    <div class="hour-ctl">
+      <span style="font-size:12px;color:var(--ink-muted)">PM&minus;6</span>
+      <input type="range" id="hourSlider" min="-6" max="6" step="1" value="0" />
+      <span style="font-size:12px;color:var(--ink-muted)">PM+6</span>
+      <span class="hour-label" id="hourLabel">PM</span>
+    </div>
+    <button class="btn" id="btnGrid">All 13 maps</button>
+    <button class="btn primary" id="btnPrint">Print / PDF</button>
+  </div>
+
+  <main>
+    <div class="print-head">
+      <h1 id="printTitle">Tidal Currents &mdash; Pornichet</h1>
+      <div class="meta" id="printMeta"></div>
+    </div>
+    <div class="single-view" id="singleView">
+      <img id="mapImg" alt="Tidal current map" />
+      <div class="status" id="statusText"></div>
+    </div>
+    <div class="grid-view" id="gridView"></div>
+  </main>
+
+  <script>
+    let regime = 'VE';
+    let hour = 0;
+    let gridMode = false;
+
+    const mapImg = document.getElementById('mapImg');
+    const hourSlider = document.getElementById('hourSlider');
+    const hourLabel = document.getElementById('hourLabel');
+    const statusText = document.getElementById('statusText');
+
+    const pmLabel = h => h === 0 ? 'PM' : (h > 0 ? `PM+${h}` : `PM−${-h}`);
+    const mapUrl = (r, h) => `/api/current-atlas/map?regime=${r}&hour=${h}`;
+
+    function showSingle() {
+      hourLabel.textContent = pmLabel(hour);
+      statusText.textContent = 'Rendering…';
+      mapImg.src = mapUrl(regime, hour);
+      mapImg.onload = () => {
+        statusText.textContent = '';
+        // Pre-warm neighbouring hours for smooth sliding
+        [hour - 1, hour + 1].forEach(h2 => {
+          if (h2 >= -6 && h2 <= 6) { const i = new Image(); i.src = mapUrl(regime, h2); }
+        });
+      };
+      mapImg.onerror = () => { statusText.textContent = 'Map failed to load.'; };
+    }
+
+    function buildGrid() {
+      const grid = document.getElementById('gridView');
+      grid.innerHTML = '';
+      for (let h = -6; h <= 6; h++) {
+        const fig = document.createElement('figure');
+        const cap = document.createElement('figcaption');
+        cap.textContent = pmLabel(h) + (regime === 'VE' ? ' · spring (VE)' : ' · neap (ME)');
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = mapUrl(regime, h);
+        fig.append(cap, img);
+        grid.appendChild(fig);
+      }
+    }
+
+    function setGridMode(on) {
+      gridMode = on;
+      document.getElementById('gridView').style.display = on ? 'grid' : 'none';
+      document.getElementById('singleView').style.display = on ? 'none' : '';
+      document.getElementById('btnGrid').textContent = on ? 'Single map' : 'All 13 maps';
+      if (on) buildGrid(); else showSingle();
+    }
+
+    function setRegime(r) {
+      regime = r;
+      document.getElementById('btnVE').classList.toggle('active', r === 'VE');
+      document.getElementById('btnME').classList.toggle('active', r === 'ME');
+      updatePrintHead();
+      if (gridMode) buildGrid(); else showSingle();
+    }
+
+    function updatePrintHead() {
+      const rl = regime === 'VE' ? 'Spring tide (vive-eau, coeff 95)' : 'Neap tide (morte-eau, coeff 45)';
+      document.getElementById('printTitle').textContent =
+        `Tidal Currents — Pornichet / La Baule / Le Pouliguen — ${rl}`;
+      document.getElementById('printMeta').textContent =
+        `SHOM C3D LOIRE (surface) · PM = high water Saint-Nazaire · printed ${new Date().toLocaleString()}`;
+    }
+
+    document.getElementById('btnVE').addEventListener('click', () => setRegime('VE'));
+    document.getElementById('btnME').addEventListener('click', () => setRegime('ME'));
+    hourSlider.addEventListener('input', () => { hour = +hourSlider.value; showSingle(); });
+    document.getElementById('btnGrid').addEventListener('click', () => setGridMode(!gridMode));
+    document.getElementById('btnPrint').addEventListener('click', () => {
+      // Print always uses the 13-map grid of the active regime
+      if (!gridMode) setGridMode(true);
+      updatePrintHead();
+      // Give lazy images a moment to load before the print dialog
+      const imgs = [...document.querySelectorAll('#gridView img')];
+      Promise.all(imgs.map(i => i.complete ? null : new Promise(res => { i.onload = i.onerror = res; })))
+        .then(() => setTimeout(() => window.print(), 200));
+    });
+
+    fetch('/api/current-atlas/meta')
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(m => {
+        document.getElementById('metaText').textContent =
+          `${m.product} · PM = HW ${m.pm_reference} · scale 0–${m.vmax_kt} kt`;
+      })
+      .catch(() => {
+        document.getElementById('metaText').textContent = 'Atlas data not available on this server.';
+      });
+
+    updatePrintHead();
+    showSingle();
+  </script>
+</body>
+</html>

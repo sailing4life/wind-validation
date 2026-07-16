@@ -501,6 +501,8 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 
 .tab:hover { background: var(--bg); color: var(--ink); }
 
+.tab-link { text-decoration: none; display: inline-block; line-height: normal; }
+
 .tab.active {
   background: var(--bg);
   color: var(--accent);
