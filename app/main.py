@@ -489,11 +489,12 @@ async def current_atlas_meta() -> dict:
 async def current_atlas_map(
     regime: str = Query("VE"),
     hour: int = Query(0, ge=-6, le=6),
+    view: str = Query("bay"),
 ) -> Response:
     from .currents_atlas import render_map  # noqa: PLC0415
 
     try:
-        png = await asyncio.to_thread(render_map, regime, hour)
+        png = await asyncio.to_thread(render_map, regime, hour, view)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except FileNotFoundError:
@@ -503,6 +504,93 @@ async def current_atlas_map(
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.get("/api/current-atlas/tides")
+async def current_atlas_tides(
+    date: str = Query(..., description="YYYY-MM-DD (local race day)"),
+    lat: float = Query(47.24, ge=-90.0, le=90.0),
+    lon: float = Query(-2.35, ge=-180.0, le=180.0),
+) -> dict:
+    """High/low water times near Saint-Nazaire from the marine model sea level.
+
+    Used to hang the PM-relative atlas maps on the clock of the race day and
+    to estimate the tidal coefficient (interpolation between ME=45 and VE=95).
+    """
+    try:
+        day = datetime.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+    start = (day - timedelta(days=1)).strftime("%Y-%m-%d")
+    end = (day + timedelta(days=1)).strftime("%Y-%m-%d")
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "sea_level_height_msl",
+        "start_date": start,
+        "end_date": end,
+        "timezone": "UTC",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(SETTINGS.openmeteo_marine_url, params=params)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Tide data unavailable: {exc}")
+
+    hourly = resp.json().get("hourly", {})
+    times = hourly.get("time") or []
+    levels = hourly.get("sea_level_height_msl") or []
+    if len(times) < 3 or len(levels) != len(times):
+        raise HTTPException(status_code=503, detail="Tide data incomplete")
+
+    def _extreme(i: int) -> tuple[str, float]:
+        """Parabolic refinement of an hourly extreme at index i."""
+        y0, y1, y2 = levels[i - 1], levels[i], levels[i + 1]
+        denom = y0 - 2 * y1 + y2
+        dt = 0.5 * (y0 - y2) / denom if denom else 0.0
+        t = datetime.fromisoformat(times[i]) + timedelta(hours=dt)
+        height = y1 - 0.25 * (y0 - y2) * dt
+        return t.strftime("%Y-%m-%dT%H:%M:%SZ"), round(height, 2)
+
+    highs, lows = [], []
+    for i in range(1, len(levels) - 1):
+        if levels[i] is None or levels[i - 1] is None or levels[i + 1] is None:
+            continue
+        if levels[i] >= levels[i - 1] and levels[i] > levels[i + 1]:
+            t, h = _extreme(i)
+            highs.append({"time_utc": t, "height_m": h})
+        elif levels[i] <= levels[i - 1] and levels[i] < levels[i + 1]:
+            t, h = _extreme(i)
+            lows.append({"time_utc": t, "height_m": h})
+
+    day_str = day.strftime("%Y-%m-%d")
+    day_highs = [h for h in highs if h["time_utc"].startswith(day_str)]
+    day_lows = [x for x in lows if x["time_utc"].startswith(day_str)]
+
+    tidal_range = None
+    coeff = None
+    regime_suggestion = None
+    if day_highs and day_lows:
+        tidal_range = round(
+            max(h["height_m"] for h in day_highs) - min(x["height_m"] for x in day_lows), 2
+        )
+        # Rough coefficient: linear between neap (45, ~2.6 m) and spring (95, ~5.2 m)
+        # ranges at Saint-Nazaire — good enough to pick the VE/ME map set
+        coeff = round(45 + 50 * (tidal_range - 2.6) / (5.2 - 2.6))
+        coeff = max(20, min(120, coeff))
+        regime_suggestion = "VE" if coeff >= 70 else "ME"
+
+    return {
+        "date": day_str,
+        "highs": day_highs,
+        "lows": day_lows,
+        "all_highs": highs,
+        "range_m": tidal_range,
+        "coeff_estimate": coeff,
+        "regime_suggestion": regime_suggestion,
+    }
 
 
 @app.get("/api/pressure-charts")

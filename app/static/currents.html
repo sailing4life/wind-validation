@@ -22,25 +22,30 @@
     header a { color: var(--accent); text-decoration: none; font-size: 13px; }
     .meta { color: var(--ink-muted); font-size: 12px; }
     .controls {
-      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
       padding: 10px 18px; background: #fff; border-bottom: 1px solid var(--line);
       position: sticky; top: 0; z-index: 5;
     }
-    .regime-toggle button {
-      padding: 6px 14px; border: 1px solid var(--line); background: #fff;
+    .seg button {
+      padding: 6px 13px; border: 1px solid var(--line); background: #fff;
       cursor: pointer; font-size: 13px;
     }
-    .regime-toggle button:first-child { border-radius: 6px 0 0 6px; }
-    .regime-toggle button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
-    .regime-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .hour-ctl { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 260px; max-width: 520px; }
+    .seg button:first-child { border-radius: 6px 0 0 6px; }
+    .seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+    .seg button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .hour-ctl { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 240px; max-width: 480px; }
     .hour-ctl input[type=range] { flex: 1; }
-    .hour-label { font-weight: 700; font-size: 15px; min-width: 52px; text-align: center; }
+    .hour-label { font-weight: 700; font-size: 14px; min-width: 110px; text-align: center; }
     .btn {
       padding: 6px 14px; border: 1px solid var(--line); background: #fff;
       border-radius: 6px; cursor: pointer; font-size: 13px;
     }
     .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .tide-ctl { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .tide-ctl input[type=date], .tide-ctl select {
+      padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px;
+    }
+    .tide-info { color: var(--ink-muted); font-size: 12px; }
     main { padding: 14px 18px; max-width: 1280px; margin: 0 auto; }
     .single-view img, .grid-view img {
       width: 100%; display: block; border: 1px solid var(--line);
@@ -78,15 +83,24 @@
   </header>
 
   <div class="controls">
-    <div class="regime-toggle">
-      <button id="btnVE" class="active" title="Vive-eau, coefficient 95">Spring (VE)</button>
-      <button id="btnME" title="Morte-eau, coefficient 45">Neap (ME)</button>
+    <div class="seg" id="viewToggle">
+      <button data-view="bay" class="active" title="Zoomed in on the bay, just outside Pornichet harbour">Bay</button>
+      <button data-view="area" title="Wider approaches: Le Croisic to the Loire estuary">Area</button>
+    </div>
+    <div class="seg" id="regimeToggle">
+      <button data-regime="VE" class="active" title="Vive-eau, coefficient 95">Spring (VE)</button>
+      <button data-regime="ME" title="Morte-eau, coefficient 45">Neap (ME)</button>
     </div>
     <div class="hour-ctl">
       <span style="font-size:12px;color:var(--ink-muted)">PM&minus;6</span>
       <input type="range" id="hourSlider" min="-6" max="6" step="1" value="0" />
       <span style="font-size:12px;color:var(--ink-muted)">PM+6</span>
       <span class="hour-label" id="hourLabel">PM</span>
+    </div>
+    <div class="tide-ctl">
+      <label>Race day <input type="date" id="raceDate" /></label>
+      <select id="hwSelect" style="display:none"></select>
+      <span class="tide-info" id="tideInfo"></span>
     </div>
     <button class="btn" id="btnGrid">All 13 maps</button>
     <button class="btn primary" id="btnPrint">Print / PDF</button>
@@ -105,9 +119,12 @@
   </main>
 
   <script>
+    let view = 'bay';
     let regime = 'VE';
     let hour = 0;
     let gridMode = false;
+    let tide = null;        // /api/current-atlas/tides payload
+    let hwTime = null;      // Date of the selected high water
 
     const mapImg = document.getElementById('mapImg');
     const hourSlider = document.getElementById('hourSlider');
@@ -115,15 +132,21 @@
     const statusText = document.getElementById('statusText');
 
     const pmLabel = h => h === 0 ? 'PM' : (h > 0 ? `PM+${h}` : `PM−${-h}`);
-    const mapUrl = (r, h) => `/api/current-atlas/map?regime=${r}&hour=${h}`;
+    const clock = dt => dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const mapUrl = (r, h) => `/api/current-atlas/map?regime=${r}&hour=${h}&view=${view}`;
+
+    function hourText(h) {
+      if (!hwTime) return pmLabel(h);
+      const t = new Date(hwTime.getTime() + h * 3600e3);
+      return `${pmLabel(h)} · ${clock(t)}`;
+    }
 
     function showSingle() {
-      hourLabel.textContent = pmLabel(hour);
+      hourLabel.textContent = hourText(hour);
       statusText.textContent = 'Rendering…';
       mapImg.src = mapUrl(regime, hour);
       mapImg.onload = () => {
         statusText.textContent = '';
-        // Pre-warm neighbouring hours for smooth sliding
         [hour - 1, hour + 1].forEach(h2 => {
           if (h2 >= -6 && h2 <= 6) { const i = new Image(); i.src = mapUrl(regime, h2); }
         });
@@ -137,7 +160,7 @@
       for (let h = -6; h <= 6; h++) {
         const fig = document.createElement('figure');
         const cap = document.createElement('figcaption');
-        cap.textContent = pmLabel(h) + (regime === 'VE' ? ' · spring (VE)' : ' · neap (ME)');
+        cap.textContent = hourText(h) + (regime === 'VE' ? ' · spring (VE)' : ' · neap (ME)');
         const img = document.createElement('img');
         img.loading = 'lazy';
         img.src = mapUrl(regime, h);
@@ -146,43 +169,107 @@
       }
     }
 
+    function refresh() {
+      updatePrintHead();
+      if (gridMode) buildGrid(); else showSingle();
+    }
+
     function setGridMode(on) {
       gridMode = on;
       document.getElementById('gridView').style.display = on ? 'grid' : 'none';
       document.getElementById('singleView').style.display = on ? 'none' : '';
       document.getElementById('btnGrid').textContent = on ? 'Single map' : 'All 13 maps';
-      if (on) buildGrid(); else showSingle();
-    }
-
-    function setRegime(r) {
-      regime = r;
-      document.getElementById('btnVE').classList.toggle('active', r === 'VE');
-      document.getElementById('btnME').classList.toggle('active', r === 'ME');
-      updatePrintHead();
-      if (gridMode) buildGrid(); else showSingle();
+      refresh();
     }
 
     function updatePrintHead() {
       const rl = regime === 'VE' ? 'Spring tide (vive-eau, coeff 95)' : 'Neap tide (morte-eau, coeff 45)';
+      const vl = view === 'bay' ? 'Baie de La Baule / Pornichet' : 'Le Croisic – Loire';
+      let extra = '';
+      if (tide && hwTime) {
+        extra = ` · ${tide.date}: HW ${clock(hwTime)}` +
+          (tide.coeff_estimate ? `, coeff ≈ ${tide.coeff_estimate}` : '');
+      }
       document.getElementById('printTitle').textContent =
-        `Tidal Currents — Pornichet / La Baule / Le Pouliguen — ${rl}`;
+        `Tidal Currents — ${vl} — ${rl}`;
       document.getElementById('printMeta').textContent =
-        `SHOM C3D LOIRE (surface) · PM = high water Saint-Nazaire · printed ${new Date().toLocaleString()}`;
+        `SHOM C3D LOIRE (surface) · PM = high water Saint-Nazaire${extra} · printed ${new Date().toLocaleString()}`;
     }
 
-    document.getElementById('btnVE').addEventListener('click', () => setRegime('VE'));
-    document.getElementById('btnME').addEventListener('click', () => setRegime('ME'));
+    // ── Tide clock ───────────────────────────────────────────────────────────
+    async function loadTides(dateStr) {
+      const info = document.getElementById('tideInfo');
+      const sel = document.getElementById('hwSelect');
+      info.textContent = 'Loading tides…';
+      sel.style.display = 'none';
+      tide = null; hwTime = null;
+      try {
+        const resp = await fetch(`/api/current-atlas/tides?date=${dateStr}`);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        tide = await resp.json();
+        const highs = tide.highs || [];
+        if (!highs.length) { info.textContent = 'No HW found for this date.'; refresh(); return; }
+
+        sel.innerHTML = '';
+        highs.forEach((h, i) => {
+          const t = new Date(h.time_utc);
+          sel.add(new Option(`HW ${clock(t)} (${h.height_m} m)`, i));
+        });
+        sel.style.display = '';
+        sel.onchange = () => {
+          hwTime = new Date(highs[+sel.value].time_utc);
+          refresh();
+        };
+        // Default: first HW after 06:00 local, else the first one
+        let pick = highs.findIndex(h => new Date(h.time_utc).getHours() >= 6);
+        if (pick < 0) pick = 0;
+        sel.value = String(pick);
+        hwTime = new Date(highs[pick].time_utc);
+
+        let txt = '';
+        if (tide.coeff_estimate) {
+          txt = `coeff ≈ ${tide.coeff_estimate} → ${tide.regime_suggestion === 'VE' ? 'spring (VE)' : 'neap (ME)'}`;
+          if (tide.regime_suggestion && tide.regime_suggestion !== regime) setRegime(tide.regime_suggestion, true);
+        }
+        info.textContent = txt;
+        refresh();
+      } catch (err) {
+        info.textContent = 'Tides unavailable.';
+        refresh();
+      }
+    }
+
+    // ── Controls ─────────────────────────────────────────────────────────────
+    function setRegime(r, silent) {
+      regime = r;
+      document.querySelectorAll('#regimeToggle button').forEach(b =>
+        b.classList.toggle('active', b.dataset.regime === r));
+      if (!silent) refresh();
+    }
+
+    document.querySelectorAll('#viewToggle button').forEach(b =>
+      b.addEventListener('click', () => {
+        view = b.dataset.view;
+        document.querySelectorAll('#viewToggle button').forEach(x =>
+          x.classList.toggle('active', x === b));
+        refresh();
+      }));
+    document.querySelectorAll('#regimeToggle button').forEach(b =>
+      b.addEventListener('click', () => setRegime(b.dataset.regime)));
     hourSlider.addEventListener('input', () => { hour = +hourSlider.value; showSingle(); });
     document.getElementById('btnGrid').addEventListener('click', () => setGridMode(!gridMode));
     document.getElementById('btnPrint').addEventListener('click', () => {
-      // Print always uses the 13-map grid of the active regime
       if (!gridMode) setGridMode(true);
       updatePrintHead();
-      // Give lazy images a moment to load before the print dialog
       const imgs = [...document.querySelectorAll('#gridView img')];
       Promise.all(imgs.map(i => i.complete ? null : new Promise(res => { i.onload = i.onerror = res; })))
         .then(() => setTimeout(() => window.print(), 200));
     });
+
+    const dateInput = document.getElementById('raceDate');
+    const today = new Date();
+    dateInput.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    dateInput.addEventListener('change', () => { if (dateInput.value) loadTides(dateInput.value); });
 
     fetch('/api/current-atlas/meta')
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
@@ -196,6 +283,7 @@
 
     updatePrintHead();
     showSingle();
+    loadTides(dateInput.value);
   </script>
 </body>
 </html>
