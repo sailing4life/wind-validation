@@ -345,7 +345,11 @@
               <div id="bfModelChecks" class="bf-model-checks" title="Select which models appear in the ensemble charts"></div>
               <input type="file" id="bfGribFileInput" accept=".grib,.grb,.grib2,.grb2" style="display:none">
               <button id="bfImportGribBtn" class="btn-secondary" title="Import a local GRIB file as a wind map source">Import GRIB</button>
-              <button id="bfPrintCrewBtn" class="btn-secondary" title="One-pager for the crew: header, summary bullets, wind chart, hourly table and wind maps">Print Crew</button>
+              <label class="bf-include-label" title="Add the Ensemble TWS/TWD and ICON-EPS uncertainty charts to the crew print">
+                <input type="checkbox" id="bfCrewIncludeEnsemble">
+                <span>Ensemble in Crew</span>
+              </label>
+              <button id="bfPrintCrewBtn" class="btn-secondary" title="One-pager for the crew: header, summary bullets, wind chart, hourly table, wind maps and optionally ensemble">Print Crew</button>
               <button id="bfPrintBtn" title="Full briefing: all sections, charts and notes">Print Full</button>
             </div>
           </div>
@@ -458,6 +462,6 @@
   <script src="/static/app.js?v=35"></script>
   <script src="/static/forecast.js?v=35"></script>
   <script src="/static/weather.js?v=31"></script>
-  <script src="/static/briefing.js?v=39"></script>
+  <script src="/static/briefing.js?v=40"></script>
 </body>
 </html>

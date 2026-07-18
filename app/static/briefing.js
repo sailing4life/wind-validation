@@ -213,12 +213,12 @@ function renderBriefingBestChart() {
 }
 
 // â”€â”€ Ensemble charts (TWS + TWD, share a row wrapper) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function renderBriefingEnsembleCharts() {
+function renderBriefingEnsembleCharts(force) {
   const row = document.getElementById('bfEnsembleRow');
   if (!row || !forecastData) { if (row) row.style.display = 'none'; return; }
 
-  // Hide if the ensemble checkbox is not checked
-  if (!document.getElementById('bfIncludeEnsemble')?.checked) {
+  // Hide if the ensemble checkbox is not checked (unless force-rendering for export)
+  if (!force && !document.getElementById('bfIncludeEnsemble')?.checked) {
     row.style.display = 'none';
     return;
   }
@@ -733,10 +733,10 @@ function bfEpsOverlayModel() {
     || null;
 }
 
-function bfRenderEpsCharts() {
+function bfRenderEpsCharts(force) {
   const row = document.getElementById('bfEpsRow');
   if (!row) return;
-  if (!document.getElementById('bfIncludeEnsemble')?.checked || !_ensembleData) {
+  if ((!force && !document.getElementById('bfIncludeEnsemble')?.checked) || !_ensembleData) {
     row.style.display = 'none';
     return;
   }
@@ -1239,6 +1239,27 @@ document.querySelectorAll('[data-note-insert]').forEach(btn => {
   });
 });
 
+// Force-render the ensemble/EPS charts for image capture even when the main
+// "Ensemble" checkbox is off on screen; returns true if a restore is needed.
+async function bfEnsureEnsembleRendered() {
+  if (document.getElementById('bfIncludeEnsemble')?.checked) return false;
+  const row1 = document.getElementById('bfEnsembleRow');
+  const row2 = document.getElementById('bfEpsRow');
+  if (row1) row1.style.display = '';
+  if (row2) row2.style.display = '';
+  renderBriefingEnsembleCharts(true);
+  bfRenderEpsCharts(true);
+  await new Promise(r => setTimeout(r, 50));   // let Plotly finish laying out
+  return true;
+}
+
+function bfRestoreEnsembleHidden() {
+  const row1 = document.getElementById('bfEnsembleRow');
+  const row2 = document.getElementById('bfEpsRow');
+  if (row1) row1.style.display = 'none';
+  if (row2) row2.style.display = 'none';
+}
+
 // crew=true → one-pager: header, summary bullets, wind chart, hourly table, wind maps.
 // crew=false → full briefing with every section in framework order.
 async function bfExportPrint(crew) {
@@ -1264,14 +1285,21 @@ async function bfExportPrint(crew) {
   const bestImg   = await bfChartAsImg('bfBestChart', 370);
   const tableHtml = document.getElementById('bfTableWrap')?.innerHTML || '';
 
+  // Ensemble charts: always in the full briefing, optional in the crew print
+  const crewWantsEnsemble = crew && document.getElementById('bfCrewIncludeEnsemble')?.checked;
+  let ensTwsImg = '', ensTwdImg = '', epsTwsImg = '', epsTwdImg = '';
+  if (!crew || crewWantsEnsemble) {
+    const wasForced = await bfEnsureEnsembleRendered();
+    ensTwsImg = await bfChartAsImg('bfEnsembleChart', 370);
+    ensTwdImg = await bfChartAsImg('bfEnsembleDirChart', 370);
+    epsTwsImg = await bfChartAsImg('bfEpsTwsChart', 300);
+    epsTwdImg = await bfChartAsImg('bfEpsTwdChart', 300);
+    if (wasForced) bfRestoreEnsembleHidden();
+  }
+
   // Full-only assets
-  let ensTwsImg = '', ensTwdImg = '', epsTwsImg = '', epsTwdImg = '',
-      currentImg = '', gradientImg = '', skyImg = '', wavesImg = '';
+  let currentImg = '', gradientImg = '', skyImg = '', wavesImg = '';
   if (!crew) {
-    ensTwsImg   = await bfChartAsImg('bfEnsembleChart', 370);
-    ensTwdImg   = await bfChartAsImg('bfEnsembleDirChart', 370);
-    epsTwsImg   = await bfChartAsImg('bfEpsTwsChart', 300);
-    epsTwdImg   = await bfChartAsImg('bfEpsTwdChart', 300);
     gradientImg = await bfChartAsImg('bfGradientChart', 300);
     skyImg      = await bfChartAsImg('bfSkyChart', 260);
     wavesImg    = await bfChartAsImg('bfWavesChart', 260);
@@ -1395,10 +1423,10 @@ td[style*="background"]{background-clip:padding-box}
     <div class="label">Hourly Forecast Table</div>
     <div class="table-wrap">${tableHtml}</div>
   </div>` : ''}
-  ${ensTwsImg ? `<div class="section"><div class="label">3 · Ensemble TWS</div><img src="${ensTwsImg}" alt="Ensemble TWS" /></div>` : ''}
-  ${ensTwdImg ? `<div class="section"><div class="label">3 · Ensemble TWD</div><img src="${ensTwdImg}" alt="Ensemble TWD" /></div>` : ''}
-  ${epsTwsImg ? `<div class="section"><div class="label">3 · ICON-EPS TWS Uncertainty</div><img src="${epsTwsImg}" alt="ICON-EPS TWS" /></div>` : ''}
-  ${epsTwdImg ? `<div class="section"><div class="label">3 · ICON-EPS TWD Spread</div><img src="${epsTwdImg}" alt="ICON-EPS TWD" /></div>` : ''}
+  ${ensTwsImg ? `<div class="section"><div class="label">${crew ? 'Ensemble TWS' : '3 · Ensemble TWS'}</div><img src="${ensTwsImg}" alt="Ensemble TWS" /></div>` : ''}
+  ${ensTwdImg ? `<div class="section"><div class="label">${crew ? 'Ensemble TWD' : '3 · Ensemble TWD'}</div><img src="${ensTwdImg}" alt="Ensemble TWD" /></div>` : ''}
+  ${epsTwsImg ? `<div class="section"><div class="label">${crew ? 'ICON-EPS TWS Uncertainty' : '3 · ICON-EPS TWS Uncertainty'}</div><img src="${epsTwsImg}" alt="ICON-EPS TWS" /></div>` : ''}
+  ${epsTwdImg ? `<div class="section"><div class="label">${crew ? 'ICON-EPS TWD Spread' : '3 · ICON-EPS TWD Spread'}</div><img src="${epsTwdImg}" alt="ICON-EPS TWD" /></div>` : ''}
   ${skyImg ? `<div class="section"><div class="label">4 · Local Effects — Cloud / CAPE</div><img src="${skyImg}" alt="Cloud and CAPE" /></div>` : ''}
   ${currentImg ? `<div class="section"><div class="label">5 · Ocean Current</div><img src="${currentImg}" alt="Ocean current" /></div>` : ''}
   ${wavesImg ? `<div class="section"><div class="label">5 · Waves</div><img src="${wavesImg}" alt="Waves" /></div>` : ''}
