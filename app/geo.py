@@ -23,4 +23,8 @@ def detect_country(lat: float, lon: float) -> str:
         return "FR"
     if 35.0 <= lat <= 47.2 and 6.0 <= lon <= 18.7:
         return "IT"
+    # Mainland Spain and the Balearic Islands. This is deliberately after
+    # France so shared border coordinates retain the existing France routing.
+    if 35.0 <= lat <= 44.5 and -10.0 <= lon <= 5.5:
+        return "ES"
     return "OTHER"

@@ -39,6 +39,8 @@ class InMemoryRepository:
             Station("IT001", "isd", "IT", 45.46, 9.19, 120, external_id="160800-99999"),
             Station("IT002", "isd", "IT", 41.90, 12.49, 21, external_id="162390-99999"),
             Station("EU001", "isd", "OTHER", 50.11, 8.68, 110, external_id="106370-99999"),
+            # SOCIB Bahia de Palma oceanographic buoy — 10-minute wind observations.
+            Station("SOCIB_BAHIA_PALMA", "socib", "ES", 39.498883, 2.702133, 2, station_type="buoy"),
             # METAR and BrightSky stations are discovered dynamically at query time — no catalog entries needed.
         ]
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .adapters import BaseSourceAdapter, BrightSkyAdapter, IsdAdapter, ItalyRegionalAdapter, KnmiAdapter, MetarAdapter, MeteoFranceAdapter
+from .adapters import BaseSourceAdapter, BrightSkyAdapter, IsdAdapter, ItalyRegionalAdapter, KnmiAdapter, MetarAdapter, MeteoFranceAdapter, SocibPalmaAdapter
 from .config import Settings
 from .domain import Observation, Station
 from .qc import qc_observations
@@ -19,6 +19,7 @@ class ObservationBroker:
         self._it = ItalyRegionalAdapter(settings)
         self._metar = MetarAdapter(settings)
         self._brightsky = BrightSkyAdapter(settings)
+        self._socib = SocibPalmaAdapter(settings)
 
     def _source_order(self, country: str) -> list[BaseSourceAdapter]:
         if country == "NL":
@@ -28,6 +29,8 @@ class ObservationBroker:
         if country == "IT":
             extra = [self._it] if self.settings.italy_regional_enabled else []
             return [self._metar] + extra + [self._isd]
+        if country == "ES":
+            return [self._socib, self._metar, self._isd]
         # OTHER includes DE, BE, GB, etc. — METAR + BrightSky (DWD) + ISD fallback
         return [self._metar, self._brightsky, self._isd]
 

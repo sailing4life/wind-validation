@@ -60,8 +60,10 @@ class Settings:
     refresh_interval_seconds: int = _env_int("REFRESH_INTERVAL_SECONDS", 600)
     italy_regional_enabled: bool = False
     live_observations_enabled: bool = _env_bool("LIVE_OBSERVATIONS_ENABLED", True)
+    socib_buoy_enabled: bool = _env_bool("SOCIB_BUOY_ENABLED", True)
     live_forecasts_enabled: bool = _env_bool("LIVE_FORECASTS_ENABLED", True)
     request_timeout_seconds: float = _env_float("REQUEST_TIMEOUT_SECONDS", 8.0)
+    socib_request_timeout_seconds: float = _env_float("SOCIB_REQUEST_TIMEOUT_SECONDS", 30.0)
     fingerprint_cache_ttl_seconds: int = _env_int("FINGERPRINT_CACHE_TTL_SECONDS", 21600)
     knmi_api_key: str | None = os.getenv("KNMI_API_KEY")
     knmi_api_base_url: str = os.getenv("KNMI_API_BASE_URL", "https://api.dataplatform.knmi.nl/open-data/v1")
@@ -72,6 +74,12 @@ class Settings:
     ncei_api_base_url: str = os.getenv("NCEI_API_BASE_URL", "https://www.ncei.noaa.gov/access/services/data/v1")
     ncei_dataset: str = os.getenv("NCEI_DATASET", "global-hourly")
     ncei_token: str | None = os.getenv("NCEI_TOKEN")
+    socib_palma_opendap_url: str = os.getenv(
+        "SOCIB_PALMA_OPENDAP_URL",
+        "https://thredds.socib.es/thredds/dodsC/mooring/weather_station/"
+        "buoy_bahiadepalma-scb_met029/L1/"
+        "dep0002_buoy-bahiadepalma_scb-met029_L1_latest.nc.ascii",
+    )
     openmeteo_knmi_url: str = os.getenv("OPENMETEO_KNMI_URL", "https://api.open-meteo.com/v1/forecast")
     openmeteo_knmi_model: str = os.getenv("OPENMETEO_KNMI_MODEL", "knmi_seamless")
     openmeteo_arome_hd_url: str = os.getenv("OPENMETEO_AROME_HD_URL", "https://api.open-meteo.com/v1/forecast")

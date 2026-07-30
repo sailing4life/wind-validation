@@ -206,6 +206,88 @@ class MeteoFranceAdapter(BaseSourceAdapter):
         return parsed_rows
 
 
+class SocibPalmaAdapter(BaseSourceAdapter):
+    """SOCIB Bahia de Palma buoy, served as public OPeNDAP ASCII data.
+
+    The source reports wind-from direction and mean wind speed at 10-minute
+    resolution.  Requesting the ASCII projection keeps this dependency-free:
+    no NetCDF reader or SOCIB API key is needed.
+    """
+
+    source_name = "socib"
+    _STATION_ID = "SOCIB_BAHIA_PALMA"
+    _GOOD_QC = {0, 1, 2}  # no QC, good, probably good (SOCIB flag convention)
+
+    def _live_enabled(self) -> bool:
+        return self.settings.live_observations_enabled and self.settings.socib_buoy_enabled
+
+    @staticmethod
+    def _parse_ascii_sections(text: str) -> dict[str, list[str]]:
+        """Parse the small, predictable OPeNDAP .ascii response into sections."""
+        sections: dict[str, list[str]] = {}
+        lines = iter(text.splitlines())
+        for line in lines:
+            name = line.strip().split("[", 1)[0]
+            if name not in {"time", "WIN_SPE", "WIN_DIR", "QC_WIN_SPE", "QC_WIN_DIR"}:
+                continue
+            try:
+                values_line = next(lines).strip()
+            except StopIteration:
+                break
+            sections[name] = [value.strip() for value in values_line.split(",") if value.strip()]
+        return sections
+
+    @classmethod
+    def _parse_observations(cls, text: str, start: datetime, end: datetime) -> list[Observation]:
+        sections = cls._parse_ascii_sections(text)
+        needed = ("time", "WIN_SPE", "WIN_DIR", "QC_WIN_SPE", "QC_WIN_DIR")
+        if any(key not in sections for key in needed):
+            return []
+
+        rows: list[Observation] = []
+        for values in zip(*(sections[key] for key in needed)):
+            try:
+                timestamp, speed, direction, speed_qc, direction_qc = (float(value) for value in values)
+                ts = datetime.fromtimestamp(timestamp, tz=UTC)
+            except (OverflowError, OSError, ValueError):
+                continue
+            if ts < start or ts > end:
+                continue
+            if not all(math.isfinite(value) for value in (speed, direction)):
+                continue
+            if int(speed_qc) not in cls._GOOD_QC or int(direction_qc) not in cls._GOOD_QC:
+                continue
+            if speed < 0:
+                continue
+            rows.append(Observation(
+                station_id=cls._STATION_ID,
+                source=cls.source_name,
+                time_utc=ts,
+                ws_ms=speed,
+                wd_deg=direction % 360,
+            ))
+        return rows
+
+    def get_obs(self, repo: InMemoryRepository, station_ids: set[str], start: datetime, end: datetime) -> list[Observation]:
+        if not self._live_enabled() or self._STATION_ID not in station_ids:
+            return []
+
+        projection = "?time,WIN_SPE,WIN_DIR,QC_WIN_SPE,QC_WIN_DIR"
+        try:
+            with httpx.Client(timeout=self.settings.socib_request_timeout_seconds, follow_redirects=True) as client:
+                response = client.get(self.settings.socib_palma_opendap_url + projection)
+                response.raise_for_status()
+            rows = self._parse_observations(response.text, start, end)
+            if rows:
+                logger.info("SOCIB Palma fetch: %d obs, latest=%s", len(rows), max(row.time_utc for row in rows).isoformat())
+            else:
+                logger.warning("SOCIB Palma fetch returned 0 observations for window %s–%s", start.isoformat(), end.isoformat())
+            return rows
+        except Exception as exc:
+            logger.warning("SOCIB Palma fetch failed", exc_info=exc)
+            return []
+
+
 class IsdAdapter(BaseSourceAdapter):
     source_name = "isd"
 

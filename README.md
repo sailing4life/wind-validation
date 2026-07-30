@@ -49,6 +49,7 @@ Source settings:
 - `OPENMETEO_ECMWF_MODEL`: Open-Meteo model name for ecmwf_global, default `ecmwf_ifs04`
 
 KNMI observations use `daggegevens.knmi.nl` (free, no API key needed).
+For the Bay of Palma, the SOCIB buoy is included as a fixed 10-minute wind-observation source. Set `SOCIB_BUOY_ENABLED=false` to disable it, `SOCIB_PALMA_OPENDAP_URL` to override its public OPeNDAP endpoint, or `SOCIB_REQUEST_TIMEOUT_SECONDS` (default: 30) for a slower SOCIB response.
 
 If a live source call fails, that source/model returns no rows for that refresh cycle.
 
