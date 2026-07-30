@@ -104,8 +104,11 @@ async function loadForecast() {
     _selectedModels = new Set(forecastData.models.map(m => m.model_id));
 
     const cal = forecastData.calibration || {};
+    const uncertaintyLabel = cal.uncertainty_source === 'historical_hour_regime'
+      ? `hour/regime n=${cal.historical_n_effective}`
+      : `n=${cal.n_effective}`;
     status.textContent = _winnerModelId
-      ? `Best: ${_winnerModelId} · ${cal.status === 'insufficient_history' ? 'insufficient history' : `${cal.status} · n=${cal.n_effective}`}`
+      ? `Best: ${_winnerModelId} · ${cal.status === 'insufficient_history' ? 'insufficient history' : `${cal.status} · ${uncertaintyLabel}`}`
       : 'Run Validation first for bias correction';
 
     renderModelToggles();
@@ -548,9 +551,12 @@ function renderVerification() {
     return;
   }
   const biasKt = Math.hypot(c.bias_u || 0, c.bias_v || 0) * MS_TO_KT;
-  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Comparable samples:</span> ${c.n_effective}</div>
+  const uncertainty = c.uncertainty_source === 'historical_hour_regime'
+    ? `historical local-hour + regime p10–p90 (n=${c.historical_n_effective})`
+    : 'recent local residual p10–p90';
+  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Recent comparable samples:</span> ${c.n_effective}</div>
     <div class="meta-row"><span class="meta-label">Recent U/V correction:</span> ${biasKt.toFixed(1)} kt &nbsp; <span class="meta-label">Method:</span> recency + wind-regime weighted</div>
-    <div class="meta-row"><span class="meta-label">Uncertainty:</span> locally estimated p10–p90; correction fades with forecast lead time.</div>`;
+    <div class="meta-row"><span class="meta-label">Uncertainty:</span> ${uncertainty}; correction fades with forecast lead time.</div>`;
 }
 
 // â”€â”€ ICON-EPS ensemble load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

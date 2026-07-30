@@ -14,24 +14,44 @@ class CalibrationSample:
     model_v: float
     obs_u: float
     obs_v: float
+    # Spatial/source relevance is supplied by ValidationService.  Keeping it
+    # on the sample lets the same calibration code work for recent and stored
+    # verification pairs.
+    relevance_weight: float = 1.0
+    local_solar_hour: float | None = None
 
 
 def circular_delta(a: float, b: float) -> float:
     return abs((a - b + 180.0) % 360.0 - 180.0)
 
 
-def calibrate(samples: list[CalibrationSample], target_u: float, target_v: float, now: datetime, lead_hours: float) -> dict:
-    """Recent, regime-weighted U/V correction with an honest effective sample size."""
+def calibrate(
+    samples: list[CalibrationSample],
+    target_u: float,
+    target_v: float,
+    now: datetime,
+    lead_hours: float,
+    *,
+    recency_half_life_hours: float | None = 6.0,
+    target_local_solar_hour: float | None = None,
+    hour_sigma_hours: float | None = None,
+) -> dict:
+    """Regime-weighted U/V correction with optional local-hour conditioning."""
     speed, direction = uv_to_speed_dir(target_u, target_v)
     weighted: list[tuple[float, float, float]] = []
     for row in samples:
         ms, md = uv_to_speed_dir(row.model_u, row.model_v)
         age_h = max(0.0, (now - row.time_utc).total_seconds() / 3600.0)
-        # Six-hour recency half-life; retain analogous older cases gently.
-        w_age = 0.5 ** (age_h / 6.0)
+        # Recent pairs help the live bias. Durable history uses a much longer
+        # half-life, because it is primarily evidence for the uncertainty band.
+        w_age = 1.0 if recency_half_life_hours is None else 0.5 ** (age_h / recency_half_life_hours)
         w_dir = math.exp(-0.5 * (circular_delta(direction, md) / 45.0) ** 2)
         w_speed = math.exp(-0.5 * ((speed - ms) / 4.0) ** 2)
-        w = w_age * w_dir * w_speed
+        w_hour = 1.0
+        if target_local_solar_hour is not None and row.local_solar_hour is not None and hour_sigma_hours:
+            hour_delta = abs((target_local_solar_hour - row.local_solar_hour + 12.0) % 24.0 - 12.0)
+            w_hour = math.exp(-0.5 * (hour_delta / hour_sigma_hours) ** 2)
+        w = row.relevance_weight * w_age * w_dir * w_speed * w_hour
         if w > 0.002:
             weighted.append((w, row.obs_u - row.model_u, row.obs_v - row.model_v))
     if not weighted:
@@ -67,6 +87,7 @@ def calibrate(samples: list[CalibrationSample], target_u: float, target_v: float
         "status": "bootstrap" if n_eff < 15 else "calibrated",
         "n_effective": round(n_eff, 1), "bias_u": bu, "bias_v": bv,
         "attenuation": attenuation, "ws_ms": cs, "wd_deg": cd,
+        "sigma_along_ms": sig_s, "sigma_cross_ms": sig_c,
         "ws_p10_ms": p10, "ws_p90_ms": p90,
         "wd_p10_deg": (cd - dir_half) % 360, "wd_p90_deg": (cd + dir_half) % 360,
     }

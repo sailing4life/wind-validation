@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterable
 
 from .domain import ForecastValue, Observation
@@ -47,6 +47,18 @@ class PostgresStore:
                         PRIMARY KEY (model_id, run_time_utc, valid_time_utc, lat, lon)
                     );
                     CREATE INDEX IF NOT EXISTS forecast_valid_idx ON forecast_runs (model_id, valid_time_utc DESC);
+                    CREATE TABLE IF NOT EXISTS forecast_observation_pairs (
+                        model_id TEXT NOT NULL, run_time_utc TIMESTAMPTZ NOT NULL, valid_time_utc TIMESTAMPTZ NOT NULL,
+                        station_id TEXT NOT NULL, station_source TEXT NOT NULL, station_type TEXT NOT NULL,
+                        station_lat DOUBLE PRECISION NOT NULL, station_lon DOUBLE PRECISION NOT NULL,
+                        obs_time_utc TIMESTAMPTZ NOT NULL, model_u DOUBLE PRECISION NOT NULL, model_v DOUBLE PRECISION NOT NULL,
+                        obs_u DOUBLE PRECISION NOT NULL, obs_v DOUBLE PRECISION NOT NULL,
+                        lead_hours DOUBLE PRECISION NOT NULL, local_solar_hour DOUBLE PRECISION NOT NULL,
+                        archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (model_id, run_time_utc, valid_time_utc, station_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS forecast_obs_pairs_model_time_idx
+                        ON forecast_observation_pairs (model_id, obs_time_utc DESC);
                     CREATE TABLE IF NOT EXISTS briefings (
                         briefing_id TEXT PRIMARY KEY, saved_at TIMESTAMPTZ NOT NULL,
                         title TEXT, lat DOUBLE PRECISION, lon DOUBLE PRECISION, payload JSONB NOT NULL
@@ -95,6 +107,50 @@ class PostgresStore:
                 """, values)
         except Exception:
             logger.exception("Could not archive forecast runs")
+
+    def save_forecast_observation_pairs(self, rows: Iterable[dict]) -> None:
+        """Archive only causal pairs: the forecast run predates the observation."""
+        rows = list(rows)
+        if not self.enabled or not rows:
+            return
+        values = [(
+            r["model_id"], r["run_time_utc"], r["valid_time_utc"], r["station_id"], r["station_source"],
+            r["station_type"], r["station_lat"], r["station_lon"], r["obs_time_utc"], r["model_u"],
+            r["model_v"], r["obs_u"], r["obs_v"], r["lead_hours"], r["local_solar_hour"],
+        ) for r in rows if r["run_time_utc"] <= r["obs_time_utc"]]
+        if not values:
+            return
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO forecast_observation_pairs (
+                      model_id,run_time_utc,valid_time_utc,station_id,station_source,station_type,station_lat,station_lon,
+                      obs_time_utc,model_u,model_v,obs_u,obs_v,lead_hours,local_solar_hour
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (model_id,run_time_utc,valid_time_utc,station_id) DO NOTHING
+                """, values)
+        except Exception:
+            logger.exception("Could not archive forecast-observation pairs")
+
+    def recent_forecast_observation_pairs(self, model_id: str, now: datetime, days: int = 60) -> list[dict]:
+        """Return durable verification pairs; spatial relevance is resolved at query time."""
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT station_id,station_source,station_type,station_lat,station_lon,obs_time_utc,
+                           model_u,model_v,obs_u,obs_v,local_solar_hour
+                    FROM forecast_observation_pairs
+                    WHERE model_id=%s AND obs_time_utc >= %s AND obs_time_utc <= %s
+                    ORDER BY obs_time_utc DESC
+                """, (model_id, now - timedelta(days=days), now))
+                keys = ("station_id", "station_source", "station_type", "station_lat", "station_lon", "obs_time_utc",
+                        "model_u", "model_v", "obs_u", "obs_v", "local_solar_hour")
+                return [dict(zip(keys, row)) for row in cur.fetchall()]
+        except Exception:
+            logger.exception("Could not load forecast-observation pairs")
+            return []
 
     def save_briefing(self, briefing_id: str, payload: dict, saved_at: datetime) -> None:
         if not self.enabled:

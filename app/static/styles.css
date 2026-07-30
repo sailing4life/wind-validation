@@ -109,10 +109,6 @@ h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   border-radius: 8px;
 }
 
-.sidebar-ranking h2 {
-  margin-bottom: 8px;
-}
-
 .grib-inputs {
   margin-top: 6px;
   display: flex;
@@ -401,28 +397,41 @@ tr.winner-row td { background: var(--winner-bg); }
 td.winner-cell { color: var(--good); font-weight: 700; }
 td.model-cell { font-family: monospace; font-size: 11px; }
 
-/* ranking table  -  fixed layout so it stays within the 290px panel */
+/* Ranking sits beneath the evidence charts, so it can use the full chart width. */
+.validation-ranking {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ranking-note {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+.ranking-table-wrap {
+  overflow-x: auto;
+}
 #ranking {
+  min-width: 560px;
   table-layout: fixed;
 }
 #ranking th, #ranking td {
-  padding: 4px 3px;
+  padding: 6px 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: 12px;
 }
 #ranking th {
-  font-size: 10px;
-  padding-bottom: 6px;
+  font-size: 11px;
+  padding-bottom: 7px;
 }
-#ranking th:nth-child(1), #ranking td:nth-child(1) { width: 32%; }  /* model */
-#ranking th:nth-child(2), #ranking td:nth-child(2) { width: 15%; }  /* vec rmse */
-#ranking th:nth-child(3), #ranking td:nth-child(3) { width: 15%; }  /* rmse ws */
-#ranking th:nth-child(4), #ranking td:nth-child(4) { width: 14%; }  /* bias ws */
-#ranking th:nth-child(5), #ranking td:nth-child(5) { width:  9%; }  /* n */
+#ranking th:nth-child(1), #ranking td:nth-child(1) { width: 30%; }  /* model */
+#ranking th:nth-child(2), #ranking td:nth-child(2) { width: 16%; }  /* vec rmse */
+#ranking th:nth-child(3), #ranking td:nth-child(3) { width: 16%; }  /* rmse ws */
+#ranking th:nth-child(4), #ranking td:nth-child(4) { width: 15%; }  /* bias ws */
+#ranking th:nth-child(5), #ranking td:nth-child(5) { width:  8%; }  /* n */
 #ranking th:nth-child(6), #ranking td:nth-child(6) { width: 15%; }  /* status */
-#ranking td.model-cell { font-size: 10px; }
+#ranking td.model-cell { font-size: 11px; }
 
 .badge {
   display: inline-block;
@@ -1431,4 +1440,3 @@ td.model-cell { font-family: monospace; font-size: 11px; }
 @media (max-width: 860px) {
   .bf-top-row, .bf-ensemble-row { grid-template-columns: 1fr; }
 }
-

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=36" />
+  <link rel="stylesheet" href="/static/styles.css?v=37" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -72,23 +72,6 @@
         </div>
       </div>
 
-      <div class="sidebar-ranking">
-        <h2>Model ranking</h2>
-        <table id="ranking">
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th title="Vector RMSE on U/V components (m/s)">Vec&nbsp;RMSE</th>
-              <th title="RMSE of wind speed (m/s)">RMSE&nbsp;ws</th>
-              <th title="Mean bias of wind speed (m/s)">Bias&nbsp;ws</th>
-              <th title="Number of matched obs-forecast pairs">n</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
     </aside>
 
     <!-- ── Main area ──────────────────────────────────────────────────── -->
@@ -125,6 +108,27 @@
               <span style="color:#94a3b8;font-size:11px"> &ndash;&nbsp; model colors match toggles above</span>
               <span class="chart-tz">UTC</span>
             </div>
+            <section class="validation-ranking" aria-labelledby="ranking-heading">
+              <div class="chart-header">
+                <h2 id="ranking-heading">Model ranking</h2>
+                <span class="ranking-note">Same validation window as the charts</span>
+              </div>
+              <div class="ranking-table-wrap">
+                <table id="ranking">
+                  <thead>
+                    <tr>
+                      <th>Model</th>
+                      <th title="Vector RMSE on U/V components (m/s)">Vec&nbsp;RMSE</th>
+                      <th title="RMSE of wind speed (m/s)">RMSE&nbsp;ws</th>
+                      <th title="Mean bias of wind speed (m/s)">Bias&nbsp;ws</th>
+                      <th title="Number of matched obs-forecast pairs">n</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </section>
           </div>
 
           <div class="panel stations-panel">
@@ -465,7 +469,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script src="/static/app.js?v=35"></script>
-  <script src="/static/forecast.js?v=36"></script>
+  <script src="/static/forecast.js?v=37"></script>
   <script src="/static/weather.js?v=31"></script>
   <script src="/static/briefing.js?v=40"></script>
 </body>
