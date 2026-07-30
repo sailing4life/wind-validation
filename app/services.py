@@ -730,6 +730,11 @@ class ValidationService:
                         row.update({key: cal[key] for key in ("ws_ms", "wd_deg", "ws_p10_ms", "ws_p90_ms", "wd_p10_deg", "wd_p90_deg") if key in cal})
                         row["corrected_ws_ms"] = cal["ws_ms"]
                         row["corrected_wd_deg"] = cal["wd_deg"]
+                        uncertainty_cal = hourly_cal if hourly_cal and hourly_cal["status"] != "insufficient_history" else cal
+                        row["calibration_n_effective"] = uncertainty_cal["n_effective"]
+                        row["calibration_sigma_along_ms"] = uncertainty_cal["sigma_along_ms"]
+                        row["calibration_sigma_cross_ms"] = uncertainty_cal["sigma_cross_ms"]
+                        row["calibration_uncertainty_source"] = cal.get("uncertainty_source", "recent_regime")
                 hours_list.append(row)
             if hours_list:
                 models_series.append({"model_id": model.model_id, "hours": hours_list})

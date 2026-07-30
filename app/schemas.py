@@ -143,6 +143,10 @@ class ForecastHour(BaseModel):
     ws_p90_ms: float | None = None
     wd_p10_deg: float | None = None
     wd_p90_deg: float | None = None
+    calibration_n_effective: float | None = None
+    calibration_sigma_along_ms: float | None = None
+    calibration_sigma_cross_ms: float | None = None
+    calibration_uncertainty_source: str | None = None
 
 
 class ForecastModelSeries(BaseModel):

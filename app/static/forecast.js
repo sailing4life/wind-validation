@@ -556,7 +556,40 @@ function renderVerification() {
     : 'recent local residual p10–p90';
   el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Recent comparable samples:</span> ${c.n_effective}</div>
     <div class="meta-row"><span class="meta-label">Recent U/V correction:</span> ${biasKt.toFixed(1)} kt &nbsp; <span class="meta-label">Method:</span> recency + wind-regime weighted</div>
-    <div class="meta-row"><span class="meta-label">Uncertainty:</span> ${uncertainty}; correction fades with forecast lead time.</div>`;
+    <div class="meta-row"><span class="meta-label">Uncertainty:</span> ${uncertainty}; correction fades with forecast lead time.</div>
+    <div id="fcErrorProfile" class="fc-error-profile" aria-label="Historical error profile by forecast hour"></div>`;
+  renderHistoricalErrorProfile();
+}
+
+function renderHistoricalErrorProfile() {
+  const target = document.getElementById('fcErrorProfile');
+  const winner = forecastData?.models?.find(m => m.model_id === _winnerModelId);
+  const rows = winner?.hours?.filter(h => h.calibration_sigma_along_ms != null && h.calibration_sigma_cross_ms != null) || [];
+  if (!target || !rows.length || typeof Plotly === 'undefined') return;
+
+  const times = rows.map(h => h.time_utc);
+  const along = rows.map(h => +(h.calibration_sigma_along_ms * MS_TO_KT).toFixed(2));
+  const cross = rows.map(h => +(h.calibration_sigma_cross_ms * MS_TO_KT).toFixed(2));
+  const nEff = rows.map(h => h.calibration_n_effective);
+  const source = rows[0].calibration_uncertainty_source === 'historical_hour_regime'
+    ? 'Historical local-hour + regime residuals'
+    : 'Recent regime residuals';
+  const layout = {
+    height: 245,
+    margin: { l: 42, r: 40, t: 38, b: 35 },
+    title: { text: `Error profile · ${source}`, x: 0, xanchor: 'left', font: { size: 12 } },
+    paper_bgcolor: 'white', plot_bgcolor: 'white',
+    xaxis: { title: { text: 'Forecast time (UTC)', font: { size: 10 } }, tickformat: '%d %b<br>%Hz', showgrid: false },
+    yaxis: { title: { text: 'σ residual (kt)', font: { size: 10 } }, rangemode: 'tozero', gridcolor: '#e2e8f0' },
+    yaxis2: { title: { text: 'n eff.', font: { size: 10 } }, overlaying: 'y', side: 'right', rangemode: 'tozero', showgrid: false },
+    legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 10 } },
+    hovermode: 'x unified',
+  };
+  Plotly.react(target, [
+    { x: times, y: nEff, type: 'bar', name: 'Comparable cases (n eff.)', yaxis: 'y2', marker: { color: '#cbd5e1' }, hovertemplate: '%{y:.1f}<extra>n eff.</extra>' },
+    { x: times, y: along, type: 'scatter', mode: 'lines+markers', name: 'σ along-wind', line: { color: '#0369a1', width: 2 }, marker: { size: 4 }, hovertemplate: '%{y:.2f} kt<extra>σ along</extra>' },
+    { x: times, y: cross, type: 'scatter', mode: 'lines+markers', name: 'σ cross-wind', line: { color: '#b45309', width: 2 }, marker: { size: 4 }, hovertemplate: '%{y:.2f} kt<extra>σ cross</extra>' },
+  ], layout, { responsive: true, displayModeBar: false });
 }
 
 // â”€â”€ ICON-EPS ensemble load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

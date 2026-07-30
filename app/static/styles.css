@@ -911,6 +911,12 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   /* border/bg come from parent .panel */
 }
 
+.fc-error-profile {
+  min-height: 245px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .fc-table {
   width: 100%;
   border-collapse: collapse;
