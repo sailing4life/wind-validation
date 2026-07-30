@@ -29,6 +29,9 @@ from .scoring import compute_metrics, speed_dir_to_uv, uv_to_speed_dir
 logger = logging.getLogger("wind_validation")
 
 _ALADIN_CZ_ID = "aladin_cz"
+# On-demand models with no live server fetch: their runs arrive via the push
+# ingest endpoint and are only ever read back from the durable archive.
+_PUSH_ONLY_IDS = {"fuxicfd_palma"}
 
 # After a slow/failed ALADIN download, skip the source for a while so repeat
 # validations don't burn the whole fetch budget on a crawling ČHMÚ server.
@@ -400,6 +403,8 @@ class ValidationService:
         all_coords = list({(lat, lon)} | {(s.lat, s.lon) for s in stations})
 
         def _fetch_model(model):
+            if model.model_id in _PUSH_ONLY_IDS:
+                return []  # served entirely from the pushed archive below
             if model.model_id == _OPENWRF_ID:
                 return self.openwrf.fetch_model_at_coords(model, all_coords, window_start, forecast_end)
             if model.model_id == _ALADIN_CZ_ID:
@@ -731,7 +736,9 @@ class ValidationService:
             if model.status != "ACTIVE":
                 continue
             try:
-                if model.model_id == _OPENWRF_ID:
+                if model.model_id in _PUSH_ONLY_IDS:
+                    fvs = []  # filled from the pushed archive by the fallback below
+                elif model.model_id == _OPENWRF_ID:
                     fvs = self.openwrf.fetch_forecast_with_extras(model, [(lat, lon)], now, end)
                 elif model.model_id == _ALADIN_CZ_ID:
                     fvs = _fetch_aladin_cz_at_coords([(lat, lon)], now, end)

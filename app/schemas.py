@@ -11,6 +11,25 @@ class ValidatePointRequest(BaseModel):
     radius_km: float = Field(default=50.0, gt=0.0, le=150.0)
 
 
+class ForecastPushPoint(BaseModel):
+    valid_time_utc: datetime
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
+    u10: float
+    v10: float
+    gust_ms: float | None = None
+    temp_c: float | None = None
+
+
+class ForecastPushRequest(BaseModel):
+    """A run of an externally computed model (e.g. FuXi-CFD) pushed into the
+    durable archive so validate/forecast can read it back like any on-demand run."""
+    model_config = {"protected_namespaces": ()}
+    model_id: str = Field(min_length=1, max_length=64)
+    run_time_utc: datetime
+    points: list[ForecastPushPoint] = Field(min_length=1, max_length=200_000)
+
+
 class StationDTO(BaseModel):
     station_id: str
     source: str

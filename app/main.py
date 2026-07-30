@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -14,19 +15,20 @@ from pathlib import Path
 logger = logging.getLogger("wind_validation")
 
 import httpx
-from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .catalog import catalog_as_dict
 from .config import SETTINGS
+from .domain import ForecastValue
 from .forecast_broker import ForecastBroker
 from .ingestion import IngestionService
 from .location_fingerprint import LocationFingerprintService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
 from .storage import PostgresStore
-from .schemas import ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
+from .schemas import ForecastPushRequest, ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
 from .services import ValidationService, run_hourly_refresh
 
 # Only one windmap generation at a time — GRIB download + rendering is memory-heavy
@@ -154,6 +156,29 @@ def freshness() -> dict:
 def storage_health() -> dict:
     """Safe deployment check: exposes status, never the database URL or credentials."""
     return {"postgres_enabled": store.enabled}
+
+
+@app.post("/api/forecasts/push")
+async def push_forecasts(payload: ForecastPushRequest, x_ingest_token: str = Header(default="")) -> dict:
+    """Ingest an externally computed model run (e.g. the local FuXi-CFD morning
+    run) into the durable archive. validate/forecast read it back on demand."""
+    token = SETTINGS.ingest_token
+    if not token:
+        raise HTTPException(status_code=503, detail="Push ingest disabled: INGEST_TOKEN is not configured")
+    if not hmac.compare_digest(x_ingest_token, token):
+        raise HTTPException(status_code=401, detail="Invalid ingest token")
+    if not store.enabled:
+        raise HTTPException(status_code=503, detail="Forecast archive requires a configured DATABASE_URL")
+    rows = [
+        ForecastValue(
+            model_id=payload.model_id, run_time_utc=payload.run_time_utc, valid_time_utc=p.valid_time_utc,
+            lat=p.lat, lon=p.lon, u10=p.u10, v10=p.v10, gust_ms=p.gust_ms, temp_c=p.temp_c,
+        )
+        for p in payload.points
+    ]
+    await asyncio.to_thread(store.save_forecasts, rows)
+    logger.info("forecast_push: %d points for %s run %s", len(rows), payload.model_id, payload.run_time_utc.isoformat())
+    return {"model_id": payload.model_id, "run_time_utc": payload.run_time_utc, "stored": len(rows)}
 
 @app.get("/api/locations")
 def list_locations() -> dict:

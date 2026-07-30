@@ -62,6 +62,8 @@ class Settings:
     live_observations_enabled: bool = _env_bool("LIVE_OBSERVATIONS_ENABLED", True)
     socib_buoy_enabled: bool = _env_bool("SOCIB_BUOY_ENABLED", True)
     live_forecasts_enabled: bool = _env_bool("LIVE_FORECASTS_ENABLED", True)
+    # Shared secret for the forecast-push ingest endpoint. Unset → endpoint disabled.
+    ingest_token: str | None = os.getenv("INGEST_TOKEN")
     request_timeout_seconds: float = _env_float("REQUEST_TIMEOUT_SECONDS", 8.0)
     socib_request_timeout_seconds: float = _env_float("SOCIB_REQUEST_TIMEOUT_SECONDS", 30.0)
     fingerprint_cache_ttl_seconds: int = _env_int("FINGERPRINT_CACHE_TTL_SECONDS", 21600)

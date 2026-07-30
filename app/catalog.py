@@ -78,6 +78,17 @@ def default_model_catalog() -> list[ModelDefinition]:
             priority_by_country={"CZ": 1, "SK": 2, "AT": 3, "PL": 4, "SI": 5, "HR": 5, "HU": 5, "ES": 5, "DE": 10, "IT": 10, "OTHER": 50},
             on_demand=True,   # windmap-only — fetched from ČHMÚ GRIB on request
         ),
+        ModelDefinition(
+            model_id="fuxicfd_palma",
+            provider="FuXi-CFD",
+            category="microscale",
+            # ~150 m terrain-aware downscaling over Bahía de Palma. No live
+            # server fetch: a local morning run pushes point forecasts into the
+            # archive, which validate/forecast read back like any on-demand run.
+            coverage_bbox={"min_lat": 39.30, "max_lat": 39.75, "min_lon": 2.50, "max_lon": 2.95},
+            priority_by_country={"ES": 1, "OTHER": 60},
+            on_demand=True,
+        ),
     ]
 
 
