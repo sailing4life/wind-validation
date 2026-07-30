@@ -120,6 +120,7 @@ class ForecastRequest(BaseModel):
     lon: float = Field(ge=-180.0, le=180.0)
     winner_model_id: str
     bias_ws_ms: float = 0.0
+    query_id: str | None = None
     hours_ahead: int = Field(default=48, ge=6, le=168)
 
 
@@ -135,6 +136,12 @@ class ForecastHour(BaseModel):
     shortwave_wm2: float | None = None
     cape_jkg: float | None = None
     boundary_layer_height_m: float | None = None
+    corrected_ws_ms: float | None = None
+    corrected_wd_deg: float | None = None
+    ws_p10_ms: float | None = None
+    ws_p90_ms: float | None = None
+    wd_p10_deg: float | None = None
+    wd_p90_deg: float | None = None
 
 
 class ForecastModelSeries(BaseModel):
@@ -173,3 +180,4 @@ class ForecastResponse(BaseModel):
     hours_ahead: int
     models: list[ForecastModelSeries]
     location_fingerprint: LocationFingerprintDTO | None = None
+    calibration: dict = Field(default_factory=dict)

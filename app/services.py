@@ -13,6 +13,7 @@ from uuid import uuid4
 import httpx
 
 from .cache import TTLCache
+from .calibration import CalibrationSample, calibrate
 from .catalog import select_candidate_models
 from .config import Settings
 from .domain import ForecastValue, Observation, ScoreRow
@@ -22,6 +23,7 @@ from .geo import haversine_km
 from .location_fingerprint import LocationFingerprintService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
+from .storage import PostgresStore
 from .scoring import compute_metrics, speed_dir_to_uv, uv_to_speed_dir
 
 logger = logging.getLogger("wind_validation")
@@ -151,6 +153,7 @@ class ValidationService:
         forecast_adapter: OpenMeteoForecastAdapter,
         settings: Settings,
         fingerprint_service: LocationFingerprintService | None = None,
+        store: PostgresStore | None = None,
     ) -> None:
         self.repo = repo
         self.broker = broker
@@ -159,6 +162,8 @@ class ValidationService:
         self.settings = settings
         self.fingerprint_service = fingerprint_service
         self.cache: TTLCache[dict] = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
+        self._calibration_samples: dict[str, dict[str, list[CalibrationSample]]] = {}
+        self.store = store
 
     def _cache_key(
         self,
@@ -244,6 +249,8 @@ class ValidationService:
         stations = self.broker.list_stations(country, lat, lon, radius_km)
         station_ids = {s.station_id for s in stations}
         observations, provenance = self.broker.get_observations(country, station_ids, window_start, window_end)
+        if self.store:
+            self.store.save_observations(observations)
 
         candidates, excluded_reasons = select_candidate_models(
             lat=lat,
@@ -304,6 +311,7 @@ class ValidationService:
             return min(cands, key=lambda r: haversine_km(slat, slon, r.lat, r.lon))
 
         rows: list[ScoreRow] = []
+        calibration_samples: dict[str, list[CalibrationSample]] = defaultdict(list)
         for model in candidates:
             obs_uv: list[tuple[float, float]] = []
             fc_uv: list[tuple[float, float]] = []
@@ -321,6 +329,7 @@ class ValidationService:
 
                 obs_uv.append(speed_dir_to_uv(obs.ws_ms, obs.wd_deg))
                 fc_uv.append((nearest.u10, nearest.v10))
+                calibration_samples[model.model_id].append(CalibrationSample(obs.time_utc, nearest.u10, nearest.v10, *speed_dir_to_uv(obs.ws_ms, obs.wd_deg)))
 
             if len(obs_uv) < self.settings.min_samples:
                 rows.append(
@@ -506,6 +515,7 @@ class ValidationService:
             "source_provenance": provenance,
             "computed_at_utc": datetime.now(timezone.utc),
         }
+        self._calibration_samples[query_id] = dict(calibration_samples)
         logger.info("validation_complete", extra={"query_id": query_id, "winner": winner, "stations": len(stations)})
         self.cache.set(cache_key, result)
         return result
@@ -516,6 +526,7 @@ class ValidationService:
         lon: float,
         winner_model_id: str,
         bias_ws_ms: float,
+        query_id: str | None,
         hours_ahead: int,
     ) -> dict:
         from .scoring import uv_to_speed_dir
@@ -525,6 +536,8 @@ class ValidationService:
         catalog = self.repo.models
 
         models_series = []
+        samples = self._calibration_samples.get(query_id or "", {}).get(winner_model_id, [])
+        calibration_summary: dict = {"status": "insufficient_history", "n_effective": 0.0}
         for model in catalog:
             if model.status != "ACTIVE":
                 continue
@@ -546,7 +559,7 @@ class ValidationService:
             hours_list = []
             for fv in sorted(fvs, key=lambda x: x.valid_time_utc):
                 ws, wd = uv_to_speed_dir(fv.u10, fv.v10)
-                hours_list.append({
+                row = {
                     "time_utc": fv.valid_time_utc,
                     "ws_ms": ws,
                     "gust_ms": fv.gust_ms,
@@ -558,7 +571,16 @@ class ValidationService:
                     "shortwave_wm2": fv.shortwave_wm2,
                     "cape_jkg": fv.cape_jkg,
                     "boundary_layer_height_m": fv.boundary_layer_height_m,
-                })
+                }
+                if model.model_id == winner_model_id and samples:
+                    lead_h = (fv.valid_time_utc - now).total_seconds() / 3600.0
+                    cal = calibrate(samples, fv.u10, fv.v10, now, lead_h)
+                    calibration_summary = cal
+                    if cal["status"] != "insufficient_history":
+                        row.update({key: cal[key] for key in ("ws_ms", "wd_deg", "ws_p10_ms", "ws_p90_ms", "wd_p10_deg", "wd_p90_deg") if key in cal})
+                        row["corrected_ws_ms"] = cal["ws_ms"]
+                        row["corrected_wd_deg"] = cal["wd_deg"]
+                hours_list.append(row)
             if hours_list:
                 models_series.append({"model_id": model.model_id, "hours": hours_list})
 
@@ -568,6 +590,7 @@ class ValidationService:
             "hours_ahead": hours_ahead,
             "models": models_series,
             "location_fingerprint": self.fingerprint_service.fingerprint(lat, lon) if self.fingerprint_service else None,
+            "calibration": calibration_summary,
         }
 
 

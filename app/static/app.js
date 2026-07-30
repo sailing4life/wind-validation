@@ -601,6 +601,7 @@ async function runValidation() {
       data.lon,
       data.winner_model_id ?? '',
       winnerRow?.bias_ws ?? 0,
+      data.query_id ?? '',
     );
   }
   if (typeof loadForecast === 'function') loadForecast();
@@ -861,7 +862,7 @@ async function runExpeditionValidation() {
   // (same behaviour as point validation; uses the sidebar lat/lon inputs)
   const winnerRow = (data.models || []).find(m => m.model_id === data.winner_model_id);
   if (typeof setForecastParams === 'function') {
-    setForecastParams(null, null, data.winner_model_id ?? '', winnerRow?.bias_ws ?? 0);
+    setForecastParams(null, null, data.winner_model_id ?? '', winnerRow?.bias_ws ?? 0, data.query_id ?? '');
   }
   if (typeof loadForecast === 'function') loadForecast();
 }

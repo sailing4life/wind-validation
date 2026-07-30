@@ -25,6 +25,7 @@ from .ingestion import IngestionService
 from .location_fingerprint import LocationFingerprintService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
+from .storage import PostgresStore
 from .schemas import ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
 from .services import ValidationService, run_hourly_refresh
 
@@ -50,11 +51,12 @@ BRIEFINGS_DIR = Path(os.getenv("BRIEFINGS_DIR", str(BASE_DIR.parent / "briefings
 BRIEFINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 repo = InMemoryRepository()
+store = PostgresStore()
 forecast_broker = ForecastBroker(repo, SETTINGS)
-ingestion_service = IngestionService(repo, forecast_broker)
 broker = ObservationBroker(repo, SETTINGS)
+ingestion_service = IngestionService(repo, forecast_broker, broker, store)
 fingerprint_service = LocationFingerprintService(SETTINGS)
-validation_service = ValidationService(repo, broker, forecast_broker.openmeteo, SETTINGS, fingerprint_service=fingerprint_service)
+validation_service = ValidationService(repo, broker, forecast_broker.openmeteo, SETTINGS, fingerprint_service=fingerprint_service, store=store)
 
 _stop_event = asyncio.Event()
 _refresh_task: asyncio.Task | None = None
@@ -63,6 +65,7 @@ _refresh_task: asyncio.Task | None = None
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global _refresh_task
+    await asyncio.to_thread(store.initialize)
     await asyncio.to_thread(ingestion_service.refresh)
     _refresh_task = asyncio.create_task(
         run_hourly_refresh(ingestion_service, SETTINGS.refresh_interval_seconds, _stop_event)
@@ -104,6 +107,7 @@ def forecast(payload: ForecastRequest) -> dict:
         lon=payload.lon,
         winner_model_id=payload.winner_model_id,
         bias_ws_ms=payload.bias_ws_ms,
+        query_id=payload.query_id,
         hours_ahead=payload.hours_ahead,
     )
 
@@ -144,6 +148,12 @@ def freshness() -> dict:
         "sources": repo.freshness.sources,
         "models": repo.freshness.models,
     }
+
+
+@app.get("/v1/health/storage")
+def storage_health() -> dict:
+    """Safe deployment check: exposes status, never the database URL or credentials."""
+    return {"postgres_enabled": store.enabled}
 
 
 def _windmap_model_params(model_id: str) -> tuple[str, str]:
@@ -757,6 +767,7 @@ async def save_briefing(payload: dict = Body(...)) -> dict:
         n += 1
 
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    await asyncio.to_thread(store.save_briefing, path.stem, payload, datetime.fromisoformat(saved_at.replace("Z", "+00:00")))
     return {"id": path.stem, "saved_at": saved_at}
 
 

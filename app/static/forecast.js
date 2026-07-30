@@ -6,6 +6,7 @@ const MS_TO_KT = 1.94384;
 let forecastData = null;
 let _winnerModelId = '';
 let _biasWsMs = 0;
+let _validationQueryId = '';
 let _selectedModels = new Set();
 let _correctedOnly = false;
 let _relayoutHandler = null;   // for range-slider sync
@@ -22,9 +23,10 @@ function modelColor(modelId) {
 }
 
 // â”€â”€ Called by app.js after successful validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function setForecastParams(lat, lon, winnerModelId, biasWsMs) {
+function setForecastParams(lat, lon, winnerModelId, biasWsMs, queryId = '') {
   _winnerModelId = winnerModelId || '';
   _biasWsMs = biasWsMs || 0;
+  _validationQueryId = queryId || '';
   forecastData = null;
   _ensembleData = null;
   _gradientData = null;
@@ -52,7 +54,7 @@ document.querySelectorAll('.tab').forEach(btn => {
 });
 
 document.getElementById('fcRunBtn').addEventListener('click', loadForecast);
-document.getElementById('fcCorrectedOnly').addEventListener('change', e => {
+document.getElementById('fcCorrectedOnly')?.addEventListener('change', e => {
   _correctedOnly = e.target.checked;
   if (forecastData) renderAllCharts();
 });
@@ -80,6 +82,7 @@ async function loadForecast() {
         lon: pos.lon,
         winner_model_id: _winnerModelId,
         bias_ws_ms: _biasWsMs,
+        query_id: _validationQueryId,
         hours_ahead: hoursAhead,
       }),
     });
@@ -90,9 +93,9 @@ async function loadForecast() {
     forecastData = await resp.json();
     _selectedModels = new Set(forecastData.models.map(m => m.model_id));
 
-    const biasKt = (_biasWsMs * MS_TO_KT).toFixed(1);
+    const cal = forecastData.calibration || {};
     status.textContent = _winnerModelId
-      ? `Winner: ${_winnerModelId}   -   bias ${biasKt} kt`
+      ? `Best: ${_winnerModelId} · ${cal.status === 'insufficient_history' ? 'insufficient history' : `${cal.status} · n=${cal.n_effective}`}`
       : 'Run Validation first for bias correction';
 
     renderModelToggles();
@@ -210,25 +213,28 @@ function renderBestForecastChart() {
   const panel = document.getElementById('fcBestPanel');
   const chartDiv = document.getElementById('fcBestChart');
   if (!panel || !chartDiv) return;
-  const { winner_model_id, bias_ws_ms, models } = forecastData;
+  const { winner_model_id, models } = forecastData;
   const winner = models.find(m => m.model_id === winner_model_id) || models[0];
   if (!winner) { panel.style.display = 'none'; return; }
 
   panel.style.display = '';
-  document.getElementById('fcBestTitle').textContent =
-    winner_model_id + (bias_ws_ms ? `  -  bias ${(bias_ws_ms * MS_TO_KT).toFixed(1)} kt` : '');
+  document.getElementById('fcBestTitle').textContent = winner_model_id + ' · calibrated p10–p90';
 
   const times = winner.hours.map(h => h.time_utc);
-  const ws_kt = winner.hours.map(h => h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null);
-  const biasKt = bias_ws_ms * MS_TO_KT;
-  const corr_kt = ws_kt.map(v => v != null ? +(v - biasKt).toFixed(1) : null);
+  const ws_kt = winner.hours.map(h => h.corrected_ws_ms != null ? +(h.corrected_ws_ms * MS_TO_KT).toFixed(1) : (h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null));
+  const p10_kt = winner.hours.map(h => h.ws_p10_ms != null ? +(h.ws_p10_ms * MS_TO_KT).toFixed(1) : null);
+  const p90_kt = winner.hours.map(h => h.ws_p90_ms != null ? +(h.ws_p90_ms * MS_TO_KT).toFixed(1) : null);
   const gust_kt = winner.hours.map(h => h.gust_ms != null ? +(h.gust_ms * MS_TO_KT).toFixed(1) : null);
-  const wd = winner.hours.map(h => h.wd_deg);
+  const wd = winner.hours.map(h => h.corrected_wd_deg ?? h.wd_deg);
 
-  const mainWs = _correctedOnly ? corr_kt : ws_kt;
-  const mainLabel = _correctedOnly ? 'Corrected TWS (kt)' : 'TWS (kt)';
+  const mainWs = ws_kt;
+  const mainLabel = 'TWS p50 (kt)';
 
   const traces = [];
+  if (p10_kt.some(v => v != null) && p90_kt.some(v => v != null)) {
+    traces.push({ x: times, y: p10_kt, type: 'scatter', mode: 'lines', line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
+    traces.push({ x: times, y: p90_kt, name: 'TWS p10–p90', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(37,99,235,.16)', line: { width: 0 } });
+  }
 
   // TWS (or corrected)  -  blue solid line+markers+labels
   traces.push({
@@ -243,20 +249,6 @@ function renderBestForecastChart() {
     yaxis: 'y1',
   });
 
-  // Corrected overlay when not in corrected-only mode
-  if (!_correctedOnly && bias_ws_ms !== 0) {
-    traces.push({
-      x: times, y: corr_kt,
-      name: 'Corrected TWS (kt)',
-      type: 'scatter', mode: 'lines+markers+text',
-      line: { color: '#f59e0b', width: 2.5 },
-      marker: { color: '#f59e0b', size: 6 },
-      text: every3hText(times, corr_kt),
-      textposition: 'top center',
-      textfont: { size: 10, color: '#92400e' },
-      yaxis: 'y1',
-    });
-  }
 
   // Gust  -  light blue dashed+X+labels
   if (gust_kt.some(v => v != null)) {
@@ -541,6 +533,23 @@ function renderAllCharts() {
     row.style.display = (tempVis || precipVis) ? '' : 'none';
   }
   renderForecastTable();
+  renderVerification();
+}
+
+function renderVerification() {
+  const panel = document.getElementById('fcVerificationPanel');
+  const el = document.getElementById('fcVerification');
+  if (!panel || !el) return;
+  const c = forecastData?.calibration || {};
+  panel.style.display = '';
+  if (c.status === 'insufficient_history') {
+    el.innerHTML = `<p class="fc-status">Insufficient local history (n=${c.n_effective ?? 0}). Best Forecast remains raw; ICON-EPS p10–p90 is shown separately.</p>`;
+    return;
+  }
+  const biasKt = Math.hypot(c.bias_u || 0, c.bias_v || 0) * MS_TO_KT;
+  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Comparable samples:</span> ${c.n_effective}</div>
+    <div class="meta-row"><span class="meta-label">Recent U/V correction:</span> ${biasKt.toFixed(1)} kt &nbsp; <span class="meta-label">Method:</span> recency + wind-regime weighted</div>
+    <div class="meta-row"><span class="meta-label">Uncertainty:</span> locally estimated p10–p90; correction fades with forecast lead time.</div>`;
 }
 
 // â”€â”€ ICON-EPS ensemble load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -779,11 +788,10 @@ function renderForecastTable() {
   const wrap = document.getElementById('fcTableWrap');
   if (!wrap) return;
 
-  const { winner_model_id, bias_ws_ms, models } = forecastData;
+  const { winner_model_id, models } = forecastData;
   if (!models || models.length === 0) { wrap.style.display = 'none'; return; }
 
   const winner = models.find(m => m.model_id === winner_model_id) || models[0];
-  const biasKt = bias_ws_ms * MS_TO_KT;
   wrap.innerHTML = '';
   wrap.style.display = '';
 
@@ -796,11 +804,8 @@ function renderForecastTable() {
   scrollWrap.className = 'fc-table-scroll';
 
   const hasPrecip = winner.hours.some(h => h.precip_mm != null);
-  const hasCorr = bias_ws_ms !== 0;
-
-  let colHtml = '<th>Time UTC</th><th>TWS (kt)</th>';
-  if (hasCorr) colHtml += '<th>Corr (kt)</th>';
-  colHtml += '<th>Gust (kt)</th><th>TWD ( deg)</th><th>Temp ( degC)</th>';
+  let colHtml = '<th>Time UTC</th><th>TWS p10–p90 (kt)</th>';
+  colHtml += '<th>Gust max (kt)</th><th>TWD p10–p90 ( deg)</th><th>Temp ( degC)</th>';
   if (hasPrecip) colHtml += '<th>Rain</th>';
   colHtml += '<th class="note-col">Notes</th>';
 
@@ -812,10 +817,10 @@ function renderForecastTable() {
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   for (const hour of winner.hours) {
-    const ws_kt = hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT).toFixed(1) : null;
-    const corr_kt = ws_kt != null ? (parseFloat(ws_kt) - biasKt).toFixed(1) : null;
+    const ws_kt = hour.corrected_ws_ms != null ? (hour.corrected_ws_ms * MS_TO_KT).toFixed(1) : (hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT).toFixed(1) : null);
+    const wsRange = hour.ws_p10_ms != null && hour.ws_p90_ms != null ? `${(hour.ws_p10_ms * MS_TO_KT).toFixed(1)}–${(hour.ws_p90_ms * MS_TO_KT).toFixed(1)}` : (ws_kt ?? ' - ');
     const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
-    const wd = hour.wd_deg != null ? Math.round(hour.wd_deg) + ' deg' : ' - ';
+    const wd = hour.wd_p10_deg != null && hour.wd_p90_deg != null ? `${Math.round(hour.wd_p10_deg)}–${Math.round(hour.wd_p90_deg)}°` : (hour.corrected_wd_deg ?? hour.wd_deg) != null ? Math.round(hour.corrected_wd_deg ?? hour.wd_deg) + '°' : ' - ';
     const temp = hour.temp_c != null ? hour.temp_c.toFixed(1) : ' - ';
     const precip = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';
 
@@ -823,12 +828,10 @@ function renderForecastTable() {
     const label = `${String(t.getUTCDate()).padStart(2,'0')} ${MONTHS[t.getUTCMonth()]} ${String(t.getUTCHours()).padStart(2,'0')}z`;
     const wsColor = ws_kt != null ? windSpeedColor(+ws_kt) : '';
     const gustColor = gust_kt != null ? windSpeedColor(+gust_kt) : '';
-    const corrColor = corr_kt != null ? windSpeedColor(+corr_kt) : '';
 
     const tr = document.createElement('tr');
     let cells = `<td class="fc-time">${label}</td>`;
-    cells += `<td class="fc-num" style="background:${wsColor}">${ws_kt ?? ' - '}</td>`;
-    if (hasCorr) cells += `<td class="fc-num" style="background:${corrColor}">${corr_kt ?? ' - '}</td>`;
+    cells += `<td class="fc-num" style="background:${wsColor}">${wsRange}</td>`;
     cells += `<td class="fc-num" style="background:${gustColor}">${gust_kt ?? ' - '}</td>`;
     cells += `<td class="fc-num">${wd}</td>`;
     cells += `<td class="fc-num">${temp}</td>`;
@@ -842,4 +845,3 @@ function renderForecastTable() {
   scrollWrap.appendChild(table);
   wrap.appendChild(scrollWrap);
 }
-
