@@ -139,6 +139,7 @@ class ForecastHour(BaseModel):
     boundary_layer_height_m: float | None = None
     corrected_ws_ms: float | None = None
     corrected_wd_deg: float | None = None
+    corrected_gust_ms: float | None = None
     ws_p10_ms: float | None = None
     ws_p90_ms: float | None = None
     wd_p10_deg: float | None = None

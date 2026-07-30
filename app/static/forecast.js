@@ -242,7 +242,7 @@ function renderBestForecastChart() {
   const ws_kt = winner.hours.map(h => h.corrected_ws_ms != null ? +(h.corrected_ws_ms * MS_TO_KT).toFixed(1) : (h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null));
   const p10_kt = winner.hours.map(h => h.ws_p10_ms != null ? +(h.ws_p10_ms * MS_TO_KT).toFixed(1) : null);
   const p90_kt = winner.hours.map(h => h.ws_p90_ms != null ? +(h.ws_p90_ms * MS_TO_KT).toFixed(1) : null);
-  const gust_kt = winner.hours.map(h => h.gust_ms != null ? +(h.gust_ms * MS_TO_KT).toFixed(1) : null);
+  const gust_kt = winner.hours.map(h => (h.corrected_gust_ms ?? h.gust_ms) != null ? +((h.corrected_gust_ms ?? h.gust_ms) * MS_TO_KT).toFixed(1) : null);
   const wd = winner.hours.map(h => h.corrected_wd_deg ?? h.wd_deg);
 
   const mainWs = ws_kt;
@@ -872,7 +872,7 @@ function renderForecastTable() {
   for (const hour of winner.hours) {
     const ws_kt = hour.corrected_ws_ms != null ? (hour.corrected_ws_ms * MS_TO_KT).toFixed(1) : (hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT).toFixed(1) : null);
     const wsRange = hour.ws_p10_ms != null && hour.ws_p90_ms != null ? `${(hour.ws_p10_ms * MS_TO_KT).toFixed(1)}–${(hour.ws_p90_ms * MS_TO_KT).toFixed(1)}` : (ws_kt ?? ' - ');
-    const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
+    const gust_kt = (hour.corrected_gust_ms ?? hour.gust_ms) != null ? ((hour.corrected_gust_ms ?? hour.gust_ms) * MS_TO_KT).toFixed(1) : null;
     const wd = hour.wd_p10_deg != null && hour.wd_p90_deg != null ? `${Math.round(hour.wd_p10_deg)}–${Math.round(hour.wd_p90_deg)}°` : (hour.corrected_wd_deg ?? hour.wd_deg) != null ? Math.round(hour.corrected_wd_deg ?? hour.wd_deg) + '°' : ' - ';
     const temp = hour.temp_c != null ? hour.temp_c.toFixed(1) : ' - ';
     const precip = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';

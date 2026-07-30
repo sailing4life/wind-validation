@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from app.calibration import CalibrationSample, blend_hour, calibrate
+from app.calibration import CalibrationSample, blend_hour, calibrate, scale_gust
 
 
 def test_calibration_corrects_uv_and_returns_an_uncertainty_band():
@@ -72,3 +72,13 @@ def test_blend_hour_averages_centres_and_keeps_the_band_honest():
     assert abs(out["sigma_along_ms"] - 1.0) < 1e-9
     assert abs((out["ws_p90_ms"] - out["ws_ms"]) - 1.2816) < 1e-6
     assert blend_hour([]) is None
+
+
+def test_gust_scales_with_the_correction_and_covers_the_band():
+    # Correction lifts 5 → 8 m/s: the 1.4 gust factor rides along (7 → 11.2).
+    assert abs(scale_gust(7.0, 5.0, 8.0, ws_p90_ms=10.0) - 11.2) < 1e-9
+    # No bias but a wide band: the gust envelope must still cover p90.
+    assert scale_gust(7.0, 5.0, 5.0, ws_p90_ms=9.0) == 9.0
+    # Near-calm: the ratio is meaningless, shift additively instead.
+    assert scale_gust(3.0, 0.5, 2.5) == 5.0
+    assert scale_gust(None, 5.0, 8.0) is None

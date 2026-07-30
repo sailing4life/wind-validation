@@ -102,6 +102,27 @@ def calibrate(
     }
 
 
+def scale_gust(
+    gust_ms: float | None,
+    raw_ws_ms: float,
+    corrected_ws_ms: float,
+    ws_p90_ms: float | None = None,
+) -> float | None:
+    """Keep the model's gust factor over the calibrated wind, and never report
+    a gust below the p90 mean wind: if the mean reaches p90, gusts exceed it."""
+    if gust_ms is None:
+        return None
+    if raw_ws_ms > 1.0:
+        scaled = gust_ms * min(2.0, max(0.5, corrected_ws_ms / raw_ws_ms))
+    else:
+        # The gust factor is meaningless in near-calm; shift additively instead.
+        scaled = gust_ms + (corrected_ws_ms - raw_ws_ms)
+    scaled = max(scaled, corrected_ws_ms)
+    if ws_p90_ms is not None:
+        scaled = max(scaled, ws_p90_ms)
+    return scaled
+
+
 def blend_hour(members: list[dict]) -> dict | None:
     """Combine one forecast hour across models into a consensus.
 

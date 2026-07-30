@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx
 
 from .cache import TTLCache
-from .calibration import CalibrationSample, blend_hour, calibrate, circular_delta
+from .calibration import CalibrationSample, blend_hour, calibrate, circular_delta, scale_gust
 from .catalog import select_candidate_models
 from .config import Settings
 from .domain import ForecastValue, Observation, ScoreRow
@@ -787,6 +787,7 @@ class ValidationService:
                         # remain comparable in the UI.
                         row["corrected_ws_ms"] = cal["ws_ms"]
                         row["corrected_wd_deg"] = cal["wd_deg"]
+                        row["corrected_gust_ms"] = scale_gust(fv.gust_ms, ws, cal["ws_ms"], cal.get("ws_p90_ms"))
                         for key in ("ws_p10_ms", "ws_p90_ms", "wd_p10_deg", "wd_p90_deg"):
                             if key in cal:
                                 row[key] = cal[key]
@@ -889,6 +890,9 @@ class ValidationService:
                     entries.append({"weight": w, "u": fv.u10, "v": fv.v10})
                 for key in extras_keys:
                     val = getattr(fv, key)
+                    if key == "gust_ms" and val is not None and cal["status"] != "insufficient_history":
+                        # Keep each member's gust factor over its corrected wind.
+                        val = scale_gust(val, uv_to_speed_dir(fv.u10, fv.v10)[0], cal["ws_ms"])
                     if val is not None:
                         extras[key].append((w, val))
             combined = blend_hour(entries)
@@ -909,6 +913,10 @@ class ValidationService:
                 brow["calibration_sigma_along_ms"] = combined["sigma_along_ms"]
                 brow["calibration_sigma_cross_ms"] = combined["sigma_cross_ms"]
                 brow["calibration_uncertainty_source"] = "blend"
+                if brow.get("gust_ms") is not None:
+                    # The gust envelope must cover the band: in the p90
+                    # scenario the mean wind alone already reaches p90.
+                    brow["gust_ms"] = max(brow["gust_ms"], brow["ws_p90_ms"])
             blend_hours_list.append(brow)
         if not blend_hours_list:
             return None, summary
