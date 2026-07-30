@@ -26,6 +26,24 @@ const LIGHT_YAXIS = (title) => ({ title, gridcolor: '#e2e8f0', tickfont: { color
 // â”€â”€ Model color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FC_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d'];
 
+// ── Best-series selection: blended consensus when available, else winner ─────
+function bestSeries() {
+  if (!forecastData) return null;
+  if (forecastData.blend?.hours?.length) return forecastData.blend;
+  const models = forecastData.models || [];
+  return models.find(m => m.model_id === _winnerModelId) || models[0] || null;
+}
+
+function bestSeriesLabel() {
+  const weights = forecastData?.calibration?.weights || {};
+  if (forecastData?.blend?.hours?.length && Object.keys(weights).length > 1) {
+    const parts = Object.entries(weights).sort((a, b) => b[1] - a[1])
+      .map(([id, w]) => `${id} ${(w * 100).toFixed(0)}%`);
+    return `Blend: ${parts.join(' + ')}`;
+  }
+  return _winnerModelId || 'Best model';
+}
+
 function modelColor(modelId) {
   if (!forecastData) return '#94a3b8';
   const idx = forecastData.models.findIndex(m => m.model_id === modelId);
@@ -104,11 +122,8 @@ async function loadForecast() {
     _selectedModels = new Set(forecastData.models.map(m => m.model_id));
 
     const cal = forecastData.calibration || {};
-    const uncertaintyLabel = cal.uncertainty_source === 'historical_hour_regime'
-      ? `hour/regime n=${cal.historical_n_effective}`
-      : `n=${cal.n_effective}`;
     status.textContent = _winnerModelId
-      ? `Best: ${_winnerModelId} · ${cal.status === 'insufficient_history' ? 'insufficient history' : `${cal.status} · ${uncertaintyLabel}`}`
+      ? `Best: ${bestSeriesLabel()} · ${cal.status === 'insufficient_history' ? 'insufficient history' : `${cal.status} · n=${cal.n_effective}`}`
       : 'Run Validation first for bias correction';
 
     renderModelToggles();
@@ -217,12 +232,11 @@ function renderBestForecastChart() {
   const panel = document.getElementById('fcBestPanel');
   const chartDiv = document.getElementById('fcBestChart');
   if (!panel || !chartDiv) return;
-  const { winner_model_id, models } = forecastData;
-  const winner = models.find(m => m.model_id === winner_model_id) || models[0];
+  const winner = bestSeries();
   if (!winner) { panel.style.display = 'none'; return; }
 
   panel.style.display = '';
-  document.getElementById('fcBestTitle').textContent = winner_model_id + ' · calibrated p10–p90';
+  document.getElementById('fcBestTitle').textContent = bestSeriesLabel() + ' · calibrated p10–p90';
 
   const times = winner.hours.map(h => h.time_utc);
   const ws_kt = winner.hours.map(h => h.corrected_ws_ms != null ? +(h.corrected_ws_ms * MS_TO_KT).toFixed(1) : (h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null));
@@ -550,20 +564,19 @@ function renderVerification() {
     el.innerHTML = `<p class="fc-status">Insufficient local history (n=${c.n_effective ?? 0}). Best Forecast remains raw; ICON-EPS p10–p90 is shown separately.</p>`;
     return;
   }
-  const biasKt = Math.hypot(c.bias_u || 0, c.bias_v || 0) * MS_TO_KT;
-  const uncertainty = c.uncertainty_source === 'historical_hour_regime'
-    ? `historical local-hour + regime p10–p90 (n=${c.historical_n_effective})`
-    : 'recent local residual p10–p90';
-  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Recent comparable samples:</span> ${c.n_effective}</div>
-    <div class="meta-row"><span class="meta-label">Recent U/V correction:</span> ${biasKt.toFixed(1)} kt &nbsp; <span class="meta-label">Method:</span> recency + wind-regime weighted</div>
-    <div class="meta-row"><span class="meta-label">Uncertainty:</span> ${uncertainty}; correction fades with forecast lead time.</div>
+  const weights = c.weights || {};
+  const weightsLabel = Object.entries(weights).sort((a, b) => b[1] - a[1])
+    .map(([id, w]) => `${id} ${(w * 100).toFixed(0)}%`).join(' + ') || '—';
+  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Band evidence (n eff.):</span> ${c.n_effective}</div>
+    <div class="meta-row"><span class="meta-label">Method:</span> inverse-MSE blend of calibrated models &nbsp; <span class="meta-label">Weights:</span> ${weightsLabel}</div>
+    <div class="meta-row"><span class="meta-label">Uncertainty:</span> historical local-hour, regime and lead-matched residuals; recent bias correction fades with lead time.</div>
     <div id="fcErrorProfile" class="fc-error-profile" aria-label="Historical error profile by forecast hour"></div>`;
   renderHistoricalErrorProfile();
 }
 
 function renderHistoricalErrorProfile() {
   const target = document.getElementById('fcErrorProfile');
-  const winner = forecastData?.models?.find(m => m.model_id === _winnerModelId);
+  const winner = bestSeries();
   const rows = winner?.hours?.filter(h => h.calibration_sigma_along_ms != null && h.calibration_sigma_cross_ms != null) || [];
   if (!target || !rows.length || typeof Plotly === 'undefined') return;
 
@@ -571,9 +584,11 @@ function renderHistoricalErrorProfile() {
   const along = rows.map(h => +(h.calibration_sigma_along_ms * MS_TO_KT).toFixed(2));
   const cross = rows.map(h => +(h.calibration_sigma_cross_ms * MS_TO_KT).toFixed(2));
   const nEff = rows.map(h => h.calibration_n_effective);
-  const source = rows[0].calibration_uncertainty_source === 'historical_hour_regime'
-    ? 'Historical local-hour + regime residuals'
-    : 'Recent regime residuals';
+  const sourceLabels = {
+    blend: 'Blended historical residuals',
+    historical_hour_regime: 'Historical local-hour + regime residuals',
+  };
+  const source = sourceLabels[rows[0].calibration_uncertainty_source] || 'Recent regime residuals';
   const layout = {
     height: 245,
     margin: { l: 42, r: 40, t: 38, b: 35 },
@@ -828,16 +843,14 @@ function renderForecastTable() {
   const wrap = document.getElementById('fcTableWrap');
   if (!wrap) return;
 
-  const { winner_model_id, models } = forecastData;
-  if (!models || models.length === 0) { wrap.style.display = 'none'; return; }
-
-  const winner = models.find(m => m.model_id === winner_model_id) || models[0];
+  const winner = bestSeries();
+  if (!winner) { wrap.style.display = 'none'; return; }
   wrap.innerHTML = '';
   wrap.style.display = '';
 
   const heading = document.createElement('div');
   heading.className = 'fc-chart-title';
-  heading.textContent = `Hourly forecast  -  ${winner.model_id}`;
+  heading.textContent = `Hourly forecast  -  ${bestSeriesLabel()}`;
   wrap.appendChild(heading);
 
   const scrollWrap = document.createElement('div');

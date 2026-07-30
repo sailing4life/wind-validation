@@ -19,6 +19,7 @@ class CalibrationSample:
     # verification pairs.
     relevance_weight: float = 1.0
     local_solar_hour: float | None = None
+    lead_hours: float | None = None
 
 
 def circular_delta(a: float, b: float) -> float:
@@ -35,9 +36,14 @@ def calibrate(
     recency_half_life_hours: float | None = 6.0,
     target_local_solar_hour: float | None = None,
     hour_sigma_hours: float | None = None,
+    target_lead_hours: float | None = None,
 ) -> dict:
     """Regime-weighted U/V correction with optional local-hour conditioning."""
     speed, direction = uv_to_speed_dir(target_u, target_v)
+    # Errors grow with forecast lead, so prefer verification pairs whose lead
+    # matches the target hour. The tolerance widens with lead: at +60h a +40h
+    # pair is fine evidence, at +6h it is not.
+    lead_sigma = None if target_lead_hours is None else 12.0 + 0.5 * max(0.0, target_lead_hours)
     weighted: list[tuple[float, float, float]] = []
     for row in samples:
         ms, md = uv_to_speed_dir(row.model_u, row.model_v)
@@ -51,7 +57,10 @@ def calibrate(
         if target_local_solar_hour is not None and row.local_solar_hour is not None and hour_sigma_hours:
             hour_delta = abs((target_local_solar_hour - row.local_solar_hour + 12.0) % 24.0 - 12.0)
             w_hour = math.exp(-0.5 * (hour_delta / hour_sigma_hours) ** 2)
-        w = row.relevance_weight * w_age * w_dir * w_speed * w_hour
+        w_lead = 1.0
+        if lead_sigma is not None and row.lead_hours is not None:
+            w_lead = math.exp(-0.5 * ((target_lead_hours - row.lead_hours) / lead_sigma) ** 2)
+        w = row.relevance_weight * w_age * w_dir * w_speed * w_hour * w_lead
         if w > 0.002:
             weighted.append((w, row.obs_u - row.model_u, row.obs_v - row.model_v))
     if not weighted:
@@ -91,3 +100,36 @@ def calibrate(
         "ws_p10_ms": p10, "ws_p90_ms": p90,
         "wd_p10_deg": (cd - dir_half) % 360, "wd_p90_deg": (cd + dir_half) % 360,
     }
+
+
+def blend_hour(members: list[dict]) -> dict | None:
+    """Combine one forecast hour across models into a consensus.
+
+    Each member: {"weight", "u", "v", optional "sigma_along_ms",
+    "sigma_cross_ms", "n_effective"}. Centres are blended in U/V space, where
+    partially uncorrelated model errors cancel. Sigmas are averaged rather than
+    variance-reduced: model errors are correlated, so treating members as
+    independent evidence would make the band dishonestly narrow.
+    """
+    total = sum(m["weight"] for m in members)
+    if total <= 0:
+        return None
+    u = sum(m["weight"] * m["u"] for m in members) / total
+    v = sum(m["weight"] * m["v"] for m in members) / total
+    ws, wd = uv_to_speed_dir(u, v)
+    out = {"u": u, "v": v, "ws_ms": ws, "wd_deg": wd}
+
+    with_sigma = [m for m in members if m.get("sigma_along_ms") is not None]
+    if with_sigma:
+        sig_total = sum(m["weight"] for m in with_sigma)
+        sig_s = sum(m["weight"] * m["sigma_along_ms"] for m in with_sigma) / sig_total
+        sig_c = sum(m["weight"] * m["sigma_cross_ms"] for m in with_sigma) / sig_total
+        n_eff = sum(m["weight"] * m.get("n_effective", 0.0) for m in with_sigma) / sig_total
+        z90 = 1.2816
+        dir_half = min(90.0, math.degrees(math.atan2(z90 * sig_c, max(ws, 0.5))))
+        out.update({
+            "sigma_along_ms": sig_s, "sigma_cross_ms": sig_c, "n_effective": round(n_eff, 1),
+            "ws_p10_ms": max(0.0, ws - z90 * sig_s), "ws_p90_ms": ws + z90 * sig_s,
+            "wd_p10_deg": (wd - dir_half) % 360, "wd_p90_deg": (wd + dir_half) % 360,
+        })
+    return out

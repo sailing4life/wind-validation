@@ -184,5 +184,8 @@ class ForecastResponse(BaseModel):
     bias_ws_ms: float
     hours_ahead: int
     models: list[ForecastModelSeries]
+    # Consensus of the top validated models; kept out of `models` so model
+    # toggles and ensemble logic keep operating on real sources only.
+    blend: ForecastModelSeries | None = None
     location_fingerprint: LocationFingerprintDTO | None = None
     calibration: dict = Field(default_factory=dict)

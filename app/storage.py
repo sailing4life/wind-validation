@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -132,24 +133,62 @@ class PostgresStore:
         except Exception:
             logger.exception("Could not archive forecast-observation pairs")
 
-    def recent_forecast_observation_pairs(self, model_id: str, now: datetime, days: int = 60) -> list[dict]:
-        """Return durable verification pairs; spatial relevance is resolved at query time."""
+    @staticmethod
+    def _bbox(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
+        lat_delta = radius_km / 111.0
+        lon_delta = radius_km / (111.0 * max(0.2, math.cos(math.radians(lat))))
+        return lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta
+
+    def recent_forecast_observation_pairs(
+        self, model_id: str, now: datetime, lat: float, lon: float,
+        radius_km: float = 75.0, days: int = 60, limit: int = 20000,
+    ) -> list[dict]:
+        """Return durable verification pairs near a point; the fine-grained
+        relevance weighting is resolved at query time."""
         if not self.enabled:
             return []
+        lat_min, lat_max, lon_min, lon_max = self._bbox(lat, lon, radius_km)
         try:
             with self._connect() as conn, conn.cursor() as cur:
                 cur.execute("""
                     SELECT station_id,station_source,station_type,station_lat,station_lon,obs_time_utc,
-                           model_u,model_v,obs_u,obs_v,local_solar_hour
+                           model_u,model_v,obs_u,obs_v,local_solar_hour,lead_hours
                     FROM forecast_observation_pairs
                     WHERE model_id=%s AND obs_time_utc >= %s AND obs_time_utc <= %s
+                      AND station_lat BETWEEN %s AND %s AND station_lon BETWEEN %s AND %s
                     ORDER BY obs_time_utc DESC
-                """, (model_id, now - timedelta(days=days), now))
+                    LIMIT %s
+                """, (model_id, now - timedelta(days=days), now, lat_min, lat_max, lon_min, lon_max, limit))
                 keys = ("station_id", "station_source", "station_type", "station_lat", "station_lon", "obs_time_utc",
-                        "model_u", "model_v", "obs_u", "obs_v", "local_solar_hour")
+                        "model_u", "model_v", "obs_u", "obs_v", "local_solar_hour", "lead_hours")
                 return [dict(zip(keys, row)) for row in cur.fetchall()]
         except Exception:
             logger.exception("Could not load forecast-observation pairs")
+            return []
+
+    def load_forecasts(
+        self, model_ids: list[str], start: datetime, end: datetime,
+        lat: float, lon: float, radius_km: float = 75.0, limit: int = 50000,
+    ) -> list[ForecastValue]:
+        """Read archived point forecasts back, e.g. when an on-demand GRIB
+        source (ALADIN, OpenWRF) is unreachable during an event."""
+        if not self.enabled or not model_ids:
+            return []
+        lat_min, lat_max, lon_min, lon_max = self._bbox(lat, lon, radius_km)
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT model_id, run_time_utc, valid_time_utc, lat, lon, u10, v10,
+                           gust_ms, temp_c, precip_mm, cloud_cover_pct, pressure_msl_hpa
+                    FROM forecast_runs
+                    WHERE model_id = ANY(%s) AND valid_time_utc >= %s AND valid_time_utc <= %s
+                      AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+                    ORDER BY valid_time_utc
+                    LIMIT %s
+                """, (model_ids, start, end, lat_min, lat_max, lon_min, lon_max, limit))
+                return [ForecastValue(*row) for row in cur.fetchall()]
+        except Exception:
+            logger.exception("Could not load archived forecasts")
             return []
 
     def save_briefing(self, briefing_id: str, payload: dict, saved_at: datetime) -> None:
