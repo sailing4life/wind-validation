@@ -51,6 +51,11 @@ class PostgresStore:
                         briefing_id TEXT PRIMARY KEY, saved_at TIMESTAMPTZ NOT NULL,
                         title TEXT, lat DOUBLE PRECISION, lon DOUBLE PRECISION, payload JSONB NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS saved_locations (
+                        location_id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                        lat DOUBLE PRECISION NOT NULL, lon DOUBLE PRECISION NOT NULL,
+                        radius_km DOUBLE PRECISION NOT NULL DEFAULT 50, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
                 """)
             logger.info("Postgres archive schema ready")
         except Exception:
@@ -103,3 +108,17 @@ class PostgresStore:
                 """, (briefing_id, saved_at, payload.get("title"), payload.get("lat"), payload.get("lon"), json.dumps(payload)))
         except Exception:
             logger.exception("Could not archive briefing")
+
+    def list_locations(self) -> list[dict]:
+        if not self.enabled: return []
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT location_id, name, lat, lon, radius_km FROM saved_locations ORDER BY name")
+            return [{"id": r[0], "name": r[1], "lat": r[2], "lon": r[3], "radius_km": r[4]} for r in cur.fetchall()]
+
+    def save_location(self, name: str, lat: float, lon: float, radius_km: float) -> dict:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO saved_locations (name,lat,lon,radius_km) VALUES (%s,%s,%s,%s)
+                ON CONFLICT (name) DO UPDATE SET lat=EXCLUDED.lat,lon=EXCLUDED.lon,radius_km=EXCLUDED.radius_km
+                RETURNING location_id,name,lat,lon,radius_km""", (name,lat,lon,radius_km))
+            r=cur.fetchone()
+            return {"id":r[0],"name":r[1],"lat":r[2],"lon":r[3],"radius_km":r[4]}

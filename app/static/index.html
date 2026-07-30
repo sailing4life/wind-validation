@@ -29,6 +29,8 @@
       </div>
 
       <div id="pointInputs" class="sidebar-inputs">
+        <label>Saved location <select id="savedLocation"><option value="">Unsaved point</option></select></label>
+        <button id="saveLocationBtn" class="btn-secondary" type="button">Save current</button>
         <label>Latitude  <input id="lat"       type="number" step="0.0001" value="52.1" /></label>
         <label>Longitude <input id="lon"       type="number" step="0.0001" value="5.1"  /></label>
         <label>Radius (km) <input id="radius"  type="number" step="1"      value="50"   /></label>
@@ -128,6 +130,12 @@
           <div class="panel stations-panel">
             <h2>Stations in radius</h2>
             <ul id="stations"></ul>
+          </div>
+
+          <div class="panel chart-panel" id="stationEvidence" style="display:none">
+            <div class="chart-header"><h2 id="stationEvidenceTitle">Station evidence</h2></div>
+            <p class="chart-sublabel">Observed vs model wind speed (kt)</p>
+            <canvas id="stationTimePlot"></canvas>
           </div>
 
         </div>
@@ -457,7 +465,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script src="/static/app.js?v=35"></script>
-  <script src="/static/forecast.js?v=35"></script>
+  <script src="/static/forecast.js?v=36"></script>
   <script src="/static/weather.js?v=31"></script>
   <script src="/static/briefing.js?v=40"></script>
 </body>

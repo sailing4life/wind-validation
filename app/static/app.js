@@ -34,7 +34,18 @@ map.on("click", (e) => {
   lonInput.value = lng.toFixed(4);
   if (clickMarker) map.removeLayer(clickMarker);
   clickMarker = L.marker([lat, lng]).addTo(map);
+  document.getElementById('savedLocation').value = '';
 });
+
+async function loadSavedLocations() {
+  const sel = document.getElementById('savedLocation');
+  try { const r = await fetch('/api/locations'); const {locations} = await r.json();
+    locations.forEach(x => { const o=document.createElement('option'); o.value=JSON.stringify(x); o.textContent=x.name; sel.appendChild(o); });
+  } catch (_) { /* storage may not be configured yet */ }
+}
+document.getElementById('savedLocation').addEventListener('change', e => { if (!e.target.value) return; const x=JSON.parse(e.target.value); latInput.value=x.lat; lonInput.value=x.lon; radiusInput.value=x.radius_km; map.setView([x.lat,x.lon], 11); });
+document.getElementById('saveLocationBtn').addEventListener('click', async () => { const name=prompt('Location name'); if (!name) return; const r=await fetch('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,lat:+latInput.value,lon:+lonInput.value,radius_km:+radiusInput.value})}); if (!r.ok) return alert('Could not save location'); const sel=document.getElementById('savedLocation'); sel.innerHTML='<option value="">Unsaved point</option>'; await loadSavedLocations(); });
+loadSavedLocations();
 
 // ── state ────────────────────────────────────────────────────────────────────
 let latestSeries    = [];
@@ -44,6 +55,7 @@ let errorMode       = false;
 let hoverIndex      = null;
 let querySource     = "point";  // "point" | "expedition"
 let expeditionTrack = null;     // Leaflet polyline for expedition mode
+let latestStationSeries = [];
 const modelColorMap = new Map();
 
 // ── tooltip ──────────────────────────────────────────────────────────────────
@@ -562,6 +574,8 @@ async function runValidation() {
       </div>
     `;
     stationsList.appendChild(li);
+    li.style.cursor = 'pointer';
+    li.addEventListener('click', () => renderStationEvidence(s.station_id));
     L.circleMarker([s.lat, s.lon], {
       radius: 4, color: "#475569", fillColor: "#94a3b8", fillOpacity: 0.7,
     })
@@ -587,6 +601,7 @@ async function runValidation() {
 
   // ── charts ──
   latestSeries = data.time_series || [];
+  latestStationSeries = data.station_series || [];
   modelColorMap.clear();
   const runTimes = {};
   (data.models || []).forEach(m => { if (m.run_time_utc) runTimes[m.model_id] = m.run_time_utc; });
@@ -605,6 +620,22 @@ async function runValidation() {
     );
   }
   if (typeof loadForecast === 'function') loadForecast();
+}
+
+function renderStationEvidence(stationId) {
+  const series = latestStationSeries.find(s => s.station_id === stationId);
+  const panel = document.getElementById('stationEvidence');
+  const canvas = document.getElementById('stationTimePlot');
+  if (!series || !panel || !canvas) return;
+  panel.style.display = '';
+  document.getElementById('stationEvidenceTitle').textContent = `Station evidence · ${stationId}`;
+  const times = series.points.map(p => p.time_utc);
+  const lines = [...selectedModels].map(id => ({ vals: series.points.map(p => p[id] != null ? p[id] * 1.94384 : null), color: getModelColor(id) }));
+  const values = [...series.points.map(p => p.obs_ws_ms).filter(v => v != null), ...lines.flatMap(l => l.vals).filter(v => v != null)].map(v => v * (v > 30 ? 1 : 1));
+  const max = Math.max(10, ...(values.length ? values : [10]));
+  const bound = Math.ceil(max / 5) * 5;
+  drawLineChart(canvas, 280, series.points.map(p => p.obs_ws_ms != null ? p.obs_ws_ms * 1.94384 : null), lines, times, { minY: 0, maxY: bound, yTicks: Array.from({length: bound / 5 + 1}, (_,i) => i * 5), yLabel: v => `${v}` });
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ── chart hover (crosshair + tooltip) ────────────────────────────────────────

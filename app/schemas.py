@@ -94,6 +94,7 @@ class ValidatePointResponse(BaseModel):
     grib_points: list[GribPointDTO]
     query_point_forecast: QueryPointForecastDTO | None = None
     time_series: list[ModelTimeSeriesDTO]
+    station_series: list[dict] = Field(default_factory=list)
     source_provenance: list[str]
     computed_at_utc: datetime
 

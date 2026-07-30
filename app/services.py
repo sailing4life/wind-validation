@@ -472,6 +472,21 @@ class ValidationService:
                 })
             time_series.append({"model_id": model.model_id, "points": points})
 
+        station_series = []
+        for station in stations:
+            station_obs: dict[datetime, list[float]] = defaultdict(list)
+            for obs in observations:
+                if obs.station_id == station.station_id:
+                    station_obs[obs.time_utc.replace(minute=0, second=0, microsecond=0)].append(obs.ws_ms)
+            points = []
+            for hour in axis:
+                point = {"time_utc": hour, "obs_ws_ms": (sum(station_obs[hour]) / len(station_obs[hour])) if station_obs[hour] else None}
+                for model in candidates:
+                    fc = nearest_fc(model.model_id, station.lat, station.lon, hour)
+                    point[model.model_id] = uv_to_speed_dir(fc.u10, fc.v10)[0] if fc else None
+                points.append(point)
+            station_series.append({"station_id": station.station_id, "points": points})
+
         result = {
             "query_id": query_id,
             "lat": lat,
@@ -512,6 +527,7 @@ class ValidationService:
             "grib_points": grib_points,
             "query_point_forecast": self._build_query_point_forecast(winner, lat, lon, window_end, nearest_fc),
             "time_series": time_series,
+            "station_series": station_series,
             "source_provenance": provenance,
             "computed_at_utc": datetime.now(timezone.utc),
         }

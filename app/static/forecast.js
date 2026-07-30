@@ -13,6 +13,16 @@ let _relayoutHandler = null;   // for range-slider sync
 let _ensembleData = null;
 let _gradientData = null;
 
+// Chart configuration must be initialized before any async forecast response can render.
+const LIGHT_LAYOUT = {
+  paper_bgcolor: '#ffffff',
+  plot_bgcolor: '#f8fafc',
+  font: { color: '#1e293b', size: 11 },
+};
+
+const LIGHT_XAXIS = { gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, type: 'date' };
+const LIGHT_YAXIS = (title) => ({ title, gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, rangemode: 'tozero' });
+
 // â”€â”€ Model color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FC_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#be185d'];
 
@@ -143,15 +153,6 @@ function renderModelToggles() {
 }
 
 // â”€â”€ Shared chart config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const LIGHT_LAYOUT = {
-  paper_bgcolor: '#ffffff',
-  plot_bgcolor: '#f8fafc',
-  font: { color: '#1e293b', size: 11 },
-};
-
-const LIGHT_XAXIS = { gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, type: 'date' };
-const LIGHT_YAXIS = (title) => ({ title, gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, rangemode: 'tozero' });
-
 // â”€â”€ Ensemble stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function computeEnsembleStats(selectedSeries) {
   const timeMap = new Map(); // ISO string â†’ number[]

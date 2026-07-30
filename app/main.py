@@ -155,6 +155,17 @@ def storage_health() -> dict:
     """Safe deployment check: exposes status, never the database URL or credentials."""
     return {"postgres_enabled": store.enabled}
 
+@app.get("/api/locations")
+def list_locations() -> dict:
+    return {"locations": store.list_locations()}
+
+@app.post("/api/locations")
+def save_location(payload: dict = Body(...)) -> dict:
+    name = str(payload.get("name", "")).strip()
+    if not name: raise HTTPException(status_code=400, detail="Location name is required")
+    try: return store.save_location(name, float(payload["lat"]), float(payload["lon"]), float(payload.get("radius_km", 50)))
+    except KeyError: raise HTTPException(status_code=400, detail="lat and lon are required")
+
 
 def _windmap_model_params(model_id: str) -> tuple[str, str]:
     """Map a forecast model ID to (endpoint_url, model_param) for Open-Meteo."""
