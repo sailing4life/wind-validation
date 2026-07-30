@@ -26,6 +26,44 @@ def circular_delta(a: float, b: float) -> float:
     return abs((a - b + 180.0) % 360.0 - 180.0)
 
 
+def _weighted_median(pairs: list[tuple[float, float]]) -> float:
+    """Weighted median of (weight, value) pairs."""
+    if not pairs:
+        return 0.0
+    ordered = sorted(pairs, key=lambda p: p[1])
+    half = sum(w for w, _ in ordered) / 2.0
+    acc = 0.0
+    for w, x in ordered:
+        acc += w
+        if acc >= half:
+            return x
+    return ordered[-1][1]
+
+
+def _robust_sigma(values: list[tuple[float, float]], total: float) -> float:
+    """Outlier-resistant scale for the (weight, residual) pairs.
+
+    A MAD prescale sets a clip level, then a single winsorized weighted RMS is
+    taken. One bad verification pair can no longer inflate the band, while a
+    genuine two-sided spread (e.g. sea-breeze timing) survives the ±3σ clip.
+    """
+    if not values:
+        return 0.0
+    med = _weighted_median(values)
+    mad = _weighted_median([(w, abs(x - med)) for w, x in values])
+    s0 = 1.4826 * mad
+    if s0 <= 1e-6:
+        # MAD degenerates when most residuals are identical (a tight bulk plus
+        # a few outliers). Mean absolute deviation stays non-zero and still
+        # bounds a lone outlier's leverage, so the clip level remains sane.
+        mnad = sum(w * abs(x - med) for w, x in values) / total
+        s0 = 1.2533 * mnad
+    if s0 <= 1e-6:
+        return 0.0  # truly constant residuals
+    clip = 3.0 * s0
+    return math.sqrt(sum(w * min(max(x, -clip), clip) ** 2 for w, x in values) / total)
+
+
 def calibrate(
     samples: list[CalibrationSample],
     target_u: float,
@@ -85,10 +123,16 @@ def calibrate(
         ru, rv = du - bu, dv - bv
         along.append((w, -ru * math.sin(theta) - rv * math.cos(theta)))
         cross.append((w, -ru * math.cos(theta) + rv * math.sin(theta)))
-    def sigma(values: list[tuple[float, float]]) -> float:
-        return math.sqrt(sum(w * x * x for w, x in values) / total) if values else 0.0
-    sig_s = sigma(along)
-    sig_c = sigma(cross)
+    sig_s = _robust_sigma(along, total)
+    sig_c = _robust_sigma(cross, total)
+    # Shrink toward a modest prior so a small, noisy sample cannot claim an
+    # extreme band (nor an implausibly tight one). With more effective samples
+    # the observed scatter dominates. The prior is a typical 10 m NWP wind RMSE.
+    n0 = 8.0
+    prior_s = max(1.5, 0.12 * cs)
+    prior_c = max(1.0, 0.10 * cs)
+    sig_s = math.sqrt((n_eff * sig_s ** 2 + n0 * prior_s ** 2) / (n_eff + n0))
+    sig_c = math.sqrt((n_eff * sig_c ** 2 + n0 * prior_c ** 2) / (n_eff + n0))
     z90 = 1.2816
     p10, p90 = max(0.0, cs - z90 * sig_s), cs + z90 * sig_s
     dir_half = min(90.0, math.degrees(math.atan2(z90 * sig_c, max(cs, 0.5))))

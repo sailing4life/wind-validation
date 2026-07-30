@@ -53,9 +53,40 @@ def test_lead_matching_widens_the_band_at_long_lead():
     short = calibrate(samples, 0.0, -5.0, now, lead_hours=2, recency_half_life_hours=None, target_lead_hours=2.0)
     long = calibrate(samples, 0.0, -5.0, now, lead_hours=40, recency_half_life_hours=None, target_lead_hours=40.0)
 
-    assert short["sigma_along_ms"] < 1.0
-    assert long["sigma_along_ms"] > 2.0
+    # Lead matching must keep the long-lead band clearly wider than short lead.
+    assert long["sigma_along_ms"] > 1.8 * short["sigma_along_ms"]
     assert long["ws_p90_ms"] - long["ws_p10_ms"] > short["ws_p90_ms"] - short["ws_p10_ms"]
+
+
+def test_a_single_outlier_does_not_blow_up_the_band():
+    now = datetime(2026, 7, 30, 12, tzinfo=UTC)
+    # 20 tight pairs and one gross outlier that a plain RMS would let dominate.
+    samples = [
+        CalibrationSample(now - timedelta(days=i), 0.0, -5.0, 0.0, -5.3, local_solar_hour=12.0)
+        for i in range(20)
+    ] + [
+        CalibrationSample(now - timedelta(days=20), 0.0, -5.0, 0.0, 15.0, local_solar_hour=12.0)
+    ]
+
+    result = calibrate(samples, 0.0, -5.0, now, lead_hours=1, recency_half_life_hours=None)
+
+    # The outlier's 20 m/s residual would push a plain-RMS band past ~5 m/s;
+    # the robust scale keeps it modest.
+    assert result["sigma_along_ms"] < 2.5
+
+
+def test_shrinkage_widens_a_tiny_sample_toward_the_prior():
+    now = datetime(2026, 7, 30, 12, tzinfo=UTC)
+    # Six near-identical pairs: raw scatter is ~0, but six samples cannot
+    # justify a near-zero band, so the prior must widen it.
+    samples = [
+        CalibrationSample(now - timedelta(days=i), 0.0, -5.0, 0.0, -5.01, local_solar_hour=12.0)
+        for i in range(6)
+    ]
+
+    result = calibrate(samples, 0.0, -5.0, now, lead_hours=1, recency_half_life_hours=None)
+
+    assert result["sigma_along_ms"] > 0.8
 
 
 def test_blend_hour_averages_centres_and_keeps_the_band_honest():
