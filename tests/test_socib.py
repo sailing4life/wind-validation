@@ -41,3 +41,15 @@ def test_palma_routes_to_spain_and_lists_socib_buoy():
     stations = ObservationBroker(InMemoryRepository(), Settings()).list_stations("ES", 39.57, 2.65, 50)
 
     assert any(station.station_id == "SOCIB_BAHIA_PALMA" for station in stations)
+
+
+def test_palma_keeps_aladin_as_validation_candidate():
+    from app.catalog import select_candidate_models
+
+    candidates, _ = select_candidate_models(
+        lat=39.57, lon=2.65, catalog=InMemoryRepository().models, coverage_availability={},
+    )
+
+    # Palma sits inside the real ALADIN-CZ Lambert grid (south edge ~38.6N);
+    # the coverage bbox must not cut the Balearics off again.
+    assert any(model.model_id == "aladin_cz" for model in candidates)

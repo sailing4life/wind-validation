@@ -71,8 +71,11 @@ def default_model_catalog() -> list[ModelDefinition]:
             model_id="aladin_cz",
             provider="ČHMÚ",
             category="regional",
-            coverage_bbox={"min_lat": 40.0, "max_lat": 58.0, "min_lon": 0.0, "max_lon": 32.0},
-            priority_by_country={"CZ": 1, "SK": 2, "AT": 3, "PL": 4, "SI": 5, "HR": 5, "HU": 5, "DE": 10, "IT": 10, "OTHER": 50},
+            # Measured from the Lambert grid of a live ČHMÚ GRIB (2026-07-30):
+            # lat 38.60–57.21, lon -4.65–34.35. Kept ~0.4° inside the extremes
+            # because the rotated grid corners undercut a plain lat/lon box.
+            coverage_bbox={"min_lat": 39.0, "max_lat": 57.0, "min_lon": -4.0, "max_lon": 34.0},
+            priority_by_country={"CZ": 1, "SK": 2, "AT": 3, "PL": 4, "SI": 5, "HR": 5, "HU": 5, "ES": 5, "DE": 10, "IT": 10, "OTHER": 50},
             on_demand=True,   # windmap-only — fetched from ČHMÚ GRIB on request
         ),
     ]
