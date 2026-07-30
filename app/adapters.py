@@ -253,7 +253,9 @@ class SocibPalmaAdapter(BaseSourceAdapter):
                 continue
             if ts < start or ts > end:
                 continue
-            if not all(math.isfinite(value) for value in (speed, direction)):
+            # QC flags can be NaN too; int(NaN) raises, which would discard the
+            # entire fetch instead of this one row.
+            if not all(math.isfinite(value) for value in (speed, direction, speed_qc, direction_qc)):
                 continue
             if int(speed_qc) not in cls._GOOD_QC or int(direction_qc) not in cls._GOOD_QC:
                 continue

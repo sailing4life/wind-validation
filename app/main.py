@@ -161,6 +161,8 @@ def list_locations() -> dict:
 
 @app.post("/api/locations")
 def save_location(payload: dict = Body(...)) -> dict:
+    if not store.enabled:
+        raise HTTPException(status_code=503, detail="Location storage requires a configured DATABASE_URL")
     name = str(payload.get("name", "")).strip()
     if not name: raise HTTPException(status_code=400, detail="Location name is required")
     try: return store.save_location(name, float(payload["lat"]), float(payload["lon"]), float(payload.get("radius_km", 50)))

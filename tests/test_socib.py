@@ -22,6 +22,19 @@ def test_socib_parser_keeps_only_in_window_good_wind_rows():
     assert rows[0].wd_deg == 29
 
 
+SOCIB_ASCII_NAN_QC = """Dataset {\n} sample;\n---------------------------------------------\ntime[2]\n1762240800, 1762241400\nWIN_DIR[2]\n29, 180\nQC_WIN_DIR[2]\n1, NaN\nWIN_SPE[2]\n4.06, 3.75\nQC_WIN_SPE[2]\n1, 1\n"""
+
+
+def test_nan_qc_flag_drops_only_that_row():
+    start = datetime(2025, 11, 4, 7, 0, tzinfo=UTC)
+    end = datetime(2025, 11, 4, 8, 0, tzinfo=UTC)
+
+    rows = SocibPalmaAdapter._parse_observations(SOCIB_ASCII_NAN_QC, start, end)
+
+    assert len(rows) == 1
+    assert rows[0].ws_ms == 4.06
+
+
 def test_palma_routes_to_spain_and_lists_socib_buoy():
     assert detect_country(39.57, 2.65) == "ES"
 

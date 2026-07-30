@@ -23,4 +23,10 @@ class TTLCache(Generic[T]):
         return value
 
     def set(self, key: str, value: T) -> None:
-        self._store[key] = (datetime.now(timezone.utc), value)
+        now = datetime.now(timezone.utc)
+        # Keys that are never read again (e.g. per-query ids) would otherwise
+        # accumulate forever; get() only evicts the key it is asked for.
+        expired = [k for k, (created_at, _) in self._store.items() if now - created_at > self.ttl]
+        for k in expired:
+            self._store.pop(k, None)
+        self._store[key] = (now, value)
