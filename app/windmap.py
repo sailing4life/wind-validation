@@ -48,7 +48,7 @@ logger = logging.getLogger("wind_validation.windmap")
 # (lon half-extent is wider to compensate for cos(lat) compression)
 AREA_LAT_DEG = 0.23   # ~25 km
 AREA_LON_DEG = 0.38   # ~26 km at 52°N  (0.38 × cos(52°) × 111 ≈ 26 km)
-OSM_ZOOM  = 11        # detailed coastline, waterways, harbour features
+OSM_ZOOM  = 12        # sharper coastline, waterways, harbour features
 TILE_PX   = 256
 FRAME_MS  = 600       # ms per GIF frame
 MAX_WS_KT = 35.0      # top of colour scale (knots)
@@ -65,12 +65,18 @@ FIG_H_PX  = 680
 BARB_SPACING_DEG = 0.04
 
 # ── wind colormap (built once at import time) ──────────────────────────────────
+# Smooth cool→warm progression that reads as increasing intensity (calm pale
+# blue → teal → green → amber → orange → red → storm violet), with the top end
+# darkening so strong wind looks visually "heavier". Alpha fades in with speed
+# so calm water stays clear and the basemap shows through.
 _n = 256
 _t = np.linspace(0, 1, _n)
 _base = mcolors.LinearSegmentedColormap.from_list(
-    "_wind_rgb", ["#3b82f6", "#22c55e", "#ef4444", "#a855f7"]
+    "_wind_rgb",
+    ["#dceff7", "#9fd0e6", "#57b6c9", "#3fae8f", "#5bb56a",
+     "#9cc551", "#e4c24a", "#ec9a44", "#e06a45", "#c73f55", "#8f3a86"],
 )(_t)
-_base[:, 3] = 0.08 + _t * 0.64   # alpha: 0.08 (calm, transparent) → 0.72 (strong)
+_base[:, 3] = np.clip(0.05 + _t * 0.72, 0.0, 0.82)   # calm → transparent, strong → opaque
 CMAP_WIND = mcolors.ListedColormap(_base, name="wind_kt")
 NORM_WIND = mcolors.Normalize(vmin=0, vmax=MAX_WS_KT)
 
@@ -1056,13 +1062,18 @@ def _render_frame(
 ) -> Image.Image:
     lon_min, lon_max, lat_min, lat_max = extent
 
-    fig, ax = plt.subplots(figsize=(fig_w_px / dpi, fig_h_px / dpi), dpi=dpi)
+    # Lay out at a fixed logical dpi and supersample on save for crisp output
+    # (points-based marks and fonts keep their relative size automatically).
+    render_dpi = 100
+    fig, ax = plt.subplots(figsize=(fig_w_px / render_dpi, fig_h_px / render_dpi), dpi=render_dpi)
+    ax.set_position([0, 0, 1, 1])   # map fills the figure, edge to edge
 
     # ── 1. OSM basemap ────────────────────────────────────────────────────────
     ax.imshow(
         basemap,
         extent=[lon_min, lon_max, lat_min, lat_max],
         origin="upper", aspect="auto", zorder=0,
+        interpolation="bilinear",
     )
 
     # ── 2. Wind-speed shading — smooth pcolormesh with alpha fade ────────────
@@ -1088,38 +1099,52 @@ def _render_frame(
     ax.barbs(
         LON_B, LAT_B, u_b, v_b,
         barb_increments=dict(half=5, full=10, flag=50),
-        length=7,
-        linewidth=0.85,
-        barbcolor="#1e3a8a",
-        flagcolor="#dc2626",
+        length=6.8,
+        linewidth=0.8,
+        barbcolor="#0f2452",
+        flagcolor="#c81e1e",
         pivot="middle",
         zorder=3,
     )
 
-    # ── 4. Colorbar ───────────────────────────────────────────────────────────
-    sm = plt.cm.ScalarMappable(cmap=CMAP_WIND, norm=NORM_WIND)
-    sm.set_array([])
-    cb = fig.colorbar(sm, ax=ax, fraction=0.026, pad=0.02)
-    cb.set_label("Wind speed (kt)", fontsize=9)
-    cb.set_ticks([0, 5, 10, 15, 20, 25, 30, 35])
-    cb.ax.tick_params(labelsize=8)
-
-    # ── 5. Centre marker ──────────────────────────────────────────────────────
-    ax.plot(center_lon, center_lat,
-            marker="x", color="#1d4ed8",
-            markersize=11, markeredgewidth=2.2, zorder=4)
-
     ax.set_xlim(lon_min, lon_max)
     ax.set_ylim(lat_min, lat_max)
-    ax.set_title(label, fontsize=11, fontweight="bold", pad=5)
-    ax.tick_params(labelsize=8)
-    ax.set_xlabel("Lon", fontsize=8)
-    ax.set_ylabel("Lat", fontsize=8)
+    ax.set_axis_off()   # no lon/lat ticks or frame — reads as a map, not a chart
 
-    fig.tight_layout(pad=0.5)
+    # ── 4. Centre marker — ringed dot ─────────────────────────────────────────
+    ax.plot(center_lon, center_lat, marker="o", markersize=9,
+            markerfacecolor="#1d4ed8", markeredgecolor="white",
+            markeredgewidth=1.8, zorder=5)
+
+    # ── 5. Title chip (top-left overlay) ──────────────────────────────────────
+    ax.text(0.014, 0.972, label, transform=ax.transAxes,
+            fontsize=11, fontweight="bold", color="#0f172a",
+            va="top", ha="left", zorder=6,
+            bbox=dict(boxstyle="round,pad=0.35", facecolor="white",
+                      edgecolor="none", alpha=0.82))
+
+    # ── 6. Inset colorbar (bottom-right overlay, on its own white panel) ──────
+    from matplotlib.patches import FancyBboxPatch  # noqa: PLC0415
+    panel = FancyBboxPatch(
+        (0.685, 0.028), 0.30, 0.082, transform=ax.transAxes,
+        boxstyle="round,pad=0.006", facecolor="white", edgecolor="none",
+        alpha=0.82, zorder=7,
+    )
+    ax.add_patch(panel)
+    sm = plt.cm.ScalarMappable(cmap=CMAP_WIND, norm=NORM_WIND)
+    sm.set_array([])
+    cax = ax.inset_axes([0.72, 0.062, 0.25, 0.026], zorder=8)
+    cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
+    cb.set_ticks([0, 10, 20, 30])
+    cb.ax.tick_params(labelsize=7, length=2, color="#334155", labelcolor="#0f172a", pad=1)
+    cb.set_label("kt", fontsize=7, color="#0f172a", labelpad=1)
+    cb.outline.set_visible(False)
+    for spine in cax.spines.values():
+        spine.set_visible(False)
+
     buf = io.BytesIO()
     try:
-        fig.savefig(buf, format="png", dpi=dpi)
+        fig.savefig(buf, format="png", dpi=int(render_dpi * 1.5))
     finally:
         plt.close(fig)
         del LON_MESH, LAT_MESH, speeds_kt
