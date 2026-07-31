@@ -1,6 +1,14 @@
 ﻿/* forecast.js  -  Forecast tab: Windy iframe + Plotly charts + hourly table */
 
 const MS_TO_KT = 1.94384;
+const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
+const LOCAL_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+});
+
+function fcLocalTime(iso) {
+  return LOCAL_TIME_FORMATTER.format(new Date(iso));
+}
 
 // â”€â”€ Masthead height scaling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Models give 10 m wind; scale up to masthead height with the log wind profile
@@ -30,7 +38,10 @@ const LIGHT_LAYOUT = {
   font: { color: '#1e293b', size: 11 },
 };
 
-const LIGHT_XAXIS = { gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, type: 'date' };
+const LIGHT_XAXIS = {
+  gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, type: 'date',
+  title: { text: `Local time (${LOCAL_TIME_ZONE})`, font: { size: 10 } },
+};
 const LIGHT_YAXIS = (title) => ({ title, gridcolor: '#e2e8f0', tickfont: { color: '#64748b' }, rangemode: 'tozero' });
 
 // â”€â”€ Model color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -215,7 +226,7 @@ function computeEnsembleStats(selectedSeries) {
 function every3hText(times, vals, fmt = v => String(v)) {
   return vals.map((v, i) => {
     const t = new Date(times[i]);
-    return (t.getUTCHours() % 3 === 0 && v != null) ? fmt(v) : '';
+    return (t.getHours() % 3 === 0 && v != null) ? fmt(v) : '';
   });
 }
 
@@ -635,12 +646,11 @@ function renderModelAdjustments() {
   scroll.className = 'fc-adjustments-scroll';
   const table = document.createElement('table');
   table.className = 'fc-table fc-adjustments-data';
-  table.innerHTML = `<thead><tr><th>Time UTC</th><th>Blend Δ</th>${ids.map(id => `<th>${id} Δ</th>`).join('')}</tr></thead>`;
+  table.innerHTML = `<thead><tr><th>Local time</th><th>Blend Δ</th>${ids.map(id => `<th>${id} Δ</th>`).join('')}</tr></thead>`;
   const body = document.createElement('tbody');
 
   series.hours.forEach(blendHour => {
-    const time = new Date(blendHour.time_utc);
-    const label = `${String(time.getUTCDate()).padStart(2, '0')} ${time.toLocaleString('en', { month: 'short', timeZone: 'UTC' })} ${String(time.getUTCHours()).padStart(2, '0')}z`;
+    const label = fcLocalTime(blendHour.time_utc);
     const rawBlend = fcRawBlendSpeed(blendHour.time_utc, weights);
     const blendCorrected = blendHour.corrected_ws_ms ?? blendHour.ws_ms;
     const blendDelta = rawBlend != null && blendCorrected != null ? (blendCorrected - rawBlend) * MS_TO_KT : null;
@@ -690,7 +700,7 @@ function renderHistoricalErrorProfile() {
     margin: { l: 42, r: 40, t: 38, b: 35 },
     title: { text: `Error profile · ${source}`, x: 0, xanchor: 'left', font: { size: 12 } },
     paper_bgcolor: 'white', plot_bgcolor: 'white',
-    xaxis: { title: { text: 'Forecast time (UTC)', font: { size: 10 } }, tickformat: '%d %b<br>%Hz', showgrid: false },
+    xaxis: { title: { text: `Forecast time (${LOCAL_TIME_ZONE})`, font: { size: 10 } }, tickformat: '%d %b<br>%H:%M', showgrid: false },
     yaxis: { title: { text: 'σ residual (kt)', font: { size: 10 } }, rangemode: 'tozero', gridcolor: '#e2e8f0' },
     yaxis2: { title: { text: 'n eff.', font: { size: 10 } }, overlaying: 'y', side: 'right', rangemode: 'tozero', showgrid: false },
     legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 10 } },
@@ -954,7 +964,7 @@ function renderForecastTable() {
   scrollWrap.className = 'fc-table-scroll';
 
   const hasPrecip = winner.hours.some(h => h.precip_mm != null);
-  let colHtml = '<th>Time UTC</th><th>TWS p10–p90 (kt)</th>';
+  let colHtml = '<th>Local time</th><th>TWS p10–p90 (kt)</th>';
   colHtml += '<th>Gust max (kt)</th><th>TWD p10–p90 ( deg)</th><th>Temp ( degC)</th>';
   if (hasPrecip) colHtml += '<th>Rain</th>';
   colHtml += '<th class="note-col">Notes</th>';
@@ -964,8 +974,6 @@ function renderForecastTable() {
   table.innerHTML = `<thead><tr>${colHtml}</tr></thead>`;
 
   const tbody = document.createElement('tbody');
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
   for (const hour of winner.hours) {
     const ws_kt = hour.corrected_ws_ms != null ? (hour.corrected_ws_ms * MS_TO_KT * mf).toFixed(1) : (hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT * mf).toFixed(1) : null);
     const wsRange = hour.ws_p10_ms != null && hour.ws_p90_ms != null ? `${(hour.ws_p10_ms * MS_TO_KT * mf).toFixed(1)}–${(hour.ws_p90_ms * MS_TO_KT * mf).toFixed(1)}` : (ws_kt ?? ' - ');
@@ -974,8 +982,7 @@ function renderForecastTable() {
     const temp = hour.temp_c != null ? hour.temp_c.toFixed(1) : ' - ';
     const precip = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';
 
-    const t = new Date(hour.time_utc);
-    const label = `${String(t.getUTCDate()).padStart(2,'0')} ${MONTHS[t.getUTCMonth()]} ${String(t.getUTCHours()).padStart(2,'0')}z`;
+    const label = fcLocalTime(hour.time_utc);
     const wsColor = ws_kt != null ? windSpeedColor(+ws_kt) : '';
     const gustColor = gust_kt != null ? windSpeedColor(+gust_kt) : '';
 
