@@ -1076,16 +1076,19 @@ def _render_frame(
         interpolation="bilinear",
     )
 
-    # ── 2. Wind-speed shading — smooth pcolormesh with alpha fade ────────────
+    # ── 2. Wind-speed shading — smooth raster with alpha fade ────────────────
+    # imshow (bilinear) instead of a gouraud pcolormesh: the latter triangulates
+    # each cell and, with semi-transparent colours, the triangle edges showed
+    # through as a faint diagonal grid. imshow has no cell edges.
     speeds_kt = np.sqrt(u_ms**2 + v_ms**2) * MS_TO_KT
     speeds_kt = np.where(np.isfinite(speeds_kt), speeds_kt, 0.0)
 
-    LON_MESH, LAT_MESH = np.meshgrid(lons, lats)
-
-    ax.pcolormesh(
-        LON_MESH, LAT_MESH, speeds_kt,
+    ax.imshow(
+        speeds_kt,
+        extent=[lons[0], lons[-1], lats[0], lats[-1]],
+        origin="lower", aspect="auto",
         cmap=CMAP_WIND, norm=NORM_WIND,
-        shading="gouraud", zorder=1,
+        interpolation="bilinear", zorder=1,
     )
 
     # ── 3. Wind barbs — subsampled to BARB_SPACING_DEG density ───────────────
@@ -1147,7 +1150,7 @@ def _render_frame(
         fig.savefig(buf, format="png", dpi=int(render_dpi * 1.5))
     finally:
         plt.close(fig)
-        del LON_MESH, LAT_MESH, speeds_kt
+        del speeds_kt
         gc.collect()
     buf.seek(0)
     return Image.open(buf).copy()
