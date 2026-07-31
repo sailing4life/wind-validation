@@ -962,6 +962,21 @@ td.model-cell { font-family: monospace; font-size: 11px; }
   border-top: 1px solid var(--line);
 }
 
+.fc-adjustments {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.fc-adjustments-title { font-size: 12px; font-weight: 700; color: var(--ink); }
+.fc-adjustments-note { margin: 3px 0 8px; font-size: 11px; color: var(--ink-muted); }
+.fc-adjustments-scroll { max-height: 320px; overflow: auto; }
+.fc-adjustments-data { min-width: 540px; }
+.fc-adjustment { font-variant-numeric: tabular-nums; font-weight: 700; }
+.fc-adjustment-up { color: #15803d; }
+.fc-adjustment-down { color: #b91c1c; }
+.fc-adjustment-flat { color: var(--ink-muted); }
+.fc-adjustment-unit { font-size: 10px; font-weight: 500; }
+
 .fc-table {
   width: 100%;
   border-collapse: collapse;

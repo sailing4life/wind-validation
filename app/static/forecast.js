@@ -589,8 +589,84 @@ function renderVerification() {
   el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Band evidence (n eff.):</span> ${c.n_effective}</div>
     <div class="meta-row"><span class="meta-label">Method:</span> inverse-MSE blend of calibrated models &nbsp; <span class="meta-label">Weights:</span> ${weightsLabel}</div>
     <div class="meta-row"><span class="meta-label">Uncertainty:</span> ${uncertaintyText}.</div>
-    <div id="fcErrorProfile" class="fc-error-profile" aria-label="Historical error profile by forecast hour"></div>`;
+    <div id="fcErrorProfile" class="fc-error-profile" aria-label="Historical error profile by forecast hour"></div>
+    <section class="fc-adjustments" aria-labelledby="fcAdjustmentsTitle">
+      <div id="fcAdjustmentsTitle" class="fc-adjustments-title">Model adjustments · Δ TWS (kt)</div>
+      <p class="fc-adjustments-note">Positive adds wind; negative removes it. Hover a value for raw → corrected wind and direction shift.</p>
+      <div id="fcAdjustmentsTable" class="fc-adjustments-table"></div>
+    </section>`;
   renderHistoricalErrorProfile();
+  renderModelAdjustments();
+}
+
+function fcSigned(value, digits = 1) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const rounded = Number(value.toFixed(digits));
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(digits)}`;
+}
+
+function fcDirectionShift(rawDeg, correctedDeg) {
+  if (rawDeg == null || correctedDeg == null) return null;
+  return ((correctedDeg - rawDeg + 540) % 360) - 180;
+}
+
+function fcRawBlendSpeed(timeIso, weights) {
+  let sumU = 0, sumV = 0, total = 0;
+  for (const [modelId, weight] of Object.entries(weights)) {
+    const hour = forecastData?.models?.find(m => m.model_id === modelId)?.hours?.find(h => h.time_utc === timeIso);
+    if (!hour || hour.ws_ms == null || hour.wd_deg == null) continue;
+    const theta = hour.wd_deg * Math.PI / 180;
+    sumU += weight * (-hour.ws_ms * Math.sin(theta));
+    sumV += weight * (-hour.ws_ms * Math.cos(theta));
+    total += weight;
+  }
+  return total ? Math.hypot(sumU / total, sumV / total) : null;
+}
+
+function renderModelAdjustments() {
+  const target = document.getElementById('fcAdjustmentsTable');
+  const series = bestSeries();
+  const weights = forecastData?.calibration?.weights || {};
+  const modelIds = Object.keys(weights).filter(id => forecastData?.models?.some(m => m.model_id === id));
+  const ids = modelIds.length ? modelIds : [_winnerModelId].filter(Boolean);
+  if (!target || !series?.hours?.length || !ids.length) return;
+
+  const scroll = document.createElement('div');
+  scroll.className = 'fc-adjustments-scroll';
+  const table = document.createElement('table');
+  table.className = 'fc-table fc-adjustments-data';
+  table.innerHTML = `<thead><tr><th>Time UTC</th><th>Blend Δ</th>${ids.map(id => `<th>${id} Δ</th>`).join('')}</tr></thead>`;
+  const body = document.createElement('tbody');
+
+  series.hours.forEach(blendHour => {
+    const time = new Date(blendHour.time_utc);
+    const label = `${String(time.getUTCDate()).padStart(2, '0')} ${time.toLocaleString('en', { month: 'short', timeZone: 'UTC' })} ${String(time.getUTCHours()).padStart(2, '0')}z`;
+    const rawBlend = fcRawBlendSpeed(blendHour.time_utc, weights);
+    const blendCorrected = blendHour.corrected_ws_ms ?? blendHour.ws_ms;
+    const blendDelta = rawBlend != null && blendCorrected != null ? (blendCorrected - rawBlend) * MS_TO_KT : null;
+    const cells = [`<td class="fc-time">${label}</td>`, fcAdjustmentCell(blendDelta, rawBlend, blendCorrected, null, 'Blend')];
+    ids.forEach(id => {
+      const hour = forecastData.models.find(m => m.model_id === id)?.hours?.find(h => h.time_utc === blendHour.time_utc);
+      const corrected = hour?.corrected_ws_ms ?? hour?.ws_ms;
+      const delta = hour?.ws_ms != null && corrected != null ? (corrected - hour.ws_ms) * MS_TO_KT : null;
+      const dirShift = fcDirectionShift(hour?.wd_deg, hour?.corrected_wd_deg ?? hour?.wd_deg);
+      cells.push(fcAdjustmentCell(delta, hour?.ws_ms, corrected, dirShift, id));
+    });
+    const row = document.createElement('tr');
+    row.innerHTML = cells.join('');
+    body.appendChild(row);
+  });
+  table.appendChild(body);
+  scroll.appendChild(table);
+  target.replaceChildren(scroll);
+}
+
+function fcAdjustmentCell(deltaKt, rawMs, correctedMs, directionShift, label) {
+  const cls = deltaKt > 0.05 ? 'fc-adjustment-up' : deltaKt < -0.05 ? 'fc-adjustment-down' : 'fc-adjustment-flat';
+  const detail = rawMs == null || correctedMs == null
+    ? `${label}: forecast unavailable`
+    : `${label}: ${(rawMs * MS_TO_KT).toFixed(1)} → ${(correctedMs * MS_TO_KT).toFixed(1)} kt${directionShift != null ? ` · TWD ${fcSigned(directionShift, 0)}°` : ''}`;
+  return `<td class="fc-adjustment ${cls}" title="${detail}">${fcSigned(deltaKt)}<span class="fc-adjustment-unit"> kt</span></td>`;
 }
 
 function renderHistoricalErrorProfile() {
