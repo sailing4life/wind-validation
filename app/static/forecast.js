@@ -250,10 +250,10 @@ function renderBestForecastChart() {
   if (!winner) { panel.style.display = 'none'; return; }
 
   panel.style.display = '';
+  const mf = mastheadFactor();
   document.getElementById('fcBestTitle').textContent = bestSeriesLabel() + ' · calibrated p10–p90'
     + (mf > 1 ? ` · ${document.getElementById('fcMastHeight').value} m masthead` : '');
 
-  const mf = mastheadFactor();
   const times = winner.hours.map(h => h.time_utc);
   const ws_kt = winner.hours.map(h => h.corrected_ws_ms != null ? +(h.corrected_ws_ms * MS_TO_KT * mf).toFixed(1) : (h.ws_ms != null ? +(h.ws_ms * MS_TO_KT * mf).toFixed(1) : null));
   const p10_kt = winner.hours.map(h => h.ws_p10_ms != null ? +(h.ws_p10_ms * MS_TO_KT * mf).toFixed(1) : null);
