@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-from app.calibration import CalibrationSample, blend_hour, calibrate, scale_gust
+import math
+
+from app.calibration import CalibrationSample, band_from_sigma, blend_hour, calibrate, emos_sigma, scale_gust
 
 
 def test_calibration_corrects_uv_and_returns_an_uncertainty_band():
@@ -103,6 +105,26 @@ def test_blend_hour_averages_centres_and_keeps_the_band_honest():
     assert abs(out["sigma_along_ms"] - 1.0) < 1e-9
     assert abs((out["ws_p90_ms"] - out["ws_ms"]) - 1.2816) < 1e-6
     assert blend_hour([]) is None
+
+
+def test_emos_sigma_transitions_from_local_to_ensemble_with_lead():
+    local, eps = 1.0, 4.0
+    # No ensemble → local scale unchanged.
+    assert emos_sigma(local, None, lead_hours=24) == local
+    # Short lead → local dominates; long lead → ensemble dominates.
+    short = emos_sigma(local, eps, lead_hours=0)
+    long = emos_sigma(local, eps, lead_hours=72, half_life_h=18.0)
+    assert abs(short - local) < 1e-9
+    assert long > 3.0
+    # At one half-life the weight is exactly 0.5.
+    mid = emos_sigma(local, eps, lead_hours=18, half_life_h=18.0)
+    assert abs(mid - math.sqrt(0.5 * local**2 + 0.5 * eps**2)) < 1e-9
+
+
+def test_band_from_sigma_brackets_the_mean():
+    b = band_from_sigma(10.0, 90.0, sigma_along_ms=2.0, sigma_cross_ms=1.0)
+    assert b["ws_p10_ms"] < 10.0 < b["ws_p90_ms"]
+    assert abs((b["ws_p90_ms"] - b["ws_p10_ms"]) - 2 * 1.2816 * 2.0) < 1e-6
 
 
 def test_gust_scales_with_the_correction_and_covers_the_band():

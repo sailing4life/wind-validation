@@ -133,17 +133,37 @@ def calibrate(
     prior_c = max(1.0, 0.10 * cs)
     sig_s = math.sqrt((n_eff * sig_s ** 2 + n0 * prior_s ** 2) / (n_eff + n0))
     sig_c = math.sqrt((n_eff * sig_c ** 2 + n0 * prior_c ** 2) / (n_eff + n0))
-    z90 = 1.2816
-    p10, p90 = max(0.0, cs - z90 * sig_s), cs + z90 * sig_s
-    dir_half = min(90.0, math.degrees(math.atan2(z90 * sig_c, max(cs, 0.5))))
     return {
         "status": "bootstrap" if n_eff < 15 else "calibrated",
         "n_effective": round(n_eff, 1), "bias_u": bu, "bias_v": bv,
         "attenuation": attenuation, "ws_ms": cs, "wd_deg": cd,
         "sigma_along_ms": sig_s, "sigma_cross_ms": sig_c,
-        "ws_p10_ms": p10, "ws_p90_ms": p90,
-        "wd_p10_deg": (cd - dir_half) % 360, "wd_p90_deg": (cd + dir_half) % 360,
+        **band_from_sigma(cs, cd, sig_s, sig_c),
     }
+
+
+def band_from_sigma(ws_ms: float, wd_deg: float, sigma_along_ms: float, sigma_cross_ms: float) -> dict:
+    """p10-p90 speed and direction band from along/cross-wind residual scales."""
+    z90 = 1.2816
+    dir_half = min(90.0, math.degrees(math.atan2(z90 * sigma_cross_ms, max(ws_ms, 0.5))))
+    return {
+        "ws_p10_ms": max(0.0, ws_ms - z90 * sigma_along_ms),
+        "ws_p90_ms": ws_ms + z90 * sigma_along_ms,
+        "wd_p10_deg": (wd_deg - dir_half) % 360.0,
+        "wd_p90_deg": (wd_deg + dir_half) % 360.0,
+    }
+
+
+def emos_sigma(sigma_local_ms: float, sigma_eps_ms: float | None, lead_hours: float, half_life_h: float = 18.0) -> float:
+    """EMOS-style blend of the calibrated local residual scale with the ICON-EPS
+    ensemble spread. The local band (tight, bias-corrected, reliable where we
+    have history) dominates at short lead; the ensemble spread — which grows
+    with lead and widens on genuinely uncertain flows (fronts) — takes over
+    further out. Falls back to the local scale when no ensemble is available."""
+    if sigma_eps_ms is None or sigma_eps_ms <= 0.0:
+        return sigma_local_ms
+    w = 0.5 ** (max(0.0, lead_hours) / half_life_h)
+    return math.sqrt(w * sigma_local_ms ** 2 + (1.0 - w) * sigma_eps_ms ** 2)
 
 
 def scale_gust(
@@ -190,11 +210,8 @@ def blend_hour(members: list[dict]) -> dict | None:
         sig_s = sum(m["weight"] * m["sigma_along_ms"] for m in with_sigma) / sig_total
         sig_c = sum(m["weight"] * m["sigma_cross_ms"] for m in with_sigma) / sig_total
         n_eff = sum(m["weight"] * m.get("n_effective", 0.0) for m in with_sigma) / sig_total
-        z90 = 1.2816
-        dir_half = min(90.0, math.degrees(math.atan2(z90 * sig_c, max(ws, 0.5))))
         out.update({
             "sigma_along_ms": sig_s, "sigma_cross_ms": sig_c, "n_effective": round(n_eff, 1),
-            "ws_p10_ms": max(0.0, ws - z90 * sig_s), "ws_p90_ms": ws + z90 * sig_s,
-            "wd_p10_deg": (wd - dir_half) % 360, "wd_p90_deg": (wd + dir_half) % 360,
+            **band_from_sigma(ws, wd, sig_s, sig_c),
         })
     return out

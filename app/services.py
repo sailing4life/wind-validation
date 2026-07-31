@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx
 
 from .cache import TTLCache
-from .calibration import CalibrationSample, blend_hour, calibrate, circular_delta, scale_gust
+from .calibration import CalibrationSample, band_from_sigma, blend_hour, calibrate, circular_delta, emos_sigma, scale_gust
 from .catalog import select_candidate_models
 from .config import Settings
 from .domain import ForecastValue, Observation, ScoreRow
@@ -176,6 +176,57 @@ def _samples_near_hour(buckets: dict[int, list[CalibrationSample]], target_hour:
     per-hour calibration cheap across a long forecast horizon."""
     center = int(target_hour)
     return [s for off in range(-3, 4) for s in buckets.get((center + off) % 24, [])]
+
+
+def fetch_eps_sigma(settings: Settings, lat: float, lon: float, hours: int) -> dict[datetime, tuple[float, float]]:
+    """ICON-EPS ensemble spread as along/cross-wind residual scales (m/s) per
+    valid time, for EMOS band widening. Empty dict on any failure — the band
+    then falls back to the calibrated local scale alone."""
+    params = {
+        "latitude": lat, "longitude": lon,
+        "hourly": "wind_speed_10m,wind_direction_10m", "models": "icon_seamless",
+        "wind_speed_unit": "ms", "forecast_hours": min(max(hours, 6), 240), "timezone": "UTC",
+    }
+    try:
+        with httpx.Client(timeout=settings.request_timeout_seconds * 3) as client:
+            resp = client.get(settings.openmeteo_ensemble_url, params=params)
+            resp.raise_for_status()
+            hourly = resp.json().get("hourly", {})
+    except Exception as exc:
+        logger.info("EPS spread fetch failed (band uses local scale only): %s", exc)
+        return {}
+
+    times = hourly.get("time", [])
+    ws_cols = [k for k in hourly if k.startswith("wind_speed_10m_member")]
+    wd_cols = [k for k in hourly if k.startswith("wind_direction_10m_member")]
+    if not times or not ws_cols:
+        return {}
+
+    z90 = 1.2816
+    out: dict[datetime, tuple[float, float]] = {}
+    for i, t in enumerate(times):
+        ws = sorted(hourly[k][i] for k in ws_cols if i < len(hourly[k]) and hourly[k][i] is not None)
+        if len(ws) < 3:
+            continue
+        p10 = ws[int(0.10 * (len(ws) - 1))]
+        p50 = ws[int(0.50 * (len(ws) - 1))]
+        p90 = ws[int(0.90 * (len(ws) - 1))]
+        sigma_along = max(0.0, (p90 - p10) / (2.0 * z90))
+        wd = [hourly[k][i] for k in wd_cols if i < len(hourly[k]) and hourly[k][i] is not None]
+        sigma_cross = sigma_along  # fallback if directions are unavailable
+        if len(wd) >= 3:
+            c = sum(math.cos(math.radians(a)) for a in wd)
+            s = sum(math.sin(math.radians(a)) for a in wd)
+            mean = math.degrees(math.atan2(s, c))
+            devs = sorted(((a - mean + 180) % 360 - 180) for a in wd)
+            dir_sigma_deg = max(0.0, (devs[int(0.90 * (len(devs) - 1))] - devs[int(0.10 * (len(devs) - 1))]) / (2.0 * z90))
+            sigma_cross = max(p50, 0.5) * math.radians(dir_sigma_deg)
+        try:
+            vt = datetime.fromisoformat(t.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        out[vt] = (sigma_along, sigma_cross)
+    return out
 
 
 def _freshest_archived_hours(rows: list[ForecastValue], lat: float, lon: float) -> list[ForecastValue]:
@@ -806,7 +857,8 @@ class ValidationService:
             if hours_list:
                 models_series.append({"model_id": model.model_id, "hours": hours_list})
 
-        blend_series, calibration_summary = self._build_blend(member_hours, weights)
+        eps_by_time = fetch_eps_sigma(self.settings, lat, lon, hours_ahead) if member_hours else {}
+        blend_series, calibration_summary = self._build_blend(member_hours, weights, eps_by_time, now)
 
         return {
             "winner_model_id": winner_model_id,
@@ -867,6 +919,8 @@ class ValidationService:
     def _build_blend(
         member_hours: dict[str, dict[datetime, tuple[ForecastValue, dict]]],
         weights: dict[str, float],
+        eps_by_time: dict[datetime, tuple[float, float]] | None = None,
+        now: datetime | None = None,
     ) -> tuple[dict | None, dict]:
         summary: dict = {"status": "insufficient_history", "n_effective": 0.0,
                          "method": "inverse_mse_blend", "weights": weights}
@@ -913,13 +967,29 @@ class ValidationService:
             for key, pairs in extras.items():
                 w_sum = sum(w for w, _ in pairs)
                 brow[key] = sum(w * val for w, val in pairs) / w_sum if w_sum else None
-            if combined.get("ws_p10_ms") is not None:
-                for key in ("ws_p10_ms", "ws_p90_ms", "wd_p10_deg", "wd_p90_deg"):
-                    brow[key] = combined[key]
-                brow["calibration_n_effective"] = combined["n_effective"]
-                brow["calibration_sigma_along_ms"] = combined["sigma_along_ms"]
-                brow["calibration_sigma_cross_ms"] = combined["sigma_cross_ms"]
-                brow["calibration_uncertainty_source"] = "blend"
+            # Band: EMOS-blend the calibrated local scale with the ICON-EPS
+            # ensemble spread (grows with lead, widens on uncertain flows).
+            eps = (eps_by_time or {}).get(t)
+            lead_h = (t - now).total_seconds() / 3600.0 if now else 0.0
+            local_sa, local_sc = combined.get("sigma_along_ms"), combined.get("sigma_cross_ms")
+            sa = sc = None
+            source = None
+            if local_sa is not None:
+                sa, sc, source = local_sa, local_sc, "blend"
+                if eps:
+                    sa = emos_sigma(local_sa, eps[0], lead_h)
+                    sc = emos_sigma(local_sc, eps[1], lead_h)
+                    source = "blend+emos"
+            elif eps:
+                # No local history yet: the ensemble spread alone still gives an
+                # honest, flow-dependent band.
+                sa, sc, source = eps[0], eps[1], "emos"
+            if sa is not None:
+                brow.update(band_from_sigma(combined["ws_ms"], combined["wd_deg"], sa, sc))
+                brow["calibration_sigma_along_ms"] = sa
+                brow["calibration_sigma_cross_ms"] = sc
+                brow["calibration_n_effective"] = combined.get("n_effective", 0.0)
+                brow["calibration_uncertainty_source"] = source
                 if brow.get("gust_ms") is not None:
                     # The gust envelope must cover the band: in the p90
                     # scenario the mean wind alone already reaches p90.
@@ -929,11 +999,14 @@ class ValidationService:
             return None, summary
         banded = [h for h in blend_hours_list if h.get("ws_p10_ms") is not None]
         if banded:
+            n_eff = max(h["calibration_n_effective"] for h in banded)
+            uses_emos = any("emos" in h["calibration_uncertainty_source"] for h in banded)
+            uses_local = any(h["calibration_uncertainty_source"] != "emos" for h in banded)
             summary = {
                 **summary,
-                "status": "calibrated" if banded[0]["calibration_n_effective"] >= 15 else "bootstrap",
-                "n_effective": banded[0]["calibration_n_effective"],
-                "uncertainty_source": "blend",
+                "status": "calibrated" if n_eff >= 15 else "bootstrap",
+                "n_effective": n_eff,
+                "uncertainty_source": "blend+emos" if (uses_emos and uses_local) else ("emos" if uses_emos else "blend"),
             }
         return {"model_id": "blend", "hours": blend_hours_list}, summary
 
