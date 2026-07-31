@@ -2,6 +2,16 @@
 
 const MS_TO_KT = 1.94384;
 
+// â”€â”€ Masthead height scaling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Models give 10 m wind; scale up to masthead height with the log wind profile
+// over open water (roughness z0 ≈ 0.0002 m). Speed only — direction is unchanged.
+const Z0_SEA = 0.0002;
+function mastheadFactor() {
+  const z = parseFloat(document.getElementById('fcMastHeight')?.value) || 10;
+  if (!(z > 10)) return 1.0;
+  return Math.log(z / Z0_SEA) / Math.log(10 / Z0_SEA);
+}
+
 // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let forecastData = null;
 let _winnerModelId = '';
@@ -85,6 +95,10 @@ document.getElementById('fcRunBtn').addEventListener('click', loadForecast);
 document.getElementById('fcCorrectedOnly')?.addEventListener('change', e => {
   _correctedOnly = e.target.checked;
   if (forecastData) renderAllCharts();
+});
+// Masthead height rescales displayed wind instantly — no re-fetch needed.
+document.getElementById('fcMastHeight')?.addEventListener('input', () => {
+  if (forecastData) { renderBestForecastChart(); renderForecastTable(); }
 });
 
 // â”€â”€ API call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -236,13 +250,15 @@ function renderBestForecastChart() {
   if (!winner) { panel.style.display = 'none'; return; }
 
   panel.style.display = '';
-  document.getElementById('fcBestTitle').textContent = bestSeriesLabel() + ' · calibrated p10–p90';
+  document.getElementById('fcBestTitle').textContent = bestSeriesLabel() + ' · calibrated p10–p90'
+    + (mf > 1 ? ` · ${document.getElementById('fcMastHeight').value} m masthead` : '');
 
+  const mf = mastheadFactor();
   const times = winner.hours.map(h => h.time_utc);
-  const ws_kt = winner.hours.map(h => h.corrected_ws_ms != null ? +(h.corrected_ws_ms * MS_TO_KT).toFixed(1) : (h.ws_ms != null ? +(h.ws_ms * MS_TO_KT).toFixed(1) : null));
-  const p10_kt = winner.hours.map(h => h.ws_p10_ms != null ? +(h.ws_p10_ms * MS_TO_KT).toFixed(1) : null);
-  const p90_kt = winner.hours.map(h => h.ws_p90_ms != null ? +(h.ws_p90_ms * MS_TO_KT).toFixed(1) : null);
-  const gust_kt = winner.hours.map(h => (h.corrected_gust_ms ?? h.gust_ms) != null ? +((h.corrected_gust_ms ?? h.gust_ms) * MS_TO_KT).toFixed(1) : null);
+  const ws_kt = winner.hours.map(h => h.corrected_ws_ms != null ? +(h.corrected_ws_ms * MS_TO_KT * mf).toFixed(1) : (h.ws_ms != null ? +(h.ws_ms * MS_TO_KT * mf).toFixed(1) : null));
+  const p10_kt = winner.hours.map(h => h.ws_p10_ms != null ? +(h.ws_p10_ms * MS_TO_KT * mf).toFixed(1) : null);
+  const p90_kt = winner.hours.map(h => h.ws_p90_ms != null ? +(h.ws_p90_ms * MS_TO_KT * mf).toFixed(1) : null);
+  const gust_kt = winner.hours.map(h => (h.corrected_gust_ms ?? h.gust_ms) != null ? +((h.corrected_gust_ms ?? h.gust_ms) * MS_TO_KT * mf).toFixed(1) : null);
   const wd = winner.hours.map(h => h.corrected_wd_deg ?? h.wd_deg);
 
   const mainWs = ws_kt;
@@ -849,6 +865,7 @@ function renderForecastTable() {
   const wrap = document.getElementById('fcTableWrap');
   if (!wrap) return;
 
+  const mf = mastheadFactor();
   const winner = bestSeries();
   if (!winner) { wrap.style.display = 'none'; return; }
   wrap.innerHTML = '';
@@ -876,9 +893,9 @@ function renderForecastTable() {
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   for (const hour of winner.hours) {
-    const ws_kt = hour.corrected_ws_ms != null ? (hour.corrected_ws_ms * MS_TO_KT).toFixed(1) : (hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT).toFixed(1) : null);
-    const wsRange = hour.ws_p10_ms != null && hour.ws_p90_ms != null ? `${(hour.ws_p10_ms * MS_TO_KT).toFixed(1)}–${(hour.ws_p90_ms * MS_TO_KT).toFixed(1)}` : (ws_kt ?? ' - ');
-    const gust_kt = (hour.corrected_gust_ms ?? hour.gust_ms) != null ? ((hour.corrected_gust_ms ?? hour.gust_ms) * MS_TO_KT).toFixed(1) : null;
+    const ws_kt = hour.corrected_ws_ms != null ? (hour.corrected_ws_ms * MS_TO_KT * mf).toFixed(1) : (hour.ws_ms != null ? (hour.ws_ms * MS_TO_KT * mf).toFixed(1) : null);
+    const wsRange = hour.ws_p10_ms != null && hour.ws_p90_ms != null ? `${(hour.ws_p10_ms * MS_TO_KT * mf).toFixed(1)}–${(hour.ws_p90_ms * MS_TO_KT * mf).toFixed(1)}` : (ws_kt ?? ' - ');
+    const gust_kt = (hour.corrected_gust_ms ?? hour.gust_ms) != null ? ((hour.corrected_gust_ms ?? hour.gust_ms) * MS_TO_KT * mf).toFixed(1) : null;
     const wd = hour.wd_p10_deg != null && hour.wd_p90_deg != null ? `${Math.round(hour.wd_p10_deg)}–${Math.round(hour.wd_p90_deg)}°` : (hour.corrected_wd_deg ?? hour.wd_deg) != null ? Math.round(hour.corrected_wd_deg ?? hour.wd_deg) + '°' : ' - ';
     const temp = hour.temp_c != null ? hour.temp_c.toFixed(1) : ' - ';
     const precip = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';
