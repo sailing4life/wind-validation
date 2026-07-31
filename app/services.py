@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx
 
 from .cache import TTLCache
-from .calibration import CalibrationSample, band_from_sigma, blend_hour, calibrate, circular_delta, emos_sigma, scale_gust
+from .calibration import CalibrationSample, band_from_sigma, blend_hour, calibrate, circular_delta, scale_gust
 from .catalog import select_candidate_models
 from .config import Settings
 from .domain import ForecastValue, Observation, ScoreRow
@@ -858,7 +858,9 @@ class ValidationService:
                 models_series.append({"model_id": model.model_id, "hours": hours_list})
 
         eps_by_time = fetch_eps_sigma(self.settings, lat, lon, hours_ahead) if member_hours else {}
-        blend_series, calibration_summary = self._build_blend(member_hours, weights, eps_by_time, now)
+        blend_series, calibration_summary = self._build_blend(
+            member_hours, weights, eps_by_time, now, self.settings.eps_spread_factor,
+        )
 
         return {
             "winner_model_id": winner_model_id,
@@ -921,14 +923,22 @@ class ValidationService:
         weights: dict[str, float],
         eps_by_time: dict[datetime, tuple[float, float]] | None = None,
         now: datetime | None = None,
+        eps_factor_default: float = 0.65,
     ) -> tuple[dict | None, dict]:
         summary: dict = {"status": "insufficient_history", "n_effective": 0.0,
                          "method": "inverse_mse_blend", "weights": weights}
         if not member_hours:
             return None, summary
+        eps_by_time = eps_by_time or {}
         times = sorted({t for hours in member_hours.values() for t in hours})
         extras_keys = ("gust_ms", "temp_c", "precip_mm", "cloud_cover_pct", "pressure_msl_hpa")
-        blend_hours_list: list[dict] = []
+
+        # Pass 1: blend the model centres, and where local calibration overlaps
+        # the ensemble, record how much the (over-dispersed) ensemble spread
+        # must shrink to match how the blend actually verifies here.
+        records: list[tuple[datetime, dict, dict]] = []
+        ratio_a: list[float] = []
+        ratio_c: list[float] = []
         for t in times:
             entries: list[dict] = []
             extras: dict[str, list[tuple[float, float]]] = defaultdict(list)
@@ -946,13 +956,10 @@ class ValidationService:
                         "n_effective": cal.get("historical_n_effective", cal.get("n_effective", 0.0)),
                     })
                 else:
-                    # Uncalibrated members still contribute their raw wind:
-                    # the blend centre helps even without local history.
                     entries.append({"weight": w, "u": fv.u10, "v": fv.v10})
                 for key in extras_keys:
                     val = getattr(fv, key)
                     if key == "gust_ms" and val is not None and cal["status"] != "insufficient_history":
-                        # Keep each member's gust factor over its corrected wind.
                         val = scale_gust(val, uv_to_speed_dir(fv.u10, fv.v10)[0], cal["ws_ms"])
                     if val is not None:
                         extras[key].append((w, val))
@@ -967,23 +974,35 @@ class ValidationService:
             for key, pairs in extras.items():
                 w_sum = sum(w for w, _ in pairs)
                 brow[key] = sum(w * val for w, val in pairs) / w_sum if w_sum else None
-            # Band: EMOS-blend the calibrated local scale with the ICON-EPS
-            # ensemble spread (grows with lead, widens on uncertain flows).
-            eps = (eps_by_time or {}).get(t)
-            lead_h = (t - now).total_seconds() / 3600.0 if now else 0.0
-            local_sa, local_sc = combined.get("sigma_along_ms"), combined.get("sigma_cross_ms")
+            eps = eps_by_time.get(t)
+            if eps and combined.get("sigma_along_ms") is not None:
+                if eps[0] > 0.1:
+                    ratio_a.append(combined["sigma_along_ms"] / eps[0])
+                if eps[1] > 0.1:
+                    ratio_c.append(combined["sigma_cross_ms"] / eps[1])
+            records.append((t, combined, brow))
+
+        def _median(xs: list[float]) -> float:
+            s = sorted(xs)
+            return s[len(s) // 2]
+
+        # Spread-calibration factor: the local error / ensemble-spread ratio,
+        # clamped so the band stays sane. Falls back to the configured default
+        # where there is no overlap (e.g. a brand-new location or long lead).
+        fa = min(1.2, max(0.3, _median(ratio_a))) if len(ratio_a) >= 3 else eps_factor_default
+        fc = min(1.2, max(0.3, _median(ratio_c))) if len(ratio_c) >= 3 else eps_factor_default
+
+        # Pass 2: band from the calibrated ensemble spread (shape follows the
+        # ensemble across lead and flow; magnitude anchored to local skill).
+        blend_hours_list: list[dict] = []
+        for t, combined, brow in records:
+            eps = eps_by_time.get(t)
             sa = sc = None
             source = None
-            if local_sa is not None:
-                sa, sc, source = local_sa, local_sc, "blend"
-                if eps:
-                    sa = emos_sigma(local_sa, eps[0], lead_h)
-                    sc = emos_sigma(local_sc, eps[1], lead_h)
-                    source = "blend+emos"
-            elif eps:
-                # No local history yet: the ensemble spread alone still gives an
-                # honest, flow-dependent band.
-                sa, sc, source = eps[0], eps[1], "emos"
+            if eps:
+                sa, sc, source = fa * eps[0], fc * eps[1], "eps_calibrated"
+            elif combined.get("sigma_along_ms") is not None:
+                sa, sc, source = combined["sigma_along_ms"], combined["sigma_cross_ms"], "blend"
             if sa is not None:
                 brow.update(band_from_sigma(combined["ws_ms"], combined["wd_deg"], sa, sc))
                 brow["calibration_sigma_along_ms"] = sa
@@ -991,8 +1010,6 @@ class ValidationService:
                 brow["calibration_n_effective"] = combined.get("n_effective", 0.0)
                 brow["calibration_uncertainty_source"] = source
                 if brow.get("gust_ms") is not None:
-                    # The gust envelope must cover the band: in the p90
-                    # scenario the mean wind alone already reaches p90.
                     brow["gust_ms"] = max(brow["gust_ms"], brow["ws_p90_ms"])
             blend_hours_list.append(brow)
         if not blend_hours_list:
@@ -1000,13 +1017,13 @@ class ValidationService:
         banded = [h for h in blend_hours_list if h.get("ws_p10_ms") is not None]
         if banded:
             n_eff = max(h["calibration_n_effective"] for h in banded)
-            uses_emos = any("emos" in h["calibration_uncertainty_source"] for h in banded)
-            uses_local = any(h["calibration_uncertainty_source"] != "emos" for h in banded)
+            uses_eps = any(h["calibration_uncertainty_source"] == "eps_calibrated" for h in banded)
             summary = {
                 **summary,
                 "status": "calibrated" if n_eff >= 15 else "bootstrap",
                 "n_effective": n_eff,
-                "uncertainty_source": "blend+emos" if (uses_emos and uses_local) else ("emos" if uses_emos else "blend"),
+                "uncertainty_source": "eps_calibrated" if uses_eps else "blend",
+                "eps_factor": round(fa, 2),
             }
         return {"model_id": "blend", "hours": blend_hours_list}, summary
 

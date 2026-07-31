@@ -584,8 +584,7 @@ function renderVerification() {
   const weightsLabel = Object.entries(weights).sort((a, b) => b[1] - a[1])
     .map(([id, w]) => `${id} ${(w * 100).toFixed(0)}%`).join(' + ') || '—';
   const uncertaintyText = {
-    'blend+emos': 'historical local-hour/regime residuals at short lead, blended into the ICON-EPS ensemble spread (EMOS) further out',
-    emos: 'ICON-EPS ensemble spread (EMOS) — local history still building',
+    eps_calibrated: `ICON-EPS ensemble spread, calibrated to local skill (×${(c.eps_factor ?? 0.65).toFixed(2)})`,
   }[c.uncertainty_source] || 'historical local-hour, regime and lead-matched residuals; recent bias correction fades with lead time';
   el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Band evidence (n eff.):</span> ${c.n_effective}</div>
     <div class="meta-row"><span class="meta-label">Method:</span> inverse-MSE blend of calibrated models &nbsp; <span class="meta-label">Weights:</span> ${weightsLabel}</div>
@@ -605,8 +604,7 @@ function renderHistoricalErrorProfile() {
   const cross = rows.map(h => +(h.calibration_sigma_cross_ms * MS_TO_KT).toFixed(2));
   const nEff = rows.map(h => h.calibration_n_effective);
   const sourceLabels = {
-    'blend+emos': 'Blended residuals + ICON-EPS spread (EMOS)',
-    emos: 'ICON-EPS ensemble spread (EMOS)',
+    eps_calibrated: 'ICON-EPS spread · calibrated to local skill',
     blend: 'Blended historical residuals',
     historical_hour_regime: 'Historical local-hour + regime residuals',
   };

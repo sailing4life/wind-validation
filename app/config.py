@@ -64,6 +64,10 @@ class Settings:
     live_forecasts_enabled: bool = _env_bool("LIVE_FORECASTS_ENABLED", True)
     # Shared secret for the forecast-push ingest endpoint. Unset → endpoint disabled.
     ingest_token: str | None = os.getenv("INGEST_TOKEN")
+    # Default deflation of the ICON-EPS spread for the p10–p90 band when there is
+    # no local verification overlap to calibrate it. Raw surface ensemble spread
+    # over-disperses a bias-corrected multi-model blend, so <1 tightens the band.
+    eps_spread_factor: float = _env_float("EPS_SPREAD_FACTOR", 0.65)
     request_timeout_seconds: float = _env_float("REQUEST_TIMEOUT_SECONDS", 8.0)
     socib_request_timeout_seconds: float = _env_float("SOCIB_REQUEST_TIMEOUT_SECONDS", 30.0)
     fingerprint_cache_ttl_seconds: int = _env_int("FINGERPRINT_CACHE_TTL_SECONDS", 21600)

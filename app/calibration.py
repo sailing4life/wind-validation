@@ -154,18 +154,6 @@ def band_from_sigma(ws_ms: float, wd_deg: float, sigma_along_ms: float, sigma_cr
     }
 
 
-def emos_sigma(sigma_local_ms: float, sigma_eps_ms: float | None, lead_hours: float, half_life_h: float = 18.0) -> float:
-    """EMOS-style blend of the calibrated local residual scale with the ICON-EPS
-    ensemble spread. The local band (tight, bias-corrected, reliable where we
-    have history) dominates at short lead; the ensemble spread — which grows
-    with lead and widens on genuinely uncertain flows (fronts) — takes over
-    further out. Falls back to the local scale when no ensemble is available."""
-    if sigma_eps_ms is None or sigma_eps_ms <= 0.0:
-        return sigma_local_ms
-    w = 0.5 ** (max(0.0, lead_hours) / half_life_h)
-    return math.sqrt(w * sigma_local_ms ** 2 + (1.0 - w) * sigma_eps_ms ** 2)
-
-
 def scale_gust(
     gust_ms: float | None,
     raw_ws_ms: float,
