@@ -553,8 +553,47 @@ async function bfFetchPressureCharts() {
 
 function bfVisiblePressureCharts() {
   if (!_bfPressure?.length) return [];
-  // Analysis + T+12 give the synoptic picture; more steps just add noise
-  return _bfPressure.filter(c => c.step_h <= 12);
+  // Analysis + next-day evolution: enough synoptic context without a map wall.
+  const analysis = _bfPressure.find(c => c.step_h === 0) || _bfPressure[0];
+  const nextDay = _bfPressure.find(c => c.step_h === 24) || _bfPressure.find(c => c.step_h > 12);
+  return [...new Map([analysis, nextDay].filter(Boolean).map(c => [c.step_h, c])).values()];
+}
+
+function bfOpenImage(src, alt, caption) {
+  const modal = document.getElementById('briefingImageModal');
+  const image = document.getElementById('briefingImageFull');
+  const text = document.getElementById('briefingImageCaption');
+  if (!modal || !image) return;
+  image.src = src;
+  image.alt = alt || '';
+  if (text) text.textContent = caption || alt || '';
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.getElementById('briefingImageClose')?.focus();
+}
+
+function bfCloseImage() {
+  const modal = document.getElementById('briefingImageModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+document.getElementById('briefingImageClose')?.addEventListener('click', bfCloseImage);
+document.getElementById('briefingImageModal')?.addEventListener('click', event => {
+  if (event.target === event.currentTarget) bfCloseImage();
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape') bfCloseImage(); });
+
+function bfMakeImageExpandable(img, caption) {
+  img.tabIndex = 0;
+  img.setAttribute('role', 'button');
+  img.setAttribute('aria-label', `Enlarge ${caption || img.alt || 'map'}`);
+  const open = () => bfOpenImage(img.src, img.alt, caption);
+  img.addEventListener('click', open);
+  img.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+  });
 }
 
 function bfRenderPressureCharts() {
@@ -576,6 +615,7 @@ function bfRenderPressureCharts() {
     img.loading = 'lazy';
     const cap = document.createElement('figcaption');
     cap.textContent = `T+${c.step_h}h — ${bfFmt(c.valid_utc)}:00`;
+    bfMakeImageExpandable(img, cap.textContent);
     fig.append(img, cap);
     grid.appendChild(fig);
   });
@@ -1626,6 +1666,7 @@ function _bfRenderWindmapFrames(frames) {
     }
     const cap = document.createElement('figcaption');
     cap.textContent = caption;
+    bfMakeImageExpandable(img, caption);
     fig.appendChild(img);
     fig.appendChild(cap);
     grid.appendChild(fig);
@@ -1874,6 +1915,3 @@ document.getElementById('bfArchiveDeleteBtn')?.addEventListener('click', async (
     alert('Delete failed: ' + err.message);
   }
 });
-
-
-

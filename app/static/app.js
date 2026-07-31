@@ -748,24 +748,37 @@ document.querySelectorAll('input[name="querySource"]').forEach((radio) => {
 window.addEventListener("resize", () => drawCharts());
 runBtn.addEventListener("click", runValidation);
 
-// ── Mobile sidebar toggle ─────────────────────────────────────────────────────
+// ── Sidebar toggle: collapsible workspace on desktop, drawer on mobile ────────
 (function () {
   const toggleBtn = document.getElementById('sidebarToggle');
   const sidebar   = document.querySelector('.app-sidebar');
   const overlay   = document.getElementById('sidebarOverlay');
   if (!toggleBtn || !sidebar || !overlay) return;
 
+  const mobile = () => window.innerWidth <= 768;
   function openSidebar()  { sidebar.classList.add('open');    overlay.classList.add('open'); }
   function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('open'); }
+  function setDesktopCollapsed(collapsed) {
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    toggleBtn.setAttribute('aria-label', collapsed ? 'Show sidebar' : 'Collapse sidebar');
+    toggleBtn.title = collapsed ? 'Show sidebar' : 'Collapse sidebar';
+    localStorage.setItem('wind-validation.sidebar-collapsed', String(collapsed));
+  }
+  if (!mobile()) setDesktopCollapsed(localStorage.getItem('wind-validation.sidebar-collapsed') === 'true');
 
-  toggleBtn.addEventListener('click', () =>
-    sidebar.classList.contains('open') ? closeSidebar() : openSidebar()
-  );
+  toggleBtn.addEventListener('click', () => {
+    if (mobile()) {
+      sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+    } else {
+      setDesktopCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+    }
+  });
   overlay.addEventListener('click', closeSidebar);
+  window.addEventListener('resize', () => { if (!mobile()) closeSidebar(); });
 
   // Close sidebar after validate on mobile
   runBtn.addEventListener('click', () => {
-    if (window.innerWidth <= 768) closeSidebar();
+    if (mobile()) closeSidebar();
   });
 })();
 
