@@ -73,11 +73,33 @@ function bfGetActiveBias() {
   return _biasWsMs || 0;
 }
 
+// The series that sections 3 (Surface Wind chart + Hourly table) render.
+// Auto → the calibrated blend (corrected p50 + p10–p90 band). A specific model
+// override → that model's raw hours.
+function bfActiveSeries() {
+  const chosen = document.getElementById('bfModelOverride')?.value;  // '' = Auto
+  if (!chosen && forecastData?.blend?.hours?.length) {
+    return { series: forecastData.blend, calibrated: true };
+  }
+  const id = chosen || _winnerModelId;
+  const models = forecastData?.models || [];
+  return { series: models.find(m => m.model_id === id) || models[0], calibrated: false };
+}
+
+function bfBestLabel() {
+  const w = forecastData?.calibration?.weights || {};
+  if (forecastData?.blend?.hours?.length && Object.keys(w).length > 1) {
+    return 'Blend: ' + Object.entries(w).sort((a, b) => b[1] - a[1])
+      .map(([id, x]) => `${id} ${(x * 100).toFixed(0)}%`).join(' + ');
+  }
+  return _winnerModelId || 'Best';
+}
+
 function bfPopulateModelOverride() {
   const sel = document.getElementById('bfModelOverride');
   if (!sel || !forecastData) return;
   const current = sel.value;
-  sel.innerHTML = '<option value="">Auto (best)</option>';
+  sel.innerHTML = '<option value="">Auto (calibrated blend)</option>';
   (forecastData.models || []).forEach(m => {
     const opt = document.createElement('option');
     opt.value = m.model_id;
@@ -137,30 +159,30 @@ function renderBriefingBestChart() {
   const chartDiv= document.getElementById('bfBestChart');
   if (!panel || !chartDiv || !forecastData) { if (panel) panel.style.display = 'none'; return; }
 
-  const { models } = forecastData;
-  const activeModelId = bfGetActiveModel();
-  const activeBias    = bfGetActiveBias();
-  const winner = models.find(m => m.model_id === activeModelId) || models[0];
+  const { series: winner, calibrated } = bfActiveSeries();
   if (!winner) { panel.style.display = 'none'; return; }
   panel.style.display = '';
 
   const titleEl = document.getElementById('bfBestTitle');
-  if (titleEl) titleEl.textContent =
-    winner.model_id + (activeBias ? `  -  bias ${(activeBias * MS_TO_KT).toFixed(1)} kt` : '');
+  if (titleEl) titleEl.textContent = calibrated ? `${bfBestLabel()}  -  calibrated p10-p90` : winner.model_id;
 
   const fh      = bfFilterHours(winner.hours);
-  const biasKt  = activeBias * MS_TO_KT;
+  const kt      = (h, k) => h[k] != null ? +(h[k] * MS_TO_KT).toFixed(1) : null;
   const times   = fh.map(h => bfLocalISO(h.time_utc));
-  const ws_kt   = fh.map(h => h.ws_ms   != null ? +(h.ws_ms   * MS_TO_KT).toFixed(1) : null);
-  const corr_kt = ws_kt.map(v  => v != null ? +(v - biasKt).toFixed(1) : null);
-  const gust_kt = fh.map(h => h.gust_ms != null ? +(h.gust_ms * MS_TO_KT).toFixed(1) : null);
-  const wd      = fh.map(h => h.wd_deg);
+  const ws_kt   = calibrated ? fh.map(h => kt(h, 'corrected_ws_ms') ?? kt(h, 'ws_ms')) : fh.map(h => kt(h, 'ws_ms'));
+  const p10_kt  = calibrated ? fh.map(h => kt(h, 'ws_p10_ms')) : fh.map(() => null);
+  const p90_kt  = calibrated ? fh.map(h => kt(h, 'ws_p90_ms')) : fh.map(() => null);
+  const gust_kt = fh.map(h => (calibrated ? kt(h, 'corrected_gust_ms') : null) ?? kt(h, 'gust_ms'));
+  const wd      = fh.map(h => calibrated ? (h.corrected_wd_deg ?? h.wd_deg) : h.wd_deg);
+  const mainWs  = ws_kt;
 
-  // Briefing always shows corrected TWS when a bias exists
-  const mainWs = activeBias !== 0 ? corr_kt : ws_kt;
-
-  const traces = [{
-    x: times, y: mainWs, name: 'TWS (kt)',
+  const traces = [];
+  if (calibrated && p10_kt.some(v => v != null) && p90_kt.some(v => v != null)) {
+    traces.push({ x: times, y: p10_kt, type: 'scatter', mode: 'lines', line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
+    traces.push({ x: times, y: p90_kt, name: 'TWS p10-p90', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(37,99,235,.14)', line: { width: 0 } });
+  }
+  traces.push({
+    x: times, y: mainWs, name: calibrated ? 'TWS p50 (kt)' : 'TWS (kt)',
     type: 'scatter', mode: 'lines+markers+text',
     line: { color: '#2563eb', width: 2 },
     marker: { color: '#2563eb', size: 5 },
@@ -168,7 +190,7 @@ function renderBriefingBestChart() {
     textposition: 'top center',
     textfont: { size: 9, color: '#1e3a8a' },
     yaxis: 'y1',
-  }];
+  });
 
   if (gust_kt.some(v => v != null)) {
     traces.push({
@@ -325,18 +347,14 @@ function renderBriefingWindTable() {
   const wrap = document.getElementById('bfTableWrap');
   if (!wrap || !forecastData) return;
 
-  const { models } = forecastData;
-  const activeModelId = bfGetActiveModel();
-  const activeBias    = bfGetActiveBias();
-  const winner  = models.find(m => m.model_id === activeModelId) || models[0];
+  const { series: winner, calibrated } = bfActiveSeries();
   if (!winner) { wrap.innerHTML = ''; return; }
 
   const fh       = bfFilterHours(winner.hours);
-  const biasKt   = activeBias * MS_TO_KT;
   const hasPrecip= winner.hours.some(h => h.precip_mm != null);
 
   let headerCols = '<th class="bfc-time">Time</th>'
-    + '<th class="bfc-num" title="True wind speed (kt)">TWS</th>'
+    + `<th class="bfc-num" title="True wind speed (kt)">${calibrated ? 'TWS p10-p90' : 'TWS'}</th>`
     + '<th class="bfc-num" title="Wind gust (kt)">Gust</th>'
     + '<th class="bfc-num" title="True wind direction ( deg)">TWD</th>'
     + '<th class="bfc-num" title="Temperature ( degC)">Temp</th>';
@@ -349,16 +367,20 @@ function renderBriefingWindTable() {
 
   const tbody = document.createElement('tbody');
   for (const hour of fh) {
-    const raw_kt  = hour.ws_ms   != null ? (hour.ws_ms   * MS_TO_KT) : null;
-    const tws_kt  = raw_kt != null ? (raw_kt - biasKt).toFixed(1) : null;
-    const gust_kt = hour.gust_ms != null ? (hour.gust_ms * MS_TO_KT).toFixed(1) : null;
-    const wd      = hour.wd_deg  != null ? `${Math.round(hour.wd_deg)} deg` : ' - ';
+    const p50ms   = calibrated ? (hour.corrected_ws_ms ?? hour.ws_ms) : hour.ws_ms;
+    const tws_kt  = p50ms != null ? (p50ms * MS_TO_KT).toFixed(1) : null;
+    const twsCell = (calibrated && hour.ws_p10_ms != null && hour.ws_p90_ms != null)
+      ? `${(hour.ws_p10_ms * MS_TO_KT).toFixed(1)}-${(hour.ws_p90_ms * MS_TO_KT).toFixed(1)}` : (tws_kt ?? ' - ');
+    const gustms  = (calibrated ? hour.corrected_gust_ms : null) ?? hour.gust_ms;
+    const gust_kt = gustms != null ? (gustms * MS_TO_KT).toFixed(1) : null;
+    const wdDeg   = calibrated ? (hour.corrected_wd_deg ?? hour.wd_deg) : hour.wd_deg;
+    const wd      = wdDeg != null ? `${Math.round(wdDeg)} deg` : ' - ';
     const temp    = hour.temp_c  != null ? hour.temp_c.toFixed(1) : ' - ';
     const precip  = hour.precip_mm != null ? hour.precip_mm.toFixed(2) : ' - ';
 
     const tr = document.createElement('tr');
     let cells = `<td class="bfc-time fc-time">${bfFmt(hour.time_utc)}</td>`;
-    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${tws_kt  ?? ' - '}</td>`;
+    cells += `<td class="bfc-num fc-num" style="background:${tws_kt  != null ? windSpeedColor(+tws_kt)  : ''}">${twsCell}</td>`;
     cells += `<td class="bfc-num fc-num" style="background:${gust_kt != null ? windSpeedColor(+gust_kt) : ''}">${gust_kt ?? ' - '}</td>`;
     cells += `<td class="bfc-num fc-num">${wd}</td><td class="bfc-num fc-num">${temp}</td>`;
     if (hasPrecip) cells += `<td class="bfc-rain fc-num">${precip}</td>`;
@@ -375,7 +397,7 @@ function renderBriefingWindTable() {
   wrap.innerHTML = '';
   const heading = document.createElement('div');
   heading.className = 'fc-chart-title';
-  heading.textContent = `Hourly Forecast  -  ${winner.model_id}`;
+  heading.textContent = `Hourly Forecast  -  ${calibrated ? bfBestLabel() : winner.model_id}`;
   wrap.appendChild(heading);
   wrap.appendChild(scrollWrap);
 }
