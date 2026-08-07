@@ -48,6 +48,17 @@ def test_band_grows_with_lead_following_the_ensemble():
     assert widths[-1] > widths[0]
 
 
+def test_blend_gust_is_not_inflated_by_the_p90_mean_wind_band():
+    # Gust and p90 describe different things.  A broad uncertainty band must
+    # not turn a 9 m/s model gust into a higher, invented gust.
+    blend, _ = ValidationService._build_blend(
+        _member_hours(local_sigma=5.0), {"a": 1.0}, _eps(8.0), NOW, eps_factor_default=1.0,
+    )
+    hour = blend["hours"][0]
+    assert hour["ws_p90_ms"] > 9.0
+    assert hour["gust_ms"] == 9.0
+
+
 def test_falls_back_to_local_band_without_an_ensemble():
     blend, summary = ValidationService._build_blend(
         _member_hours(local_sigma=1.0), {"a": 1.0}, {}, NOW, eps_factor_default=0.65,

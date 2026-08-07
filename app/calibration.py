@@ -158,10 +158,13 @@ def scale_gust(
     gust_ms: float | None,
     raw_ws_ms: float,
     corrected_ws_ms: float,
-    ws_p90_ms: float | None = None,
 ) -> float | None:
-    """Keep the model's gust factor over the calibrated wind, and never report
-    a gust below the p90 mean wind: if the mean reaches p90, gusts exceed it."""
+    """Keep the model's gust factor over the calibrated mean wind.
+
+    Gust is a modelled short-duration peak; p90 is uncertainty in the mean
+    wind.  They must remain separate, otherwise a wide error band can invent
+    a gust higher than every contributing model.
+    """
     if gust_ms is None:
         return None
     if raw_ws_ms > 1.0:
@@ -169,10 +172,7 @@ def scale_gust(
     else:
         # The gust factor is meaningless in near-calm; shift additively instead.
         scaled = gust_ms + (corrected_ws_ms - raw_ws_ms)
-    scaled = max(scaled, corrected_ws_ms)
-    if ws_p90_ms is not None:
-        scaled = max(scaled, ws_p90_ms)
-    return scaled
+    return max(scaled, corrected_ws_ms)
 
 
 def blend_hour(members: list[dict]) -> dict | None:

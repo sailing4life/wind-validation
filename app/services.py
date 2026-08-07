@@ -845,7 +845,7 @@ class ValidationService:
                         # remain comparable in the UI.
                         row["corrected_ws_ms"] = cal["ws_ms"]
                         row["corrected_wd_deg"] = cal["wd_deg"]
-                        row["corrected_gust_ms"] = scale_gust(fv.gust_ms, ws, cal["ws_ms"], cal.get("ws_p90_ms"))
+                        row["corrected_gust_ms"] = scale_gust(fv.gust_ms, ws, cal["ws_ms"])
                         for key in ("ws_p10_ms", "ws_p90_ms", "wd_p10_deg", "wd_p90_deg"):
                             if key in cal:
                                 row[key] = cal[key]
@@ -1009,8 +1009,6 @@ class ValidationService:
                 brow["calibration_sigma_cross_ms"] = sc
                 brow["calibration_n_effective"] = combined.get("n_effective", 0.0)
                 brow["calibration_uncertainty_source"] = source
-                if brow.get("gust_ms") is not None:
-                    brow["gust_ms"] = max(brow["gust_ms"], brow["ws_p90_ms"])
             blend_hours_list.append(brow)
         if not blend_hours_list:
             return None, summary
