@@ -27,4 +27,10 @@ def detect_country(lat: float, lon: float) -> str:
     # France so shared border coordinates retain the existing France routing.
     if 35.0 <= lat <= 44.5 and -10.0 <= lon <= 5.5:
         return "ES"
+    if 55.0 <= lat <= 69.5 and 10.5 <= lon <= 24.5:
+        return "SE"
+    if 49.0 <= lat <= 55.0 and 14.0 <= lon <= 24.5:
+        return "PL"
+    if 24.0 <= lat <= 50.0 and -125.0 <= lon <= -66.0:
+        return "US"
     return "OTHER"

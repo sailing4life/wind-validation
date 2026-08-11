@@ -49,6 +49,12 @@ Source settings:
 - `OPENMETEO_ECMWF_MODEL`: Open-Meteo model name for ecmwf_global, default `ecmwf_ifs04`
 
 KNMI observations use `daggegevens.knmi.nl` (free, no API key needed).
+Regional live-observation adapters are enabled automatically for their coverage:
+SMHI + Swedish Maritime Administration ViVa (Sweden), Rijkswaterstaat (NL),
+NOAA/NDBC (US waters), and IMGW (Poland). `RWS_OBSERVATION_URL` is optional:
+set it to a supported Waterinfo GeoJSON export/proxy with `station_id`,
+`time_utc`, `ws_ms`, and `wd_deg` properties. This avoids treating a changing
+browser-only Waterinfo interface as a production API.
 For the Bay of Palma, the SOCIB buoy is included as a fixed 10-minute wind-observation source. Set `SOCIB_BUOY_ENABLED=false` to disable it, `SOCIB_PALMA_OPENDAP_URL` to override its public OPeNDAP endpoint, or `SOCIB_REQUEST_TIMEOUT_SECONDS` (default: 30) for a slower SOCIB response.
 
 If a live source call fails, that source/model returns no rows for that refresh cycle.

@@ -70,6 +70,13 @@ class Settings:
     eps_spread_factor: float = _env_float("EPS_SPREAD_FACTOR", 0.65)
     request_timeout_seconds: float = _env_float("REQUEST_TIMEOUT_SECONDS", 8.0)
     socib_request_timeout_seconds: float = _env_float("SOCIB_REQUEST_TIMEOUT_SECONDS", 30.0)
+    smhi_observation_url: str = os.getenv("SMHI_OBSERVATION_URL", "https://opendata-download-metobs.smhi.se/api")
+    viva_observation_url: str = os.getenv("VIVA_OBSERVATION_URL", "https://services.viva.sjofartsverket.se/output/vivaoutputservice.svc")
+    ndbc_latest_observations_url: str = os.getenv("NDBC_LATEST_OBSERVATIONS_URL", "https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt")
+    imgw_observation_url: str = os.getenv("IMGW_OBSERVATION_URL", "https://danepubliczne.imgw.pl/api/data/synop")
+    # A Waterinfo/RWS GeoJSON export or small trusted proxy.  It must expose
+    # Feature properties station_id, time_utc, ws_ms and wd_deg.
+    rws_observation_url: str | None = os.getenv("RWS_OBSERVATION_URL")
     fingerprint_cache_ttl_seconds: int = _env_int("FINGERPRINT_CACHE_TTL_SECONDS", 21600)
     knmi_api_key: str | None = os.getenv("KNMI_API_KEY")
     knmi_api_base_url: str = os.getenv("KNMI_API_BASE_URL", "https://api.dataplatform.knmi.nl/open-data/v1")

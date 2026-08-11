@@ -7,6 +7,7 @@ from .config import Settings
 from .domain import Observation, Station
 from .qc import qc_observations
 from .repositories import InMemoryRepository
+from .regional_adapters import ImgwAdapter, NdbcAdapter, RwsAdapter, SmhiAdapter, VivaAdapter
 
 
 class ObservationBroker:
@@ -20,10 +21,15 @@ class ObservationBroker:
         self._metar = MetarAdapter(settings)
         self._brightsky = BrightSkyAdapter(settings)
         self._socib = SocibPalmaAdapter(settings)
+        self._smhi = SmhiAdapter(settings)
+        self._viva = VivaAdapter(settings)
+        self._rws = RwsAdapter(settings)
+        self._ndbc = NdbcAdapter(settings)
+        self._imgw = ImgwAdapter(settings)
 
     def _source_order(self, country: str) -> list[BaseSourceAdapter]:
         if country == "NL":
-            return [self._metar, self._knmi, self._isd]
+            return [self._metar, self._knmi, self._rws, self._isd]
         if country == "FR":
             return [self._metar, self._mf, self._isd]
         if country == "IT":
@@ -31,6 +37,12 @@ class ObservationBroker:
             return [self._metar] + extra + [self._isd]
         if country == "ES":
             return [self._socib, self._metar, self._isd]
+        if country == "SE":
+            return [self._viva, self._smhi, self._metar, self._isd]
+        if country == "PL":
+            return [self._imgw, self._metar, self._isd]
+        if country == "US":
+            return [self._ndbc, self._metar, self._isd]
         # OTHER includes DE, BE, GB, etc. — METAR + BrightSky (DWD) + ISD fallback
         return [self._metar, self._brightsky, self._isd]
 
