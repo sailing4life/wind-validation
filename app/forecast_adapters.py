@@ -41,6 +41,11 @@ def _get_with_retry(client: httpx.Client, url: str, params: dict) -> httpx.Respo
     return resp
 
 
+def _parse_utc(value) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
 def _parse_optional_float(values: list, index: int) -> float | None:
     if index >= len(values):
         return None
@@ -64,6 +69,7 @@ class OpenMeteoForecastAdapter:
     """Fetches hourly wind forecast values from Open-Meteo for configured models."""
 
     def __init__(self, settings: Settings) -> None:
+        self._future_cache: dict[tuple, tuple[float, datetime, datetime, list[ForecastValue]]] = {}
         self.settings = settings
         # Regular forecast endpoints (used for near-future data)
         self.endpoint_map = {
@@ -170,13 +176,13 @@ class OpenMeteoForecastAdapter:
         for i, (lat, lon) in enumerate(in_cov):
             if i >= len(payload):
                 break
-            # Previous-runs API returns the actual model run initialization time;
-            # regular forecast API has no run_time field.
+            # Only explicit source metadata is an initialization time. The endpoint
+            # name alone does not prove a particular run or historical availability.
             api_run_time: datetime | None = None
             run_time_raw = payload[i].get("run_time")
             if run_time_raw:
                 try:
-                    api_run_time = datetime.fromisoformat(str(run_time_raw)).replace(tzinfo=UTC)
+                    api_run_time = _parse_utc(run_time_raw)
                 except (TypeError, ValueError):
                     pass
 
@@ -195,7 +201,7 @@ class OpenMeteoForecastAdapter:
                 hourly.get("wind_direction_10m", []),
             )):
                 try:
-                    valid_time = datetime.fromisoformat(str(t_raw)).replace(tzinfo=UTC)
+                    valid_time = _parse_utc(t_raw)
                     ws_ms, wd_deg = float(ws), float(wd)
                 except (TypeError, ValueError):
                     continue
@@ -219,12 +225,11 @@ class OpenMeteoForecastAdapter:
                     shortwave_wm2 = _parse_optional_float(radiations, j)
                     cape_jkg = _parse_optional_float(capes, j)
                     boundary_layer_height_m = _parse_optional_float(blh_values, j)
-                # Use authoritative run_time from previous-runs API when available.
-                # For regular forecast API (no run_time field), cap estimate to past.
+                # Preserve actual collection time when the source omits initialization metadata.
                 if api_run_time is not None:
                     run_time = api_run_time
                 else:
-                    run_time = min(valid_time - timedelta(hours=6), now_utc)
+                    run_time = now_utc
                 rows.append(ForecastValue(
                     model_id=model_id,
                     run_time_utc=run_time,
@@ -238,6 +243,8 @@ class OpenMeteoForecastAdapter:
                     shortwave_wm2=shortwave_wm2,
                     cape_jkg=cape_jkg,
                     boundary_layer_height_m=boundary_layer_height_m,
+                    run_time_source="source" if api_run_time is not None else "fetched_snapshot",
+                    fetched_at_utc=now_utc,
                 ))
         return rows
 
@@ -318,12 +325,32 @@ class OpenMeteoForecastAdapter:
         now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         forecast_days = max(1, math.ceil((end - now).total_seconds() / 86400) + 1)
         model_param = self.model_param_map.get(model.model_id, "")
-        return self._fetch_batch(
-            endpoint, model.model_id, model_param, in_cov,
+        # Share hourly future collections between monitored locations and the
+        # point forecast builder. Coordinates shared by nearby locations reuse data.
+        cached_rows: list[ForecastValue] = []
+        missing = []
+        for lat, lon in in_cov:
+            cached = self._future_cache.get((model.model_id, lat, lon))
+            if cached and time.monotonic() - cached[0] < 3600 and cached[1] <= start and cached[2] >= end:
+                cached_rows.extend(r for r in cached[3] if start <= r.valid_time_utc <= end)
+            else:
+                missing.append((lat, lon))
+        if not missing:
+            return cached_rows
+        fetched = self._fetch_batch(
+            endpoint, model.model_id, model_param, missing,
             past_days=0, forecast_days=forecast_days,
             start=start, end=end,
             include_extras=True,
         )
+        collected = time.monotonic()
+        # Bound the cache to live coordinates rather than accumulating old pins.
+        self._future_cache = {k: v for k, v in self._future_cache.items() if collected - v[0] < 3600}
+        for lat, lon in missing:
+            point_rows = [r for r in fetched if r.lat == lat and r.lon == lon]
+            if point_rows:
+                self._future_cache[(model.model_id, lat, lon)] = (collected, start, end, point_rows)
+        return cached_rows + fetched
 
     def fetch_model(self, model: ModelDefinition, request: ForecastFetchRequest) -> list[ForecastValue]:
         stations = [s for s in request.stations if in_bbox(s.lat, s.lon, model.coverage_bbox)]
@@ -361,12 +388,13 @@ class OpenMeteoForecastAdapter:
                 except Exception as exc:
                     logger.warning("Forecast fetch failed for %s station %s", model.model_id, station.station_id, exc_info=exc)
                     continue
+                fetched_at = datetime.now(UTC)
                 data = resp.json()
                 api_run_time: datetime | None = None
                 run_time_raw = data.get("run_time")
                 if run_time_raw:
                     try:
-                        api_run_time = datetime.fromisoformat(str(run_time_raw)).replace(tzinfo=UTC)
+                        api_run_time = _parse_utc(run_time_raw)
                     except (TypeError, ValueError):
                         pass
                 payload = data.get("hourly", {})
@@ -375,7 +403,7 @@ class OpenMeteoForecastAdapter:
                 wd_values = payload.get("wind_direction_10m", [])
                 for t_raw, ws, wd in zip(times, ws_values, wd_values):
                     try:
-                        valid_time = datetime.fromisoformat(str(t_raw)).replace(tzinfo=UTC)
+                        valid_time = _parse_utc(t_raw)
                         ws_ms = float(ws)
                         wd_deg = float(wd)
                     except (TypeError, ValueError):
@@ -383,7 +411,7 @@ class OpenMeteoForecastAdapter:
                     if valid_time < request.start or valid_time > request.end:
                         continue
                     u10, v10 = speed_dir_to_uv(ws_ms, wd_deg)
-                    run_time = api_run_time if api_run_time is not None else valid_time - timedelta(hours=6)
+                    run_time = api_run_time if api_run_time is not None else fetched_at
                     rows.append(
                         ForecastValue(
                             model_id=model.model_id,
@@ -393,6 +421,8 @@ class OpenMeteoForecastAdapter:
                             lon=station.lon,
                             u10=u10,
                             v10=v10,
+                            run_time_source="source" if api_run_time is not None else "fetched_snapshot",
+                            fetched_at_utc=fetched_at,
                         )
                     )
 

@@ -17,6 +17,8 @@ def in_bbox(lat: float, lon: float, bbox: dict[str, float]) -> bool:
 
 
 def detect_country(lat: float, lon: float) -> str:
+    if 51.3 <= lat <= 55.5 and -11.0 <= lon <= -5.4:
+        return "IE"
     if 50.5 <= lat <= 53.8 and 3.0 <= lon <= 7.3:
         return "NL"
     if 41.0 <= lat <= 51.5 and -5.6 <= lon <= 9.7:

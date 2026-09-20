@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx
 
 from .cache import TTLCache
-from .calibration import CalibrationSample, band_from_sigma, blend_hour, calibrate, circular_delta, scale_gust
+from .calibration import CalibrationSample, band_from_sigma, bias_drift, blend_hour, calibrate, circular_delta, scale_gust
 from .catalog import select_candidate_models
 from .config import Settings
 from .domain import ForecastValue, Observation, ScoreRow
@@ -150,7 +150,13 @@ def _fetch_aladin_cz_at_coords(
 
 def nearest_forecast(cands: list[ForecastValue], slat: float, slon: float, not_after: datetime | None = None):
     if not_after is not None:
-        cands = [row for row in cands if row.run_time_utc <= not_after]
+        cands = [row for row in cands if (
+            row.run_time_source == "source" and row.run_time_utc <= not_after
+        ) or (
+            row.run_time_source == "fetched_snapshot" and row.fetched_at_utc is not None
+            and row.fetched_at_utc <= not_after and row.run_time_utc <= not_after
+            and row.fetched_at_utc <= row.valid_time_utc
+        )]
     if not cands:
         return None
     # At equal grid distance select the newest run that was available before
@@ -258,6 +264,7 @@ def build_pair_rows(observations, stations_by_id, fc_index) -> list[dict]:
                 continue
             pair_rows.append({
                 "model_id": model_id, "run_time_utc": nearest.run_time_utc,
+                "run_time_source": nearest.run_time_source, "fetched_at_utc": nearest.fetched_at_utc,
                 "valid_time_utc": nearest.valid_time_utc, "station_id": station.station_id,
                 "station_source": station.source, "station_type": station.station_type,
                 "station_lat": station.lat, "station_lon": station.lon, "obs_time_utc": obs.time_utc,
@@ -289,6 +296,7 @@ class ValidationService:
         # outlive the validation-result cache entry that carries the query_id,
         # so both share the same TTL.
         self._validation_context: TTLCache[dict] = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
+        self._forecast_context: TTLCache[dict] = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
         self.store = store
 
     def _cache_key(
@@ -300,7 +308,7 @@ class ValidationService:
         hours_back: int,
     ) -> str:
         return (
-            f"{round(lat, 2)}:{round(lon, 2)}:{round(radius_km, 1)}:"
+            f"{lat:.6f}:{lon:.6f}:{radius_km:.1f}:"
             f"{window_end.isoformat()}:{hours_back}"
         )
 
@@ -407,18 +415,21 @@ class ValidationService:
             samples.append(CalibrationSample(
                 row["obs_time_utc"], row["model_u"], row["model_v"], row["obs_u"], row["obs_v"],
                 relevance_weight=relevance, local_solar_hour=row["local_solar_hour"],
-                lead_hours=row["lead_hours"],
+                lead_hours=row["lead_hours"], station_id=row.get("station_id"),
             ))
         return samples
 
-    def validate_point(self, lat: float, lon: float, hours_back: int, radius_km: float) -> dict:
+    def validate_point(self, lat: float, lon: float, hours_back: int, radius_km: float, *, force_refresh: bool = False) -> dict:
         now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
         window_end = now_hour
         window_start = now_hour - timedelta(hours=hours_back)
         cache_key = self._cache_key(lat, lon, radius_km, window_end, hours_back)
 
         cached = self.cache.get(cache_key)
-        if cached is not None:
+        if cached is not None and not force_refresh and (
+            hours_back != self.settings.forecast_weight_hours or
+            (datetime.now(timezone.utc) - cached["computed_at_utc"]).total_seconds() < min(self.settings.refresh_interval_seconds, self.settings.cache_ttl_seconds)
+        ):
             return cached
 
         query_id = str(uuid4())
@@ -427,7 +438,11 @@ class ValidationService:
         buoy_distances = [haversine_km(lat, lon, s.lat, s.lon) for s in stations if s.station_type == "buoy"]
         nearest_buoy_km = min(buoy_distances) if buoy_distances else None
         station_ids = {s.station_id for s in stations}
-        observations, provenance = self.broker.get_observations(country, station_ids, window_start, window_end)
+        # Fixed forecast evidence includes subhour observations received during
+        # this refresh. Chart axes remain hourly, but live bias must not wait
+        # for the next clock hour before seeing a new ten-minute measurement.
+        observation_end = datetime.now(timezone.utc) if hours_back == self.settings.forecast_weight_hours else window_end
+        observations, provenance = self.broker.get_observations(country, station_ids, window_start, observation_end)
         if self.store:
             self.store.save_observations(observations)
 
@@ -439,7 +454,7 @@ class ValidationService:
             missing_threshold=1.0,
         )
 
-        forecast_end = window_end
+        forecast_end = (observation_end + timedelta(minutes=30)).replace(minute=0, second=0, microsecond=0)
 
         # Fast forecast index: (model_id, valid_time) → list[ForecastValue]
         fc_index: dict[tuple[str, datetime], list] = defaultdict(list)
@@ -487,19 +502,18 @@ class ValidationService:
         if self.store and fetched_forecasts:
             self.store.save_forecasts(fetched_forecasts)
 
-        # Read the archive back for on-demand GRIB models (ALADIN, OpenWRF).
-        # During an event the live source may be down or over budget, but runs
-        # stored by earlier validations and forecasts still count as evidence.
+        # Read every model archive: saved future snapshots are causal evidence
+        # once observations arrive, unlike a newly fetched historical series.
         if self.store:
-            on_demand_ids = [m.model_id for m in candidates if m.on_demand]
-            for fv in self.store.load_forecasts(on_demand_ids, window_start, forecast_end, lat, lon, radius_km=max(radius_km, 75.0)):
+            archive_ids = [m.model_id for m in candidates]
+            for fv in self.store.load_forecasts(archive_ids, window_start, forecast_end, lat, lon, radius_km=max(radius_km, 75.0)):
                 fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
 
         # Track latest run time per model (for display)
         latest_run: dict[str, datetime] = {}
         for (mid, _), fvs in fc_index.items():
             for fv in fvs:
-                if fv.run_time_utc and (mid not in latest_run or fv.run_time_utc > latest_run[mid]):
+                if fv.run_time_source == "source" and fv.run_time_utc and (mid not in latest_run or fv.run_time_utc > latest_run[mid]):
                     latest_run[mid] = fv.run_time_utc
 
         def nearest_fc(model_id: str, slat: float, slon: float, t: datetime, not_after: datetime | None = None):
@@ -534,6 +548,7 @@ class ValidationService:
                     relevance_weight=relevance,
                     local_solar_hour=local_solar_hour(obs.time_utc, lon),
                     lead_hours=(nearest.valid_time_utc - nearest.run_time_utc).total_seconds() / 3600.0,
+                    station_id=station.station_id,
                 ))
 
         for model in candidates:
@@ -623,6 +638,7 @@ class ValidationService:
                     "time_utc": obs.time_utc,
                     "ws_ms": obs.ws_ms,
                     "wd_deg": obs.wd_deg,
+                    "gust_ms": obs.gust_ms,
                 }
             )
 
@@ -751,10 +767,40 @@ class ValidationService:
             "source_provenance": provenance,
             "computed_at_utc": datetime.now(timezone.utc),
         }
-        self._validation_context.set(query_id, {"samples": dict(calibration_samples), "weights": blend_weights})
+        context = {
+            "samples": dict(calibration_samples), "weights": blend_weights,
+            "lat": lat, "lon": lon, "radius_km": radius_km, "hours_back": hours_back,
+            "window_end_utc": window_end, "winner_model_id": winner,
+            "computed_at_utc": result["computed_at_utc"],
+            "observation_points": observation_points,
+            "stations_used": result["stations_used"],
+        }
+        self._validation_context.set(query_id, context)
+        if hours_back == self.settings.forecast_weight_hours:
+            self._forecast_context.set(self._forecast_context_key(lat, lon, radius_km, window_end), context)
         logger.info("validation_complete", extra={"query_id": query_id, "winner": winner, "stations": len(stations)})
         self.cache.set(cache_key, result)
         return result
+
+    @staticmethod
+    def _forecast_context_key(lat: float, lon: float, radius_km: float, now: datetime) -> str:
+        return f"{lat:.6f}:{lon:.6f}:{radius_km:.1f}:{now.isoformat()}"
+
+    def _prepare_forecast_context(self, lat: float, lon: float, radius_km: float, now: datetime, query_id: str | None) -> dict:
+        """Reuse fixed-window evidence; an analysis query never changes the forecast."""
+        key = self._forecast_context_key(lat, lon, radius_km, now)
+        context = self._forecast_context.get(key)
+        if context is not None and (datetime.now(timezone.utc) - context["computed_at_utc"]).total_seconds() < min(self.settings.refresh_interval_seconds, self.settings.cache_ttl_seconds):
+            return context
+        context = self._validation_context.get(query_id) if query_id else None
+        if not context or (datetime.now(timezone.utc) - context["computed_at_utc"]).total_seconds() >= min(self.settings.refresh_interval_seconds, self.settings.cache_ttl_seconds) or any(context.get(k) != v for k, v in {
+            "lat": lat, "lon": lon, "radius_km": radius_km,
+            "hours_back": self.settings.forecast_weight_hours, "window_end_utc": now,
+        }.items()):
+            result = self.validate_point(lat, lon, self.settings.forecast_weight_hours, radius_km)
+            context = self._validation_context.get(result["query_id"]) or {}
+        self._forecast_context.set(key, context)
+        return context
 
     def forecast_point(
         self,
@@ -764,19 +810,25 @@ class ValidationService:
         bias_ws_ms: float,
         query_id: str | None,
         hours_ahead: int,
+        radius_km: float | None = None,
     ) -> dict:
         from .scoring import uv_to_speed_dir
 
         now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        calibration_now = datetime.now(timezone.utc)
         end = now + timedelta(hours=hours_ahead)
         catalog = self.repo.models
 
         models_series = []
-        context = self._validation_context.get(query_id) if query_id else None
+        context = self._prepare_forecast_context(
+            lat, lon, radius_km if radius_km is not None else self.settings.default_radius_km, now, query_id,
+        )
         samples_by_model: dict[str, list[CalibrationSample]] = (context or {}).get("samples", {})
         weights: dict[str, float] = dict((context or {}).get("weights") or {})
-        if not weights and winner_model_id:
-            weights = {winner_model_id: 1.0}
+        winner_model_id = context.get("winner_model_id") or ""
+        if not weights:
+            candidates, _ = select_candidate_models(lat=lat, lon=lon, catalog=catalog, coverage_availability={}, missing_threshold=1.0)
+            weights = {m.model_id: 1.0 / len(candidates) for m in candidates} if candidates else {}
         durable_buckets = {
             mid: _bucket_by_solar_hour(self._durable_calibration_samples(mid, lat, lon, now))
             for mid in weights
@@ -837,8 +889,10 @@ class ValidationService:
                 if model.model_id in weights:
                     cal = self._calibrate_member_hour(
                         fv, samples_by_model.get(model.model_id, []),
-                        durable_buckets.get(model.model_id, {}), now, lon,
+                        durable_buckets.get(model.model_id, {}), calibration_now, lon,
                     )
+                    for key in ("bias_window_hours", "bias_source", "latest_observation_utc"):
+                        row[f"calibration_{key}"] = cal.get(key)
                     member_hours[model.model_id][fv.valid_time_utc] = (fv, cal)
                     if cal["status"] != "insufficient_history":
                         # Raw ws_ms/wd_deg stay untouched so raw and corrected
@@ -861,6 +915,54 @@ class ValidationService:
         blend_series, calibration_summary = self._build_blend(
             member_hours, weights, eps_by_time, now, self.settings.eps_spread_factor,
         )
+        per_model = {}
+        for mid, hours in member_hours.items():
+            if not hours:
+                continue
+            cal = hours[min(hours)][1]
+            per_model[mid] = {
+                **{key: cal.get(key) for key in ("bias_window_hours", "bias_source", "latest_observation_utc")},
+                "n_effective": cal.get("n_effective", 0.0),
+                "drift": bias_drift(samples_by_model.get(mid, []), calibration_now, self.settings.live_bias_hours),
+            }
+        sources = {m["bias_source"] for m in per_model.values()}
+        windows = {m["bias_window_hours"] for m in per_model.values()}
+        latest = max((m["latest_observation_utc"] for m in per_model.values() if m["latest_observation_utc"]), default=None)
+        usable_drifts = [(weights[mid], m["drift"]) for mid, m in per_model.items() if m["drift"]["status"] != "insufficient_data"]
+        drift = {"status": "insufficient_data", "window_hours": self.settings.live_bias_hours,
+                 "delta_speed_ms": None, "delta_direction_deg": None, "station_count": 0}
+        if usable_drifts:
+            total = sum(w for w, _ in usable_drifts)
+            direction_drifts = [(w, d["delta_direction_deg"]) for w, d in usable_drifts if d["delta_direction_deg"] is not None]
+            stations = {sid for _, d in usable_drifts for sid in d["station_ids"]}
+            drift.update({
+                "status": "changing" if any(d["status"] == "changing" for _, d in usable_drifts) else "stable",
+                "delta_speed_ms": round(sum(w * d["delta_speed_ms"] for w, d in usable_drifts) / total, 3),
+                "delta_direction_deg": round(math.degrees(math.atan2(
+                    sum(w * math.sin(math.radians(d)) for w, d in direction_drifts),
+                    sum(w * math.cos(math.radians(d)) for w, d in direction_drifts),
+                )), 1) if direction_drifts else None,
+                "station_count": len(stations),
+            })
+        calibration_summary.update({
+            "bias_window_hours": next(iter(windows)) if len(windows) == 1 else None,
+            "bias_source": next(iter(sources)) if len(sources) == 1 else "mixed" if sources else "raw",
+            "latest_observation_utc": latest,
+            "model_weight_window_hours": self.settings.forecast_weight_hours,
+            "drift": drift, "per_model": per_model,
+        })
+        # Keep the legacy scalar response consistent with the actual first
+        # blend hour (model minus corrected), never with an analysis request.
+        bias_ws_ms = 0.0
+        if blend_series and blend_series["hours"]:
+            first = blend_series["hours"][0]
+            raw = blend_hour([
+                {"weight": weights[mid], "u": hours[first["time_utc"]][0].u10,
+                 "v": hours[first["time_utc"]][0].v10}
+                for mid, hours in member_hours.items() if first["time_utc"] in hours
+            ])
+            if raw:
+                bias_ws_ms = raw["ws_ms"] - first["ws_ms"]
 
         return {
             "winner_model_id": winner_model_id,
@@ -870,6 +972,9 @@ class ValidationService:
             "blend": blend_series,
             "location_fingerprint": self.fingerprint_service.fingerprint(lat, lon) if self.fingerprint_service else None,
             "calibration": calibration_summary,
+            "observation_points": context.get("observation_points", []),
+            "stations_used": context.get("stations_used", []),
+            "computed_at_utc": datetime.now(timezone.utc),
         }
 
     def _calibrate_member_hour(
@@ -885,7 +990,23 @@ class ValidationService:
         lead_h = (fv.valid_time_utc - now).total_seconds() / 3600.0
         target_hour = local_solar_hour(fv.valid_time_utc, lon)
         historical_samples = _samples_near_hour(durable_buckets, target_hour)
-        recent_cal = calibrate(samples, fv.u10, fv.v10, now, lead_h) if samples else None
+        valid_samples = [s for s in samples if s.time_utc <= now]
+        latest = max((s.time_utc for s in valid_samples), default=None)
+        recent_cal = None
+        bias_window = None
+        bias_source = "raw"
+        # A stale latest observation cannot support an adjustment described as
+        # live, even if older windows contain plenty of pairs.
+        if latest is not None and (now - latest).total_seconds() <= self.settings.live_bias_max_age_hours * 3600:
+            for window in dict.fromkeys((self.settings.live_bias_hours, 6, 24, 48)):
+                selected = [s for s in valid_samples if now - timedelta(hours=window) < s.time_utc]
+                if len({s.time_utc for s in selected}) < 2:
+                    continue
+                candidate = calibrate(selected, fv.u10, fv.v10, now, lead_h)
+                if candidate["status"] != "insufficient_history":
+                    recent_cal, bias_window = candidate, window
+                    bias_source = f"recent_{window}h" if window == self.settings.live_bias_hours else f"fallback_{window}h"
+                    break
         hourly_cal = calibrate(
             historical_samples, fv.u10, fv.v10, now, lead_h,
             # A 14-day half-life retains recent sea-breeze behaviour
@@ -900,6 +1021,10 @@ class ValidationService:
             else hourly_cal if hourly_cal and hourly_cal["status"] != "insufficient_history"
             else {"status": "insufficient_history", "n_effective": 0.0}
         )
+        if recent_cal is None and cal["status"] != "insufficient_history":
+            bias_source = "historical"
+        cal = {**cal, "bias_window_hours": bias_window, "bias_source": bias_source,
+               "latest_observation_utc": latest}
         if hourly_cal and hourly_cal["status"] != "insufficient_history" and cal["status"] != "insufficient_history":
             speed_low = hourly_cal["ws_ms"] - hourly_cal["ws_p10_ms"]
             speed_high = hourly_cal["ws_p90_ms"] - hourly_cal["ws_ms"]
@@ -1033,4 +1158,7 @@ async def run_hourly_refresh(ingestion_service, refresh_seconds: int, stop_event
         except asyncio.TimeoutError:
             pass
         if not stop_event.is_set():
-            await asyncio.to_thread(ingestion_service.refresh)
+            try:
+                await asyncio.to_thread(ingestion_service.refresh)
+            except Exception:
+                logger.exception("Background refresh failed; retrying on the next scheduled cycle")

@@ -1,4 +1,4 @@
-﻿/* forecast.js  -  Forecast tab: Windy iframe + Plotly charts + hourly table */
+/* forecast.js  -  Forecast tab: Windy iframe + Plotly charts + hourly table */
 
 const MS_TO_KT = 1.94384;
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
@@ -7,7 +7,9 @@ const LOCAL_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
 });
 
 function fcLocalTime(iso) {
-  return LOCAL_TIME_FORMATTER.format(new Date(iso));
+  const date = new Date(iso);
+  if (!iso || !Number.isFinite(date.getTime())) return 'unknown time';
+  return LOCAL_TIME_FORMATTER.format(date);
 }
 
 // â”€â”€ Masthead height scaling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -30,6 +32,10 @@ let _correctedOnly = false;
 let _relayoutHandler = null;   // for range-slider sync
 let _ensembleData = null;
 let _gradientData = null;
+let _forecastRequest = 0;
+let _forecastValidation = null;
+let _forecastComparison = null;
+let _forecastIsMobile = window.innerWidth < 700;
 
 // Chart configuration must be initialized before any async forecast response can render.
 const LIGHT_LAYOUT = {
@@ -89,16 +95,16 @@ function currentLatLon() {
 }
 
 // â”€â”€ Tab switching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-document.querySelectorAll('.tab').forEach(btn => {
+document.querySelectorAll('button.tab[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
 
-    if (btn.dataset.tab === 'forecast' && !forecastData) {
-      loadForecast();
-    }
+    updateSidebarAction();
+    resizeForecastCharts();
+    if (btn.dataset.tab === 'validation' && typeof drawCharts === 'function') drawCharts();
   });
 });
 
@@ -114,6 +120,8 @@ document.getElementById('fcMastHeight')?.addEventListener('input', () => {
 
 // â”€â”€ API call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadForecast() {
+  if (selectedLocationRecord?.monitoring_enabled && querySource === 'point') return loadLocationSnapshot();
+  const requestId = ++_forecastRequest;
   const pos = currentLatLon();
   const status = document.getElementById('fcStatus');
 
@@ -137,29 +145,21 @@ async function loadForecast() {
         bias_ws_ms: _biasWsMs,
         query_id: _validationQueryId,
         hours_ahead: hoursAhead,
+        radius_km: Number(document.getElementById('radius').value) || 50,
       }),
     });
     if (!resp.ok) {
       const txt = await resp.text();
       throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
     }
-    forecastData = await resp.json();
-    _selectedModels = new Set(forecastData.models.map(m => m.model_id));
-
-    const cal = forecastData.calibration || {};
-    status.textContent = _winnerModelId
-      ? `Best: ${bestSeriesLabel()} · ${cal.status === 'insufficient_history' ? 'insufficient history' : `${cal.status} · n=${cal.n_effective}`}`
-      : 'Run Validation first for bias correction';
-
-    renderModelToggles();
-    renderAllCharts();
-    if (typeof renderWeatherTab === 'function') renderWeatherTab(true);
-    loadEnsemble();
-    loadGradientWind();
+    const data = await resp.json();
+    if (requestId !== _forecastRequest) return;
+    renderPreparedForecast(data, null, null);
+    document.getElementById('fcFreshness').textContent = `On demand · loaded ${fcLocalTime(new Date().toISOString())}`;
   } catch (err) {
-    status.textContent = `Error: ${err.message}`;
+    if (requestId === _forecastRequest) status.textContent = `Error: ${err.message}`;
   } finally {
-    document.getElementById('fcRunBtn').disabled = false;
+    if (requestId === _forecastRequest) document.getElementById('fcRunBtn').disabled = false;
   }
 }
 
@@ -178,7 +178,8 @@ function renderModelToggles() {
     btn.className = 'model-toggle' + (isActive ? ' active' : '');
     btn.style.setProperty('--mt-color', color);
     const winnerTag = isWinner ? ' *' : '';
-    btn.innerHTML = `<span class="mt-dot"></span>${series.model_id}${winnerTag}`;
+    btn.innerHTML = '<span class="mt-dot"></span>';
+    btn.append(document.createTextNode(series.model_id + winnerTag));
     btn.title = isWinner ? 'Winner model from validation' : '';
 
     btn.addEventListener('click', () => {
@@ -262,7 +263,7 @@ function renderBestForecastChart() {
 
   panel.style.display = '';
   const mf = mastheadFactor();
-  document.getElementById('fcBestTitle').textContent = bestSeriesLabel() + ' · calibrated p10–p90'
+  document.getElementById('fcBestTitle').textContent = bestSeriesLabel() + (winner.hours.some(h => h.ws_p10_ms != null && h.ws_p90_ms != null) ? ' · p10–p90 band' : ' · uncertainty unavailable')
     + (mf > 1 ? ` · ${document.getElementById('fcMastHeight').value} m masthead` : '');
 
   const times = winner.hours.map(h => h.time_utc);
@@ -273,7 +274,7 @@ function renderBestForecastChart() {
   const wd = winner.hours.map(h => h.corrected_wd_deg ?? h.wd_deg);
 
   const mainWs = ws_kt;
-  const mainLabel = 'TWS p50 (kt)';
+  const mainLabel = forecastData.calibration?.status === 'insufficient_history' ? 'Raw TWS (kt)' : 'Corrected TWS (kt)';
 
   const traces = [];
   if (p10_kt.some(v => v != null) && p90_kt.some(v => v != null)) {
@@ -324,6 +325,13 @@ function renderBestForecastChart() {
     yaxis: 'y2',
   });
 
+  const mobile = window.innerWidth < 700;
+  _forecastIsMobile = mobile;
+  if (mobile) traces.forEach(trace => {
+    if (trace.mode?.includes('text')) { trace.mode = trace.mode.replace('+text', ''); delete trace.text; }
+  });
+  const mobileRange = mobile && times.length ? [fcPlotTime(times[0]), fcPlotTime(new Date(new Date(times[0]).getTime() + 12 * 3600000).toISOString())] : null;
+
   const layout = {
     ...LIGHT_LAYOUT,
     height: 480,
@@ -331,6 +339,7 @@ function renderBestForecastChart() {
     legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 11 } },
     xaxis: {
       ...LIGHT_XAXIS,
+      ...(mobileRange ? {range: mobileRange} : {}),
       rangeselector: {
         buttons: [
           { count: 12, label: '12h', step: 'hour', stepmode: 'backward' },
@@ -355,7 +364,7 @@ function renderBestForecastChart() {
     },
   };
 
-  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+  fcLocalPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 
   // Re-attach range-sync listener (replaces previous one on re-render)
   if (_relayoutHandler) chartDiv.removeListener('plotly_relayout', _relayoutHandler);
@@ -442,7 +451,7 @@ function renderEnsembleChart() {
     yaxis: { ...LIGHT_YAXIS('TWS (kt)') },
   };
 
-  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+  fcLocalPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 
   renderEnsembleDirChart(selected, winner_model_id);
 }
@@ -469,7 +478,7 @@ function renderEnsembleDirChart(selected, winner_model_id) {
     });
   });
 
-  Plotly.newPlot(chartDiv, traces, {
+  fcLocalPlot(chartDiv, traces, {
     ...LIGHT_LAYOUT,
     height: 370,
     margin: { t: 20, b: 50, l: 70, r: 20 },
@@ -523,7 +532,7 @@ function renderTempChart() {
     yaxis: { title: 'Temp ( degC)', gridcolor: '#e2e8f0', tickfont: { color: '#64748b' } },
   };
 
-  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+  fcLocalPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
 }
 
 // â”€â”€ Chart 4: Precipitation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -554,7 +563,7 @@ function renderPrecipChart() {
     bargap: 0.15,
   };
 
-  Plotly.newPlot(chartDiv, [{
+  fcLocalPlot(chartDiv, [{
     x: times, y: precip,
     name: 'Precipitation',
     type: 'bar',
@@ -566,8 +575,10 @@ function renderPrecipChart() {
 function renderAllCharts() {
   if (!forecastData) return;
   renderBestForecastChart();
+  if (!document.getElementById('fcEvidence').open) return;
   renderEnsembleChart();
   renderIconEpsCharts();
+  if (_gradientData) renderGradientChart();
   renderTempChart();
   renderPrecipChart();
   // Show temp+precip row if at least one panel is visible
@@ -597,8 +608,8 @@ function renderVerification() {
   const uncertaintyText = {
     eps_calibrated: `ICON-EPS ensemble spread, calibrated to local skill (×${(c.eps_factor ?? 0.65).toFixed(2)})`,
   }[c.uncertainty_source] || 'historical local-hour, regime and lead-matched residuals; recent bias correction fades with lead time';
-  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${c.status} &nbsp; <span class="meta-label">Band evidence (n eff.):</span> ${c.n_effective}</div>
-    <div class="meta-row"><span class="meta-label">Method:</span> inverse-MSE blend of calibrated models &nbsp; <span class="meta-label">Weights:</span> ${weightsLabel}</div>
+  el.innerHTML = `<div class="meta-row"><span class="meta-label">Status:</span> ${fcEscape(c.status || "unknown")} &nbsp; <span class="meta-label">Band evidence (n eff.):</span> ${c.n_effective}</div>
+    <div class="meta-row"><span class="meta-label">Method:</span> inverse-MSE blend of calibrated models &nbsp; <span class="meta-label">Weights:</span> ${fcEscape(weightsLabel)}</div>
     <div class="meta-row"><span class="meta-label">Uncertainty:</span> ${uncertaintyText}.</div>
     <div id="fcErrorProfile" class="fc-error-profile" aria-label="Historical error profile by forecast hour"></div>
     <section class="fc-adjustments" aria-labelledby="fcAdjustmentsTitle">
@@ -646,7 +657,7 @@ function renderModelAdjustments() {
   scroll.className = 'fc-adjustments-scroll';
   const table = document.createElement('table');
   table.className = 'fc-table fc-adjustments-data';
-  table.innerHTML = `<thead><tr><th>Local time</th><th>Blend Δ</th>${ids.map(id => `<th>${id} Δ</th>`).join('')}</tr></thead>`;
+  table.innerHTML = `<thead><tr><th>Local time</th><th>Blend Δ</th>${ids.map(id => `<th>${fcEscape(id)} Δ</th>`).join('')}</tr></thead>`;
   const body = document.createElement('tbody');
 
   series.hours.forEach(blendHour => {
@@ -676,7 +687,7 @@ function fcAdjustmentCell(deltaKt, rawMs, correctedMs, directionShift, label) {
   const detail = rawMs == null || correctedMs == null
     ? `${label}: forecast unavailable`
     : `${label}: ${(rawMs * MS_TO_KT).toFixed(1)} → ${(correctedMs * MS_TO_KT).toFixed(1)} kt${directionShift != null ? ` · TWD ${fcSigned(directionShift, 0)}°` : ''}`;
-  return `<td class="fc-adjustment ${cls}" title="${detail}">${fcSigned(deltaKt)}<span class="fc-adjustment-unit"> kt</span></td>`;
+  return `<td class="fc-adjustment ${cls}" title="${fcEscape(detail)}">${fcSigned(deltaKt)}<span class="fc-adjustment-unit"> kt</span></td>`;
 }
 
 function renderHistoricalErrorProfile() {
@@ -706,7 +717,7 @@ function renderHistoricalErrorProfile() {
     legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 10 } },
     hovermode: 'x unified',
   };
-  Plotly.react(target, [
+  fcLocalPlot(target, [
     { x: times, y: nEff, type: 'bar', name: 'Comparable cases (n eff.)', yaxis: 'y2', marker: { color: '#cbd5e1' }, hovertemplate: '%{y:.1f}<extra>n eff.</extra>' },
     { x: times, y: along, type: 'scatter', mode: 'lines+markers', name: 'σ along-wind', line: { color: '#0369a1', width: 2 }, marker: { size: 4 }, hovertemplate: '%{y:.2f} kt<extra>σ along</extra>' },
     { x: times, y: cross, type: 'scatter', mode: 'lines+markers', name: 'σ cross-wind', line: { color: '#b45309', width: 2 }, marker: { size: 4 }, hovertemplate: '%{y:.2f} kt<extra>σ cross</extra>' },
@@ -715,6 +726,7 @@ function renderHistoricalErrorProfile() {
 
 // â”€â”€ ICON-EPS ensemble load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadEnsemble() {
+  const requestData = forecastData;
   const pos = currentLatLon();
   if (!pos) return;
 
@@ -733,7 +745,9 @@ async function loadEnsemble() {
       `/api/forecast-ensemble?lat=${pos.lat}&lon=${pos.lon}&hours=${Math.min(hoursAhead, 120)}`
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
-    _ensembleData = await resp.json();
+    const result = await resp.json();
+    if (requestData !== forecastData) return;
+    _ensembleData = result;
 
     if (statusEl) statusEl.textContent = `${_ensembleData.n_members} members`;
     if (badge) {
@@ -745,6 +759,7 @@ async function loadEnsemble() {
     _renderEpsTwsChart();
     _renderEpsTwdChart();
   } catch (err) {
+    if (requestData !== forecastData) return;
     if (statusEl) statusEl.textContent = `ICON-EPS unavailable: ${err.message}`;
     // keep row visible so the error message is readable
   }
@@ -801,7 +816,7 @@ function _renderEpsTwsChart() {
     }
   }
 
-  Plotly.newPlot(el, traces, {
+  fcLocalPlot(el, traces, {
     ...LIGHT_LAYOUT,
     height: 310,
     margin: { t: 20, b: 50, l: 55, r: 20 },
@@ -859,7 +874,7 @@ function _renderEpsTwdChart() {
     }
   }
 
-  Plotly.newPlot(el, traces, {
+  fcLocalPlot(el, traces, {
     ...LIGHT_LAYOUT,
     height: 310,
     margin: { t: 20, b: 50, l: 70, r: 20 },
@@ -876,6 +891,7 @@ function _renderEpsTwdChart() {
 
 // ── Gradient wind (925 hPa) ──────────────────────────────────────────────────────
 async function loadGradientWind() {
+  const requestData = forecastData;
   const pos = currentLatLon();
   const panel = document.getElementById('fcGradientPanel');
   const statusEl = document.getElementById('fcGradientStatus');
@@ -891,10 +907,13 @@ async function loadGradientWind() {
       `/api/gradient-wind?lat=${pos.lat}&lon=${pos.lon}&hours=${Math.min(hoursAhead, 168)}`
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
-    _gradientData = await resp.json();
+    const result = await resp.json();
+    if (requestData !== forecastData) return;
+    _gradientData = result;
     if (statusEl) statusEl.textContent = _gradientData.model;
     renderGradientChart();
   } catch (err) {
+    if (requestData !== forecastData) return;
     if (statusEl) statusEl.textContent = `unavailable: ${err.message}`;
   }
 }
@@ -927,7 +946,7 @@ function renderGradientChart() {
       yaxis: 'y2' },
   ];
 
-  Plotly.newPlot(el, traces, {
+  fcLocalPlot(el, traces, {
     ...LIGHT_LAYOUT,
     height: 310,
     margin: { t: 20, b: 50, l: 55, r: 65 },
@@ -1001,4 +1020,188 @@ function renderForecastTable() {
   table.appendChild(tbody);
   scrollWrap.appendChild(table);
   wrap.appendChild(scrollWrap);
+}
+
+
+// Forecast workspace: render archived results without issuing provider requests.
+function fcEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+}
+function fcAge(iso) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (!Number.isFinite(minutes)) return 'at an unknown time';
+  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${(minutes / 60).toFixed(1)}h ago` : `${Math.floor(minutes / 1440)}d ago`;
+}
+function resetForecastLocation() {
+  _forecastRequest += 1;
+  forecastData = null; _forecastValidation = null; _forecastComparison = null;
+  _ensembleData = null; _gradientData = null;
+  _winnerModelId = ''; _biasWsMs = 0; _validationQueryId = '';
+  document.getElementById('fcRunBtn').disabled = false;
+  document.getElementById('fcStatus').textContent = '';
+  document.getElementById('fcFreshness').classList.remove('is-stale');
+  document.getElementById('fcBestPanel').style.display = 'none';
+  document.getElementById('fcEvidence').open = false;
+  document.getElementById('wxDetails').open = false;
+  document.querySelectorAll('#fcVerificationPanel, #fcEnsembleRow, #fcIconEpsRow, #fcGradientPanel, #fcTempPrecipRow, #fcTableWrap').forEach(el => { el.style.display = 'none'; });
+  document.getElementById('fcModelToggles').replaceChildren();
+  document.getElementById('fcExtrasStatus').textContent = '';
+  document.getElementById('fcGradientPanel').style.display = 'none';
+  document.getElementById('fcIconEpsRow').style.display = 'none';
+  renderNowStations(null); renderForecastChanges();
+}
+function renderPreparedForecast(data, validation = null, comparison = null) {
+  validation = validation || (data.observation_points ? {observation_points: data.observation_points, stations_used: data.stations_used || []} : _forecastValidation);
+  forecastData = data;
+  if (selectedLocationRecord?.monitoring_enabled && data.hours_ahead) document.getElementById('fcHoursAhead').value = data.hours_ahead;
+  _forecastValidation = validation; _forecastComparison = comparison;
+  _winnerModelId = data.winner_model_id || validation?.winner_model_id || '';
+  _validationQueryId = validation?.query_id || '';
+  _biasWsMs = data.bias_ws_ms || 0;
+  _ensembleData = null; _gradientData = null;
+  _selectedModels = new Set((data.models || []).map(m => m.model_id));
+  const cal = data.calibration || {};
+  document.getElementById('fcStatus').textContent = cal.status === 'insufficient_history'
+    ? 'Limited local history · raw forecast where correction is unavailable.' : `Correction: ${fcBiasSource(cal)} · model weights: ${cal.model_weight_window_hours || 48}h`;
+  document.getElementById('fcExtrasStatus').textContent = '';
+  document.getElementById('fcGradientPanel').style.display = 'none';
+  document.getElementById('fcIconEpsRow').style.display = 'none';
+  renderNowStations(validation); renderForecastChanges(); renderModelToggles(); renderAllCharts();
+  if (document.getElementById('wxDetails').open && typeof renderWeatherTab === 'function') renderWeatherTab(true);
+  resizeForecastCharts();
+}
+function renderNowStations(validation) {
+  _forecastValidation = validation;
+  const container = document.getElementById('fcNowStations');
+  container.replaceChildren();
+  const latest = new Map();
+  for (const point of validation?.observation_points || []) {
+    const old = latest.get(point.station_id);
+    if (!old || new Date(point.time_utc) > new Date(old.time_utc)) latest.set(point.station_id, point);
+  }
+  const points = [...latest.values()].sort((a, b) => new Date(b.time_utc) - new Date(a.time_utc)).slice(0, 6);
+  if (!points.length) { const p = document.createElement('p'); p.className = 'fc-empty'; p.textContent = 'No recent station observations available for this location.'; container.append(p); return; }
+  points.forEach(point => {
+    const station = (validation.stations_used || []).find(s => s.station_id === point.station_id);
+    const item = document.createElement('article'); item.className = 'fc-now-station';
+    const name = document.createElement('h3'); name.textContent = station?.name || point.station_id;
+    const wind = document.createElement('p'); wind.className = 'fc-now-wind';
+    wind.textContent = Number.isFinite(point.ws_ms) ? `${(point.ws_ms * MS_TO_KT).toFixed(1)} kt` : '—';
+    const dir = document.createElement('span'); dir.textContent = Number.isFinite(point.wd_deg) ? `${Math.round(point.wd_deg)}°` : '—'; wind.append(dir);
+    if (Number.isFinite(point.gust_ms)) {
+      const gust = document.createElement('span'); gust.textContent = `gust ${(point.gust_ms * MS_TO_KT).toFixed(1)} kt`; wind.append(gust);
+    }
+    const age = document.createElement('p'); age.className = 'fc-now-age'; age.textContent = `${point.source || 'Station'} · ${fcAge(point.time_utc)}`;
+    age.title = fcLocalTime(point.time_utc);
+    if (Date.now() - new Date(point.time_utc).getTime() > 3 * 3600000) age.classList.add('is-stale');
+    item.append(name, wind, age); container.append(item);
+  });
+  appendObservationCredits(container, [...latest.values()]);
+}
+function fcBiasSource(cal) {
+  const sources = {recent_3h:'last 3h',fallback_6h:'6h fallback',fallback_24h:'24h fallback',fallback_48h:'48h fallback',historical:'historical fallback',raw:'no recent correction',mixed:'different windows per model'};
+  return sources[cal.bias_source] || (cal.bias_window_hours ? `last ${cal.bias_window_hours}h` : 'awaiting evidence');
+}
+function renderBiasSummary() {
+  const cal = forecastData?.calibration || {};
+  const drift = cal.drift || {};
+  let summary = forecastData ? `Bias: ${fcBiasSource(cal)}.` : 'Current correction is assessed separately from the analysis history.';
+  if (cal.latest_observation_utc) summary += ` Latest observation ${fcAge(cal.latest_observation_utc)}.`;
+  if (Number.isFinite(drift.delta_speed_ms)) {
+    summary += ` Recent bias change: ${fcSigned(drift.delta_speed_ms * MS_TO_KT)} kt`;
+    if (Number.isFinite(drift.delta_direction_deg)) summary += ` / ${fcSigned(drift.delta_direction_deg, 0)}°`;
+    summary += ` across ${drift.station_count || 0} matched stations.`;
+  } else if (forecastData) summary += ' Not enough matched observations to assess a bias change.';
+  const bias = document.getElementById('fcBiasSummary'); bias.textContent = summary;
+  bias.classList.toggle('is-stale', ['changing','changed','shifting','drift_detected'].includes(drift.status));
+}
+function renderForecastChanges() {
+  renderBiasSummary();
+  const container = document.getElementById('fcRunComparison'); container.replaceChildren();
+  const comparison = _forecastComparison;
+  const models = comparison?.models || [];
+  if (!models.length) {
+    const p = document.createElement('p'); p.className = 'fc-empty';
+    p.textContent = selectedLocationRecord?.monitoring_enabled ? 'A comparison appears after two different forecasts have been collected.' : 'Follow a saved location to compare successive forecasts.';
+    container.append(p); return;
+  }
+  const note = document.createElement('p'); note.className = 'fc-comparison-note';
+  note.textContent = `Compared with the forecast saved ${fcLocalTime(comparison.previous_computed_at_utc)}. Raw wind at matching future hours.`; container.append(note);
+  const table = document.createElement('table'); table.className = 'fc-comparison-table';
+  table.innerHTML = '<thead><tr><th>Model</th><th>Mean wind change</th><th>Largest change</th><th>Direction</th><th>Hours</th></tr></thead>';
+  const body = document.createElement('tbody');
+  models.forEach(model => {
+    const row = document.createElement('tr');
+    const values = [model.model_id,fcSigned(Number.isFinite(model.mean_ws_change_ms) ? model.mean_ws_change_ms * MS_TO_KT : null) + ' kt',Number.isFinite(model.max_abs_ws_change_ms) ? (model.max_abs_ws_change_ms * MS_TO_KT).toFixed(1) + ' kt' : '—',fcSigned(model.mean_wd_change_deg, 0) + '°',model.overlap_hours];
+    values.forEach(value => { const td = document.createElement('td'); td.textContent = value ?? '—'; row.append(td); }); body.append(row);
+  });
+  table.append(body); const wrap = document.createElement('div'); wrap.className = 'fc-comparison-scroll'; wrap.append(table); container.append(wrap);
+  const detail = document.createElement('details'); detail.className = 'fc-comparison-detail';
+  const title = document.createElement('summary'); title.textContent = 'Compare forecast curves'; detail.append(title);
+  const chart = document.createElement('div'); chart.id = 'fcComparisonChart'; detail.append(chart); container.append(detail);
+  detail.addEventListener('toggle', () => {
+    if (!detail.open) return;
+    const traces = [];
+    models.forEach((model, idx) => {
+      const hours = model.hours || []; const color = FC_COLORS[idx % FC_COLORS.length];
+      traces.push({x:hours.map(h => h.time_utc),y:hours.map(h => h.previous_ws_ms == null ? null : h.previous_ws_ms * MS_TO_KT),name:`${model.model_id} previous`,mode:'lines',line:{color,width:1.5,dash:'dot'}});
+      traces.push({x:hours.map(h => h.time_utc),y:hours.map(h => h.current_ws_ms == null ? null : h.current_ws_ms * MS_TO_KT),name:`${model.model_id} latest`,mode:'lines',line:{color,width:2}});
+    });
+    fcLocalPlot(chart, traces, {...LIGHT_LAYOUT,height:340,margin:{t:30,b:60,l:45,r:15},xaxis:LIGHT_XAXIS,yaxis:LIGHT_YAXIS('kt'),legend:{orientation:'h',y:-0.3}}, {responsive:true,displayModeBar:false});
+  });
+}
+function resizeForecastCharts() {
+  requestAnimationFrame(() => {
+    document.querySelectorAll('.tab-panel.active .js-plotly-plot').forEach(el => { if (el.offsetWidth && el.offsetHeight) Plotly.Plots.resize(el); });
+  });
+}
+document.getElementById('fcEvidence').addEventListener('toggle', e => { if (e.target.open && forecastData) { renderAllCharts(); resizeForecastCharts(); } });
+document.getElementById('wxDetails').addEventListener('toggle', e => { if (e.target.open && forecastData && typeof renderWeatherTab === 'function') { renderWeatherTab(); resizeForecastCharts(); } });
+document.getElementById('fcLoadExtras').addEventListener('click', async () => {
+  if (!forecastData) return;
+  const button = document.getElementById('fcLoadExtras'); button.disabled = true;
+  const state = forecastData;
+  document.getElementById('fcExtrasStatus').textContent = 'Loading extra detail…';
+  try { await Promise.all([loadEnsemble(), loadGradientWind()]); }
+  finally {
+    button.disabled = false;
+    if (state === forecastData) { document.getElementById('fcExtrasStatus').textContent = 'Detail checked.'; resizeForecastCharts(); }
+  }
+});
+window.addEventListener('resize', () => {
+  if (forecastData && _forecastIsMobile !== (window.innerWidth < 700)) renderBestForecastChart();
+  resizeForecastCharts();
+});
+new ResizeObserver(resizeForecastCharts).observe(document.querySelector('.app-main'));
+
+
+// Plotly treats ISO date coordinates as wall-clock values. Shift once at the
+// rendering boundary; API timestamps, comparisons and range filtering stay UTC.
+function fcPlotTime(iso) {
+  if (iso == null) return null;
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+function fcPlotTraces(traces, layout) {
+  return traces.map(original => {
+    const trace = {...original, x: (original.x || []).map(fcPlotTime)};
+    const axis = layout['yaxis' + ((original.yaxis || 'y').slice(1))] || {};
+    const direction = axis.range?.[0] === 0 && axis.range?.[1] === 360;
+    if (!direction || !original.mode?.includes('lines') || !original.y?.length) return trace;
+    // Insert a gap without discarding either endpoint of a north crossing.
+    const fields = ['x', 'y', 'text', 'customdata'].filter(key => Array.isArray(trace[key]));
+    const arrays = Object.fromEntries(fields.map(key => [key, []]));
+    original.y.forEach((value, i) => {
+      if (i > 0 && value != null && original.y[i - 1] != null && Math.abs(value - original.y[i - 1]) > 180) {
+        fields.forEach(key => arrays[key].push(key === 'x' ? trace.x[i] : null));
+      }
+      fields.forEach(key => arrays[key].push(trace[key][i]));
+    });
+    return {...trace, ...arrays, connectgaps: false};
+  });
+}
+function fcLocalPlot(target, traces, layout, options) {
+  return Plotly.newPlot(target, fcPlotTraces(traces, layout), layout, options);
 }

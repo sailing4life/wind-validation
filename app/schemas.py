@@ -1,7 +1,33 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pydantic import BaseModel, Field
+from datetime import date, datetime
+from pydantic import BaseModel, Field, model_validator
+
+
+class SaveLocationRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    radius_km: float = Field(default=50, gt=0, le=150)
+
+    @model_validator(mode="after")
+    def normalize_name(self):
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("Location name is required")
+        return self
+
+
+class LocationMonitoringRequest(BaseModel):
+    monitoring_enabled: bool
+    monitoring_start: date | None = None
+    monitoring_end: date | None = None
+
+    @model_validator(mode="after")
+    def check_period(self):
+        if self.monitoring_start and self.monitoring_end and self.monitoring_end < self.monitoring_start:
+            raise ValueError("Monitoring end must be on or after its start")
+        return self
 
 
 class ValidatePointRequest(BaseModel):
@@ -48,6 +74,7 @@ class ObservationPointDTO(BaseModel):
     time_utc: datetime
     ws_ms: float
     wd_deg: float
+    gust_ms: float | None = None
 
 
 class GribPointDTO(BaseModel):
@@ -138,10 +165,11 @@ class FreshnessDTO(BaseModel):
 class ForecastRequest(BaseModel):
     lat: float = Field(ge=-90.0, le=90.0)
     lon: float = Field(ge=-180.0, le=180.0)
-    winner_model_id: str
+    winner_model_id: str = ""
     bias_ws_ms: float = 0.0
     query_id: str | None = None
     hours_ahead: int = Field(default=48, ge=6, le=168)
+    radius_km: float = Field(default=50.0, gt=0.0, le=150.0)
 
 
 class ForecastHour(BaseModel):
@@ -167,6 +195,9 @@ class ForecastHour(BaseModel):
     calibration_sigma_along_ms: float | None = None
     calibration_sigma_cross_ms: float | None = None
     calibration_uncertainty_source: str | None = None
+    calibration_bias_window_hours: int | None = None
+    calibration_bias_source: str | None = None
+    calibration_latest_observation_utc: datetime | None = None
 
 
 class ForecastModelSeries(BaseModel):
@@ -209,3 +240,6 @@ class ForecastResponse(BaseModel):
     blend: ForecastModelSeries | None = None
     location_fingerprint: LocationFingerprintDTO | None = None
     calibration: dict = Field(default_factory=dict)
+    observation_points: list[ObservationPointDTO] = Field(default_factory=list)
+    stations_used: list[StationDTO] = Field(default_factory=list)
+    computed_at_utc: datetime | None = None

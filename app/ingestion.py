@@ -18,8 +18,12 @@ class IngestionService:
         self.observation_broker = observation_broker
         self.store = store
         self.run_count = 0
+        self.monitoring_service = None
 
     def refresh(self) -> None:
+        if self.monitoring_service is not None and self.monitoring_service.refresh():
+            self.run_count += 1
+            return
         refreshed = self.forecast_broker.refresh_recent_forecasts(hours_back=72)
         for model_id, rows in refreshed.items():
             self.repo.replace_forecasts_for_model(model_id, rows)
@@ -44,10 +48,9 @@ class IngestionService:
         fc_index: dict = defaultdict(list)
         for fv in self.repo.forecasts:
             fc_index[(fv.model_id, fv.valid_time_utc)].append(fv)
-        # On-demand GRIB models (ALADIN, OpenWRF) are absent from the background
-        # refresh, but runs archived during validations and forecasts can still
-        # be paired against fresh observations here.
-        on_demand_ids = [m.model_id for m in self.repo.models if m.on_demand]
+        # Include earlier snapshots of every model: newly backfilled values
+        # cannot substitute for forecasts captured before the observations.
+        on_demand_ids = [m.model_id for m in self.repo.models]
         if on_demand_ids:
             for station in stations_by_id.values():
                 for fv in self.store.load_forecasts(

@@ -25,10 +25,11 @@ from .domain import ForecastValue
 from .forecast_broker import ForecastBroker
 from .ingestion import IngestionService
 from .location_fingerprint import LocationFingerprintService
+from .monitoring import LocationMonitoringService
 from .observation_broker import ObservationBroker
 from .repositories import InMemoryRepository
 from .storage import PostgresStore
-from .schemas import ForecastPushRequest, ForecastRequest, ForecastResponse, FreshnessDTO, ValidatePointRequest, ValidatePointResponse
+from .schemas import ForecastPushRequest, ForecastRequest, ForecastResponse, FreshnessDTO, LocationMonitoringRequest, SaveLocationRequest, ValidatePointRequest, ValidatePointResponse
 from .services import ValidationService, run_hourly_refresh
 
 # Only one windmap generation at a time — GRIB download + rendering is memory-heavy
@@ -59,6 +60,8 @@ broker = ObservationBroker(repo, SETTINGS)
 ingestion_service = IngestionService(repo, forecast_broker, broker, store)
 fingerprint_service = LocationFingerprintService(SETTINGS)
 validation_service = ValidationService(repo, broker, forecast_broker.openmeteo, SETTINGS, fingerprint_service=fingerprint_service, store=store)
+monitoring_service = LocationMonitoringService(repo, forecast_broker, broker, validation_service, store)
+ingestion_service.monitoring_service = monitoring_service
 
 _stop_event = asyncio.Event()
 _refresh_task: asyncio.Task | None = None
@@ -67,17 +70,25 @@ _refresh_task: asyncio.Task | None = None
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global _refresh_task
+    _stop_event.clear()
     await asyncio.to_thread(store.initialize)
-    await asyncio.to_thread(ingestion_service.refresh)
-    _refresh_task = asyncio.create_task(
-        run_hourly_refresh(ingestion_service, SETTINGS.refresh_interval_seconds, _stop_event)
-    )
+    background_enabled = os.getenv("BACKGROUND_REFRESH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    _refresh_task = asyncio.create_task(_refresh_in_background()) if background_enabled else None
     try:
         yield
     finally:
         _stop_event.set()
         if _refresh_task is not None:
             await _refresh_task
+
+
+async def _refresh_in_background() -> None:
+    # Serve persisted snapshots immediately, including during a slow first fetch.
+    try:
+        await asyncio.to_thread(ingestion_service.refresh)
+    except Exception:
+        logger.exception("Initial background refresh failed")
+    await run_hourly_refresh(ingestion_service, SETTINGS.refresh_interval_seconds, _stop_event)
 
 
 app = FastAPI(title=SETTINGS.app_name, lifespan=lifespan)
@@ -111,6 +122,7 @@ def forecast(payload: ForecastRequest) -> dict:
         bias_ws_ms=payload.bias_ws_ms,
         query_id=payload.query_id,
         hours_ahead=payload.hours_ahead,
+        radius_km=payload.radius_km,
     )
 
 
@@ -185,13 +197,31 @@ def list_locations() -> dict:
     return {"locations": store.list_locations()}
 
 @app.post("/api/locations")
-def save_location(payload: dict = Body(...)) -> dict:
+def save_location(payload: SaveLocationRequest) -> dict:
     if not store.enabled:
         raise HTTPException(status_code=503, detail="Location storage requires a configured DATABASE_URL")
-    name = str(payload.get("name", "")).strip()
-    if not name: raise HTTPException(status_code=400, detail="Location name is required")
-    try: return store.save_location(name, float(payload["lat"]), float(payload["lon"]), float(payload.get("radius_km", 50)))
-    except KeyError: raise HTTPException(status_code=400, detail="lat and lon are required")
+    return store.save_location(payload.name, payload.lat, payload.lon, payload.radius_km)
+
+
+@app.patch("/api/locations/{location_id}/monitoring")
+def update_location_monitoring(location_id: int, payload: LocationMonitoringRequest) -> dict:
+    if not store.enabled:
+        raise HTTPException(status_code=503, detail="Location storage requires a configured DATABASE_URL")
+    if store.get_location(location_id) is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return store.update_location_monitoring(
+        location_id, payload.monitoring_enabled, payload.monitoring_start, payload.monitoring_end,
+    )
+
+
+@app.get("/api/locations/{location_id}/snapshot")
+def location_snapshot(location_id: int, response: Response) -> dict:
+    if not store.enabled:
+        raise HTTPException(status_code=503, detail="Location storage requires a configured DATABASE_URL")
+    if store.get_location(location_id) is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    response.headers["Cache-Control"] = "no-store"
+    return monitoring_service.snapshot(location_id)
 
 
 def _windmap_model_params(model_id: str) -> tuple[str, str]:

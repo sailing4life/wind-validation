@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=37" />
+  <link rel="stylesheet" href="/static/styles.css?v=43" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -36,10 +36,20 @@
       <div id="pointInputs" class="sidebar-inputs">
         <label>Saved location <select id="savedLocation"><option value="">Unsaved point</option></select></label>
         <button id="saveLocationBtn" class="btn-secondary" type="button">Save current</button>
+        <fieldset id="monitoringControls" class="monitoring-controls" hidden>
+          <label class="monitoring-switch"><input id="monitoringEnabled" type="checkbox"> Automatically follow</label>
+          <p>Keep observations and forecasts up to date in the background.</p>
+          <details><summary>Monitoring dates (UTC, optional)</summary>
+            <label>From <input id="monitoringStart" type="date"></label>
+            <label>Until <input id="monitoringEnd" type="date"></label>
+          </details>
+          <button id="saveMonitoringBtn" type="button" class="btn-secondary">Save monitoring</button>
+          <span id="monitoringStatus" role="status"></span>
+        </fieldset>
         <label>Latitude  <input id="lat"       type="number" step="0.0001" value="52.1" /></label>
         <label>Longitude <input id="lon"       type="number" step="0.0001" value="5.1"  /></label>
         <label>Radius (km) <input id="radius"  type="number" step="1"      value="50"   /></label>
-        <label>Hours back  <input id="hoursBack" type="number" step="1"    value="48" min="1" max="168" /></label>
+        <label>Analysis history (hours)  <input id="hoursBack" type="number" step="1"    value="48" min="1" max="168" /></label>
       </div>
 
       <div id="expeditionInputs" class="sidebar-inputs" style="display:none">
@@ -63,7 +73,7 @@
         </details>
       </div>
 
-      <button id="run" title="Run validation and load the forecast in one go">Validate + Forecast</button>
+      <button id="run" title="Analyse recent observations and prepare a forecast">Analyse + Forecast</button>
       <div id="meta" class="meta-block"></div>
 
       <div class="sidebar-map-wrap">
@@ -83,14 +93,14 @@
     <div class="app-main">
 
       <div class="main-tab-nav">
-        <button class="tab active" data-tab="validation">Validation</button>
-        <button class="tab" data-tab="forecast">Forecast</button>
+        <button class="tab active" data-tab="forecast">Forecast</button>
+        <button class="tab" data-tab="validation">Analysis</button>
         <button class="tab" data-tab="briefing">Briefing</button>
         <a class="tab tab-link" href="/currents" title="SHOM tidal current atlas — Pornichet / La Baule">Currents &nearr;</a>
       </div>
 
       <!-- Validation tab -->
-      <div id="tab-validation" class="tab-panel active">
+      <div id="tab-validation" class="tab-panel">
         <div class="val-page">
 
           <div class="panel chart-panel">
@@ -151,8 +161,16 @@
       </div>
 
       <!-- Forecast tab -->
-      <div id="tab-forecast" class="tab-panel">
+      <div id="tab-forecast" class="tab-panel active">
         <div class="fc-page">
+          <section class="fc-location-heading" aria-labelledby="fcLocationTitle">
+            <div><p class="fc-eyebrow">Wind outlook</p><h2 id="fcLocationTitle">Choose a location</h2></div>
+            <p id="fcFreshness" class="fc-freshness" role="status">Select a saved location, or choose a point on the map.</p>
+          </section>
+          <section class="fc-now" aria-labelledby="fcNowHeading">
+            <div class="fc-section-heading"><h2 id="fcNowHeading">Now</h2><span>Observed wind · 10 m · local time</span></div>
+            <div id="fcNowStations" class="fc-now-stations"><p class="fc-empty">Observations will appear when a location is ready.</p></div>
+          </section>
 
           <div class="fc-controls panel">
             <label class="fc-ctrl-label">Hours ahead
@@ -162,17 +180,21 @@
               <input id="fcMastHeight" type="number" value="10" min="10" max="40" step="1">
             </label>
             <button id="fcRunBtn">Load Forecast</button>
-            <span id="fcStatus" class="fc-status"></span>
-          </div>
-
-          <div class="fc-toggles-bar panel">
-            <div id="fcModelToggles" class="model-toggles"></div>
+            <span id="fcStatus" class="fc-status" role="status"></span>
           </div>
 
           <div class="fc-chart-panel panel" id="fcBestPanel" style="display:none">
-            <div class="fc-chart-title">Best Forecast &nbsp;&ndash;&nbsp; <span id="fcBestTitle"></span></div>
+            <div class="fc-chart-title">Next hours &nbsp;&middot;&nbsp; <span id="fcBestTitle"></span></div>
             <div id="fcBestChart"></div>
           </div>
+          <section class="fc-changes" aria-labelledby="fcChangesHeading">
+            <div class="fc-section-heading"><h2 id="fcChangesHeading">What changed?</h2></div>
+            <p id="fcBiasSummary" class="fc-bias-summary">Current correction is assessed separately from the analysis history.</p>
+            <div id="fcRunComparison"><p class="fc-empty">Follow a saved location to build a history of forecasts.</p></div>
+          </section>
+          <details id="fcEvidence" class="fc-evidence">
+            <summary>Forecast evidence <span>Models, correction and hourly detail</span></summary>
+            <div class="fc-toggles-bar panel"><div id="fcModelToggles" class="model-toggles"></div></div>
           <div class="fc-chart-panel panel" id="fcVerificationPanel" style="display:none"><div class="fc-chart-title">Verification</div><div id="fcVerification"></div></div>
 
           <div class="fc-ensemble-row" id="fcEnsembleRow" style="display:none">
@@ -186,6 +208,7 @@
             </div>
           </div>
 
+          <div class="fc-extra-controls"><button id="fcLoadExtras" class="btn-secondary" type="button">Load ensemble &amp; upper-air detail</button><span id="fcExtrasStatus" class="fc-status"></span></div>
           <!-- ICON-EPS uncertainty ribbon -->
           <div class="fc-ensemble-row" id="fcIconEpsRow" style="display:none">
             <div class="fc-chart-panel panel" id="fcIconEpsTwsPanel">
@@ -223,6 +246,8 @@
           </div>
 
           <div id="fcTableWrap" class="fc-chart-panel panel" style="display:none"></div>
+
+          </details>
 
           <!-- Weather analysis — collapsed by default -->
           <details class="wx-details panel" id="wxDetails">
@@ -476,8 +501,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
-  <script src="/static/app.js?v=36"></script>
-  <script src="/static/forecast.js?v=40"></script>
+  <script src="/static/app.js?v=43"></script>
+  <script src="/static/forecast.js?v=43"></script>
   <script src="/static/weather.js?v=31"></script>
   <script src="/static/briefing.js?v=41"></script>
 </body>

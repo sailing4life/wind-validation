@@ -41,6 +41,8 @@ class InMemoryRepository:
             Station("EU001", "isd", "OTHER", 50.11, 8.68, 110, external_id="106370-99999"),
             # SOCIB Bahia de Palma oceanographic buoy — 10-minute wind observations.
             Station("SOCIB_BAHIA_PALMA", "socib", "ES", 39.498883, 2.702133, 2, station_type="buoy"),
+            # Irish Lights Dublin Bay buoy (MMSI 992501301), hourly observations.
+            Station("DUBLIN_BAY_BUOY", "dublin_bay_buoy", "IE", 53.33, -6.10, station_type="buoy"),
             # METAR and BrightSky stations are discovered dynamically at query time — no catalog entries needed.
         ]
 

@@ -1,5 +1,17 @@
-﻿
+
 const MODEL_COLORS = ["#2563eb","#dc2626","#d97706","#7c3aed","#0891b2","#be185d","#ea580c","#0f766e"];
+
+function appendObservationCredits(container, points) {
+  if (!points.some(point => point.source === 'dublin_bay_buoy')) return;
+  const credit = document.createElement('p');
+  credit.className = 'observation-credit';
+  credit.append(document.createTextNode('Data from '));
+  const link = document.createElement('a');
+  link.href = 'https://dublinbaybuoy.com/developers';
+  link.textContent = 'Dublin Bay Buoy';
+  credit.append(link, document.createTextNode(', sourced from Irish Lights MetOcean and Open-Meteo.'));
+  container.append(credit);
+}
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const latInput       = document.getElementById("lat");
@@ -35,17 +47,147 @@ map.on("click", (e) => {
   if (clickMarker) map.removeLayer(clickMarker);
   clickMarker = L.marker([lat, lng]).addTo(map);
   document.getElementById('savedLocation').value = '';
+  locationSelectionChanged(null);
 });
 
-async function loadSavedLocations() {
-  const sel = document.getElementById('savedLocation');
-  try { const r = await fetch('/api/locations'); const {locations} = await r.json();
-    locations.forEach(x => { const o=document.createElement('option'); o.value=JSON.stringify(x); o.textContent=x.name; sel.appendChild(o); });
-  } catch (_) { /* storage may not be configured yet */ }
+const savedLocations = new Map();
+let selectedLocationRecord = null;
+let snapshotRequest = 0;
+let snapshotComputedAt = null;
+let locationSelectionVersion = 0;
+let preserveManualAnalysis = false;
+
+function locationSelectionChanged(location) {
+  selectedLocationRecord = location || null;
+  locationSelectionVersion += 1;
+  preserveManualAnalysis = false;
+  snapshotRequest += 1;
+  snapshotComputedAt = null;
+  document.getElementById('monitoringControls').hidden = !location;
+  document.getElementById('monitoringStatus').textContent = '';
+  if (location) {
+    latInput.value = location.lat; lonInput.value = location.lon; radiusInput.value = location.radius_km;
+    map.setView([location.lat, location.lon], 11);
+    document.getElementById('monitoringEnabled').checked = !!location.monitoring_enabled;
+    document.getElementById('monitoringStart').value = location.monitoring_start || '';
+    document.getElementById('monitoringEnd').value = location.monitoring_end || '';
+  }
+  if (typeof resetForecastLocation === 'function') resetForecastLocation();
+  latestSeries = []; latestStationSeries = []; drawCharts();
+  rankingBody.replaceChildren(); stationsList.replaceChildren(); modelToggles.replaceChildren();
+  metaBlock.replaceChildren(); stationLayer.clearLayers(); obsLayer.clearLayers();
+  document.getElementById('stationEvidence').style.display = 'none';
+  windowInfo.textContent = 'No analysis loaded for this location';
+  updateLocationHeading();
+  updateSidebarAction();
+  document.getElementById('fcRunBtn').textContent = location?.monitoring_enabled ? 'Refresh saved forecast' : 'Load Forecast';
+  document.getElementById('fcHoursAhead').disabled = !!location?.monitoring_enabled;
+  if (location) localStorage.setItem('wind-location-id', String(location.id));
+  else localStorage.removeItem('wind-location-id');
+  if (location?.monitoring_enabled) loadLocationSnapshot();
 }
-document.getElementById('savedLocation').addEventListener('change', e => { if (!e.target.value) return; const x=JSON.parse(e.target.value); latInput.value=x.lat; lonInput.value=x.lon; radiusInput.value=x.radius_km; map.setView([x.lat,x.lon], 11); });
-document.getElementById('saveLocationBtn').addEventListener('click', async () => { const name=prompt('Location name'); if (!name) return; const r=await fetch('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,lat:+latInput.value,lon:+lonInput.value,radius_km:+radiusInput.value})}); if (!r.ok) return alert('Could not save location'); const sel=document.getElementById('savedLocation'); sel.innerHTML='<option value="">Unsaved point</option>'; await loadSavedLocations(); });
-loadSavedLocations();
+
+function updateSidebarAction() {
+  const inAnalysis = document.getElementById('tab-validation').classList.contains('active');
+  runBtn.textContent = querySource === 'expedition' ? 'Analyse Expedition log' : inAnalysis ? 'Run analysis' : selectedLocationRecord?.monitoring_enabled ? 'Refresh saved forecast' : 'Analyse + Forecast';
+}
+
+function updateLocationHeading() {
+  const name = selectedLocationRecord?.name || `Point ${Number(latInput.value).toFixed(3)}, ${Number(lonInput.value).toFixed(3)}`;
+  document.getElementById('fcLocationTitle').textContent = name;
+  document.getElementById('fcFreshness').textContent = selectedLocationRecord?.monitoring_enabled
+    ? 'Loading the latest saved forecast…' : 'On demand · load a forecast or analyse recent observations.';
+}
+
+async function loadSavedLocations(preferredId) {
+  const sel = document.getElementById('savedLocation');
+  try {
+    const r = await fetch('/api/locations');
+    if (!r.ok) throw new Error('Locations unavailable');
+    const result = await r.json();
+    const locations = Array.isArray(result) ? result : result.locations || [];
+    savedLocations.clear(); sel.replaceChildren(new Option('Unsaved point', ''));
+    locations.forEach(x => { savedLocations.set(String(x.id), x); sel.add(new Option(x.name + (x.monitoring_enabled ? ' · following' : ''), String(x.id))); });
+    const selected = String(preferredId || localStorage.getItem('wind-location-id') || locations.find(x => x.monitoring_enabled)?.id || '');
+    if (savedLocations.has(selected)) { sel.value = selected; locationSelectionChanged(savedLocations.get(selected)); }
+  } catch (_) {
+    document.getElementById('monitoringStatus').textContent = 'Saved locations are unavailable.';
+  }
+}
+
+async function loadLocationSnapshot() {
+  const location = selectedLocationRecord;
+  if (!location?.monitoring_enabled || querySource !== 'point') return;
+  const requestId = ++snapshotRequest;
+  const freshness = document.getElementById('fcFreshness');
+  const retained = !!snapshotComputedAt;
+  freshness.textContent = retained ? `Saved ${fcAge(snapshotComputedAt)} · checking for updates…` : 'Preparing this location · waiting for its first complete forecast.';
+  try {
+    const r = await fetch(`/api/locations/${encodeURIComponent(location.id)}/snapshot`);
+    if (!r.ok) throw new Error(`Saved forecast unavailable (${r.status})`);
+    const snapshot = await r.json();
+    if (requestId !== snapshotRequest || selectedLocationRecord?.id !== location.id) return;
+    const hasData = snapshot.forecast && snapshot.validation;
+    if (hasData && snapshot.computed_at_utc !== snapshotComputedAt) {
+      const viewingAnalysis = document.getElementById('tab-validation').classList.contains('active');
+      if (!preserveManualAnalysis && (!viewingAnalysis || !latestSeries.length)) renderValidationResult(snapshot.validation, {loadForecast: false});
+      renderPreparedForecast(snapshot.forecast, snapshot.validation, snapshot.run_comparison);
+      snapshotComputedAt = snapshot.computed_at_utc;
+    } else if (hasData) {
+      // Age labels advance even when the saved forecast has not changed.
+      renderNowStations(snapshot.validation);
+      renderBiasSummary();
+    }
+    const date = snapshotComputedAt;
+    const stale = date && Date.now() - new Date(date).getTime() > 90 * 60 * 1000;
+    const today = new Date().toISOString().slice(0, 10);
+    const schedule = location.monitoring_start && today < location.monitoring_start ? `Scheduled from ${location.monitoring_start}` : location.monitoring_end && today > location.monitoring_end ? `Monitoring ended ${location.monitoring_end}` : null;
+    const status = snapshot.last_error || snapshot.status === 'error' ? 'Update failed' : schedule || (snapshot.status === 'pending' ? 'Update pending' : stale ? 'Update overdue' : 'Following automatically');
+    freshness.textContent = date ? `${status} · saved ${fcAge(date)} · ${fcLocalTime(date)}` : `${status} · the first forecast is not ready yet.`;
+    freshness.classList.toggle('is-stale', !!stale || !!snapshot.last_error || snapshot.status === 'error');
+    document.getElementById('fcStatus').textContent = date ? `${snapshot.forecast?.hours_ahead || 48}h saved forecast` : 'Waiting for background collection.';
+  } catch (err) {
+    if (requestId !== snapshotRequest) return;
+    freshness.textContent = `${err.message}.${retained ? ` Showing the forecast saved ${fcAge(snapshotComputedAt)}.` : ' Try refresh again shortly.'}`;
+    freshness.classList.add('is-stale');
+  }
+}
+
+document.getElementById('savedLocation').addEventListener('change', e => locationSelectionChanged(savedLocations.get(e.target.value)));
+[latInput, lonInput, radiusInput].forEach(input => input.addEventListener('change', () => {
+  document.getElementById('savedLocation').value = ''; locationSelectionChanged(null);
+}));
+document.getElementById('saveLocationBtn').addEventListener('click', async () => {
+  const name = prompt('Location name'); if (!name?.trim()) return;
+  try {
+    const r = await fetch('/api/locations', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(),lat:+latInput.value,lon:+lonInput.value,radius_km:+radiusInput.value})});
+    if (!r.ok) throw new Error('Could not save location');
+    const result = await r.json();
+    await loadSavedLocations(result.id || result.location?.id);
+    if (!result.id && !result.location?.id) {
+      const location = [...savedLocations.values()].find(x => x.name === name.trim());
+      if (location) { document.getElementById('savedLocation').value = String(location.id); locationSelectionChanged(location); }
+    }
+  } catch (err) { alert(err.message); }
+});
+document.getElementById('saveMonitoringBtn').addEventListener('click', async () => {
+  if (!selectedLocationRecord) return;
+  const id = selectedLocationRecord.id;
+  const button = document.getElementById('saveMonitoringBtn');
+  const status = document.getElementById('monitoringStatus');
+  const start = document.getElementById('monitoringStart').value || null;
+  const end = document.getElementById('monitoringEnd').value || null;
+  if (start && end && start > end) { status.textContent = 'End date must be on or after start date.'; return; }
+  button.disabled = true; status.textContent = 'Saving…';
+  try {
+    const r = await fetch(`/api/locations/${encodeURIComponent(id)}/monitoring`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({monitoring_enabled:document.getElementById('monitoringEnabled').checked, monitoring_start:start, monitoring_end:end})});
+    if (!r.ok) throw new Error('Could not update monitoring');
+    await loadSavedLocations(id); status.textContent = 'Monitoring settings saved.';
+  } catch (err) { status.textContent = err.message; }
+  finally { button.disabled = false; }
+});
+document.addEventListener('DOMContentLoaded', () => { updateLocationHeading(); loadSavedLocations(); });
+setInterval(() => { if (!document.hidden && selectedLocationRecord?.monitoring_enabled) loadLocationSnapshot(); }, 60000);
 
 // ── state ────────────────────────────────────────────────────────────────────
 let latestSeries    = [];
@@ -144,7 +286,7 @@ function populateModelToggles(series, winner, runTimes) {
     btn.className = "model-toggle" + (isWinner ? " active" : "");
     btn.style.setProperty("--mt-color", color);
     btn.dataset.modelId = s.model_id;
-    btn.innerHTML = `<span class="mt-dot"></span>${s.model_id}${isWinner ? " ★" : ""}${runLabel ? `<span class="mt-run">${runLabel}</span>` : ""}`;
+    btn.innerHTML = `<span class="mt-dot"></span>${fcEscape(s.model_id)}${isWinner ? " ★" : ""}${runLabel ? `<span class="mt-run">${runLabel}</span>` : ""}`;
     btn.addEventListener("click", () => {
       if (selectedModels.has(s.model_id)) {
         selectedModels.delete(s.model_id);
@@ -463,7 +605,11 @@ function fmt2(v) { return v != null ? Number(v).toFixed(2) : "—"; }
 // ── main validation ──────────────────────────────────────────────────────────
 async function runValidation() {
   if (querySource === "expedition") { return runExpeditionValidation(); }
-
+  const inAnalysis = document.getElementById('tab-validation').classList.contains('active');
+  if (selectedLocationRecord?.monitoring_enabled && !inAnalysis) return loadLocationSnapshot();
+  if (inAnalysis) preserveManualAnalysis = true;
+  const followedAnalysis = !!selectedLocationRecord?.monitoring_enabled;
+  const locationGeneration = locationSelectionVersion;
   runBtn.disabled = true;
   runBtn.textContent = "Loading…";
   metaBlock.innerHTML = "";
@@ -497,27 +643,35 @@ async function runValidation() {
     });
     if (!resp.ok) {
       const txt = await resp.text();
-      metaBlock.innerHTML = `<span class="meta-error">Error ${resp.status}: ${txt.slice(0, 200)}</span>`;
+      metaBlock.innerHTML = `<span class="meta-error">Error ${resp.status}: ${fcEscape(txt.slice(0, 200))}</span>`;
       chartStatus.textContent = "Validation failed.";
       chartStatus.className = "chart-status warn";
       return;
     }
     data = await resp.json();
+    if (locationGeneration !== locationSelectionVersion) return;
   } catch (err) {
-    metaBlock.innerHTML = `<span class="meta-error">Request failed: ${err.message}</span>`;
+    metaBlock.innerHTML = `<span class="meta-error">Request failed: ${fcEscape(err.message)}</span>`;
     chartStatus.textContent = "Validation failed.";
     chartStatus.className = "chart-status warn";
     return;
   } finally {
     clearInterval(ticker);
     runBtn.disabled = false;
-    runBtn.textContent = "Validate + Forecast";
+    updateSidebarAction();
   }
   chartStatus.textContent = "";
 
+  renderValidationResult(data, {loadForecast: !followedAnalysis, updateNow: !followedAnalysis});
+}
+
+function renderValidationResult(data, {loadForecast = true, updateNow = true} = {}) {
+  data = {observation_points:[],source_provenance:[],stations_used:[],models:[],...data};
+  chartStatus.textContent = '';
+  rankingBody.replaceChildren(); stationsList.replaceChildren(); modelToggles.replaceChildren();
   // ── window info ──
   windowInfo.textContent =
-    `${fmtUTC(data.window_start_utc)} → ${fmtUTC(data.window_end_utc)} · ${payload.hours_back}h`;
+    `${fmtUTC(data.window_start_utc)} → ${fmtUTC(data.window_end_utc)}`;
 
   // ── meta block ──
   const obsCount  = data.observation_points.length;
@@ -532,15 +686,16 @@ async function runValidation() {
   }
 
   metaBlock.innerHTML = `
-    <div class="meta-row"><span class="meta-label">Winner:</span> ${data.winner_model_id ?? "—"}</div>
+    <div class="meta-row"><span class="meta-label">Winner:</span> ${fcEscape(data.winner_model_id ?? "—")}</div>
     <div class="meta-row">
-      <span class="meta-label">Obs sources:</span> ${srcLabels} (${obsCount} points) &nbsp;
+      <span class="meta-label">Obs sources:</span> ${fcEscape(srcLabels)} (${obsCount} points) &nbsp;
       <span class="meta-label">Latest obs:</span>
       <span${obsAgeWarn ? ' style="color:#b45309"' : ""}>${obsAgeStr}</span>
     </div>
-    <div class="meta-row"><span class="meta-label">Country:</span> ${data.stations_used[0]?.country ?? "—"} &nbsp; <span class="meta-label">Stations:</span> ${data.stations_used.length}</div>
+    <div class="meta-row"><span class="meta-label">Country:</span> ${fcEscape(data.stations_used[0]?.country ?? "—")} &nbsp; <span class="meta-label">Stations:</span> ${data.stations_used.length}</div>
     <div class="meta-row" style="color:#94a3b8;font-size:11px">Computed ${fmtUTC(data.computed_at_utc)}</div>
   `;
+  appendObservationCredits(metaBlock, data.observation_points);
 
   // ── ranking table ──
   data.models.forEach((row) => {
@@ -548,15 +703,15 @@ async function runValidation() {
     if (row.model_id === data.winner_model_id) tr.className = "winner-row";
     const isWinner = row.model_id === data.winner_model_id;
     const badgeCls = row.status === "ok" ? "badge-ok" : row.status === "excluded" ? "badge-excl" : "badge-insuf";
-    const note = row.reasons.join(", ");
+    const note = (row.reasons || []).join(", ");
     const runTip = row.run_time_utc ? `title="Run: ${fmtUTC(row.run_time_utc)}"` : "";
     tr.innerHTML = `
-      <td class="model-cell ${isWinner ? "winner-cell" : ""}" ${runTip}>${row.model_id}${isWinner ? " ★" : ""}</td>
+      <td class="model-cell ${isWinner ? "winner-cell" : ""}" ${runTip}>${fcEscape(row.model_id)}${isWinner ? " ★" : ""}</td>
       <td>${fmt2(row.vector_rmse_uv)}</td>
       <td>${fmt2(row.rmse_ws)}</td>
       <td>${fmt2(row.bias_ws)}</td>
       <td>${row.n_samples}</td>
-      <td><span class="badge ${badgeCls}" title="${note}">${row.status}</span></td>
+      <td><span class="badge ${badgeCls}" title="${fcEscape(note)}">${fcEscape(row.status)}</span></td>
     `;
     rankingBody.appendChild(tr);
   });
@@ -567,9 +722,9 @@ async function runValidation() {
     const li = document.createElement("li");
     li.className = "station-item";
     li.innerHTML = `
-      <span class="station-id">${s.station_id}</span>
+      <span class="station-id">${fcEscape(s.station_id)}</span>
       <div>
-        <span class="source-tag source-${s.source}">${s.source}</span>
+        <span class="source-tag source-${fcEscape(s.source)}">${fcEscape(s.source)}</span>
         <div class="station-detail">${s.lat.toFixed(3)}, ${s.lon.toFixed(3)} &nbsp; ${s.elevation_m !== null ? s.elevation_m + "m" : ""}</div>
       </div>
     `;
@@ -579,7 +734,7 @@ async function runValidation() {
     L.circleMarker([s.lat, s.lon], {
       radius: 4, color: "#475569", fillColor: "#94a3b8", fillOpacity: 0.7,
     })
-      .bindPopup(`<b>${s.station_id}</b><br/>Source: ${s.source}<br/>${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}`)
+      .bindPopup(`<b>${fcEscape(s.station_id)}</b><br/>Source: ${fcEscape(s.source)}<br/>${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}`)
       .addTo(stationLayer);
   });
 
@@ -592,7 +747,7 @@ async function runValidation() {
   data.observation_points.forEach((obs) => {
     windBarbMarker(obs.lat, obs.lon, obs.wd_deg, obs.ws_ms, "#16a34a")
       .bindPopup(
-        `<b>${obs.station_id}</b> (${obs.source})<br/>` +
+        `<b>${fcEscape(obs.station_id)}</b> (${fcEscape(obs.source)})<br/>` +
         `${obs.ws_ms.toFixed(1)} m/s &nbsp; ${obs.wd_deg.toFixed(0)}° &nbsp; ` +
         `<span style="color:#64748b">${fmtUTC(obs.time_utc)}</span>`
       )
@@ -610,7 +765,7 @@ async function runValidation() {
 
   // Pass params to forecast tab and pre-load forecast + ensemble in background
   const winnerRow = (data.models || []).find(m => m.model_id === data.winner_model_id);
-  if (typeof setForecastParams === 'function') {
+  if (loadForecast && typeof setForecastParams === 'function') {
     setForecastParams(
       data.lat,
       data.lon,
@@ -619,7 +774,8 @@ async function runValidation() {
       data.query_id ?? '',
     );
   }
-  if (typeof loadForecast === 'function') loadForecast();
+  if (updateNow && typeof renderNowStations === 'function') renderNowStations(data);
+  if (loadForecast && typeof window.loadForecast === 'function') window.loadForecast();
 }
 
 function renderStationEvidence(stationId) {
@@ -738,10 +894,20 @@ document.getElementById("errorModeToggle").addEventListener("change", (e) => {
 document.querySelectorAll('input[name="querySource"]').forEach((radio) => {
   radio.addEventListener("change", () => {
     querySource = radio.value;
+    locationSelectionVersion += 1;
     const isExp = querySource === "expedition";
+    if (isExp) {
+      snapshotRequest += 1;
+      document.querySelector('[data-tab="validation"]').click();
+      runBtn.textContent = 'Analyse Expedition log';
+    } else {
+      runBtn.textContent = selectedLocationRecord?.monitoring_enabled ? 'Refresh saved forecast' : 'Analyse + Forecast';
+      if (selectedLocationRecord?.monitoring_enabled) loadLocationSnapshot();
+    }
     document.getElementById("pointInputs").style.display        = isExp ? "none" : "";
     document.getElementById("expeditionInputs").style.display   = isExp ? ""     : "none";
     document.getElementById("analysisModeWrap").style.display   = isExp ? "none" : "";
+    updateSidebarAction();
   });
 });
 
@@ -833,14 +999,14 @@ async function runExpeditionValidation() {
     }
     data = await resp.json();
   } catch (err) {
-    metaBlock.innerHTML = `<span class="meta-error">Request failed: ${err.message}</span>`;
+    metaBlock.innerHTML = `<span class="meta-error">Request failed: ${fcEscape(err.message)}</span>`;
     chartStatus.textContent = "Validation failed.";
     chartStatus.className = "chart-status warn";
     return;
   } finally {
     clearInterval(ticker);
     runBtn.disabled = false;
-    runBtn.textContent = "Validate + Forecast";
+    runBtn.textContent = "Analyse + Forecast";
   }
   chartStatus.textContent = "";
 

@@ -33,3 +33,13 @@ def test_nearest_forecast_returns_none_when_only_hindsight_runs_exist():
     nearest = nearest_forecast([hindsight_run], 39.5, 2.7, not_after=datetime(2026, 7, 30, 10, 15, tzinfo=UTC))
 
     assert nearest is None
+
+
+def test_backfilled_snapshot_does_not_become_a_forecast_at_the_next_refresh():
+    # Fetched at 10:10 for the already elapsed 10:00 forecast hour. Even when
+    # a later 10:20 observation arrives this cannot establish forecast skill.
+    snapshot = _fv(10, 10)
+    snapshot.run_time_source = "fetched_snapshot"
+    snapshot.fetched_at_utc = datetime(2026, 7, 30, 10, 10, tzinfo=UTC)
+    observed_at = datetime(2026, 7, 30, 10, 20, tzinfo=UTC)
+    assert nearest_forecast([snapshot], 39.5, 2.7, not_after=observed_at) is None

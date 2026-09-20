@@ -57,10 +57,18 @@ class Settings:
     min_samples: int = 30
     time_tolerance_minutes: int = 30
     cache_ttl_seconds: int = 3600
+    # Forecast evidence is independent of the user-selected analysis period.
+    forecast_weight_hours: int = 48
+    live_bias_hours: int = 3
+    live_bias_max_age_hours: float = 2.0
     refresh_interval_seconds: int = _env_int("REFRESH_INTERVAL_SECONDS", 600)
     italy_regional_enabled: bool = False
     live_observations_enabled: bool = _env_bool("LIVE_OBSERVATIONS_ENABLED", True)
     socib_buoy_enabled: bool = _env_bool("SOCIB_BUOY_ENABLED", True)
+    dublin_bay_buoy_enabled: bool = _env_bool("DUBLIN_BAY_BUOY_ENABLED", True)
+    dublin_bay_api_url: str = os.getenv("DUBLIN_BAY_API_URL", "https://api.dublinbaybuoy.com/rest/v1")
+    # Public, read-only publishable key documented by the data provider.
+    dublin_bay_api_key: str = os.getenv("DUBLIN_BAY_API_KEY", "sb_publishable_R5KkIpbiwNajUyx3I4aewQ_S4NI8hl3")
     live_forecasts_enabled: bool = _env_bool("LIVE_FORECASTS_ENABLED", True)
     # Shared secret for the forecast-push ingest endpoint. Unset → endpoint disabled.
     ingest_token: str | None = os.getenv("INGEST_TOKEN")

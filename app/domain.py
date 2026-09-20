@@ -38,6 +38,7 @@ class Observation:
     wd_deg: float
     qc_passed: bool = True
     qc_flags: list[str] | None = None
+    gust_ms: float | None = None
 
 
 @dataclass(slots=True)
@@ -57,6 +58,9 @@ class ForecastValue:
     shortwave_wm2: float | None = None
     cape_jkg: float | None = None
     boundary_layer_height_m: float | None = None
+    # Unknown initializations use fetch time as the snapshot identity, never a guessed run.
+    run_time_source: str = "source"
+    fetched_at_utc: datetime | None = None
 
 
 @dataclass(slots=True)

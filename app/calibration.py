@@ -20,6 +20,63 @@ class CalibrationSample:
     relevance_weight: float = 1.0
     local_solar_hour: float | None = None
     lead_hours: float | None = None
+    station_id: str | None = None
+
+
+def bias_drift(samples: list[CalibrationSample], now: datetime, window_hours: int = 3) -> dict:
+    """Compare two disjoint windows using the same stations and equal station weights.
+
+    At least two distinct observation times in each window are required per
+    station. A change in station availability alone must never create a warning.
+    Positive speed/direction deltas mean the observation-minus-model error grew.
+    """
+    windows: list[dict[str, list[CalibrationSample]]] = [{}, {}]
+    for row in samples:
+        age = (now - row.time_utc).total_seconds() / 3600.0
+        if not row.station_id or age < 0 or age >= 2 * window_hours:
+            continue
+        windows[int(age >= window_hours)].setdefault(row.station_id, []).append(row)
+    stations = sorted(set(windows[0]) & set(windows[1]))
+    stations = [sid for sid in stations if all(
+        len({r.time_utc for r in period[sid]}) >= 2 for period in windows
+    )]
+    base = {"window_hours": window_hours, "station_count": len(stations), "station_ids": stations}
+    if not stations:
+        return {**base, "status": "insufficient_data", "delta_speed_ms": None, "delta_direction_deg": None}
+
+    speed_deltas, direction_deltas = [], []
+    for sid in stations:
+        period_errors = []
+        for period in windows:
+            # Deduplicate observations if multiple archived runs supplied a pair.
+            unique = {row.time_utc: row for row in period[sid]}
+            speeds, directions = [], []
+            for row in unique.values():
+                ms, md = uv_to_speed_dir(row.model_u, row.model_v)
+                os, od = uv_to_speed_dir(row.obs_u, row.obs_v)
+                speeds.append(os - ms)
+                if min(ms, os) >= 1.0:
+                    directions.append((od - md + 180.0) % 360.0 - 180.0)
+            direction = math.degrees(math.atan2(
+                sum(math.sin(math.radians(x)) for x in directions),
+                sum(math.cos(math.radians(x)) for x in directions),
+            )) if directions else None
+            period_errors.append((sum(speeds) / len(speeds), direction))
+        current, previous = period_errors
+        speed_deltas.append(current[0] - previous[0])
+        if current[1] is not None and previous[1] is not None:
+            direction_deltas.append((current[1] - previous[1] + 180.0) % 360.0 - 180.0)
+    speed_delta = sum(speed_deltas) / len(speed_deltas)
+    direction_delta = math.degrees(math.atan2(
+        sum(math.sin(math.radians(x)) for x in direction_deltas),
+        sum(math.cos(math.radians(x)) for x in direction_deltas),
+    )) if direction_deltas else None
+    return {
+        **base,
+        "status": "changing" if abs(speed_delta) >= 1.0 or (direction_delta is not None and abs(direction_delta) >= 15.0) else "stable",
+        "delta_speed_ms": round(speed_delta, 3),
+        "delta_direction_deg": round(direction_delta, 1) if direction_delta is not None else None,
+    }
 
 
 def circular_delta(a: float, b: float) -> float:

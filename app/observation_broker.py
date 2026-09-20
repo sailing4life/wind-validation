@@ -4,6 +4,7 @@ from datetime import datetime
 
 from .adapters import BaseSourceAdapter, BrightSkyAdapter, IsdAdapter, ItalyRegionalAdapter, KnmiAdapter, MetarAdapter, MeteoFranceAdapter, SocibPalmaAdapter
 from .config import Settings
+from .dublin_bay_adapter import DublinBayBuoyAdapter
 from .domain import Observation, Station
 from .qc import qc_observations
 from .repositories import InMemoryRepository
@@ -21,6 +22,7 @@ class ObservationBroker:
         self._metar = MetarAdapter(settings)
         self._brightsky = BrightSkyAdapter(settings)
         self._socib = SocibPalmaAdapter(settings)
+        self._dublin_bay = DublinBayBuoyAdapter(settings)
         self._smhi = SmhiAdapter(settings)
         self._viva = VivaAdapter(settings)
         self._rws = RwsAdapter(settings)
@@ -28,6 +30,8 @@ class ObservationBroker:
         self._imgw = ImgwAdapter(settings)
 
     def _source_order(self, country: str) -> list[BaseSourceAdapter]:
+        if country == "IE":
+            return [self._dublin_bay, self._metar, self._isd]
         if country == "NL":
             return [self._metar, self._knmi, self._rws, self._isd]
         if country == "FR":
