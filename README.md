@@ -39,6 +39,7 @@ Source settings:
 - `NCEI_TOKEN`: NOAA/NCEI token (optional for some endpoints)
 - `REQUEST_TIMEOUT_SECONDS`: HTTP timeout, default `8`
 - `REFRESH_INTERVAL_SECONDS`: scheduler interval in seconds, default `10800` (3 hours)
+- `OPENMETEO_MIN_INTERVAL_SECONDS`: minimum pause after each uncached Open-Meteo request, default `5` seconds (minimum `1`)
 - `OPENMETEO_KNMI_URL`: defaults to `https://api.open-meteo.com/v1/forecast`
 - `OPENMETEO_KNMI_MODEL`: Open-Meteo model name for harmonie_nl, default `harmonie_seamless`
 - `OPENMETEO_METEOFRANCE_URL`: defaults to `https://api.open-meteo.com/v1/forecast`
@@ -80,7 +81,10 @@ If a live source call fails, that source/model returns no rows for that refresh 
 Open-Meteo requests share a one-hour, bounded in-memory HTTP cache across
 forecast/analysis, ensemble, marine, gradient and location-context features.
 Simultaneous identical requests are merged; uncached requests run one at a time
-with at least one second between them. Future point forecasts retain the full
+with at least five seconds between them by default, including across models and
+manual/background work. Set `OPENMETEO_MIN_INTERVAL_SECONDS` on both web and
+worker processes to adjust the pause. Cache hits do not incur this pause.
+Future point forecasts retain the full
 downloaded days, so overlapping time windows can reuse the same data. Cached
 forecasts retain their original fetch time for validation provenance.
 
@@ -88,7 +92,8 @@ An HTTP 429 pauses all uncached Open-Meteo requests in that process instead of
 retrying separately for every model. The pause follows `Retry-After`, or the
 minute/hour/day quota mentioned in the response (five minutes if unspecified).
 Unexpired cached responses remain usable. A manual forecast with no available
-models reports the limit without clearing the displayed forecast. These caches
+models reports the remaining wait without clearing the displayed forecast. A
+longer pause does not clear an already exhausted hourly or daily quota. These caches
 and the cooldown are per process and reset on restart; use one collector and
 avoid unnecessary replicas. Batching locations still consumes provider quota;
 see [Open-Meteo's request accounting](https://open-meteo.com/en/pricing).

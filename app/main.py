@@ -127,8 +127,9 @@ def forecast(payload: ForecastRequest) -> dict:
     )
     retry_after = openmeteo_client.cooldown_remaining()
     if not result.get("models") and retry_after:
+        retry_minutes = (retry_after + 59) // 60
         raise HTTPException(status_code=503,
-                            detail="Open-Meteo is tijdelijk beperkt. Probeer het later opnieuw of toon de opgeslagen forecast.",
+                            detail=f"Open-Meteo is tijdelijk beperkt. Probeer het over ongeveer {retry_minutes} minuten opnieuw of toon de opgeslagen forecast.",
                             headers={"Retry-After": str(retry_after)})
     return result
 

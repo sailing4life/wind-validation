@@ -16,6 +16,8 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
+from .config import SETTINGS
+
 logger = logging.getLogger("wind_validation.openmeteo")
 
 def response_fetched_at(response: httpx.Response) -> datetime:
@@ -50,10 +52,12 @@ def _retry_seconds(response: httpx.Response) -> float:
 
 
 class OpenMeteoClient:
-    def __init__(self, ttl_seconds: float = 3600, min_interval_seconds: float = 1,
+    def __init__(self, ttl_seconds: float = 3600, min_interval_seconds: float | None = None,
                  max_entries: int = 128, max_bytes: int = 32 * 1024 * 1024) -> None:
         self.ttl_seconds = ttl_seconds
-        self.min_interval_seconds = min_interval_seconds
+        self.min_interval_seconds = (
+            SETTINGS.openmeteo_min_interval_seconds if min_interval_seconds is None else min_interval_seconds
+        )
         self.max_entries = max_entries
         self.max_bytes = max_bytes
         self._cache: OrderedDict[tuple, tuple[float, httpx.Response]] = OrderedDict()
@@ -107,7 +111,13 @@ class OpenMeteoClient:
             if response.status_code == 429:
                 cooldown = _retry_seconds(response)
                 self._blocked_until = time.monotonic() + cooldown
-                logger.warning("Open-Meteo rate limit: pausing uncached requests for %.0f seconds", cooldown)
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = {}
+                reason = payload.get("reason") if isinstance(payload, dict) else None
+                logger.warning("Open-Meteo rate limit: pausing uncached requests for %.0f seconds; reason: %s",
+                               cooldown, str(reason or "not supplied")[:300].replace("\n", " ").replace("\r", " "))
                 return response  # no per-model retries or sleeps during a quota block
             ttl = self.ttl_seconds if response.is_success else 600 if response.status_code == 400 else 0
             if response.is_success:

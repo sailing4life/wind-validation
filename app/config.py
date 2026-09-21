@@ -62,6 +62,7 @@ class Settings:
     live_bias_hours: int = 3
     live_bias_max_age_hours: float = 2.0
     refresh_interval_seconds: int = _env_int("REFRESH_INTERVAL_SECONDS", 10800)
+    openmeteo_min_interval_seconds: int = max(1, _env_int("OPENMETEO_MIN_INTERVAL_SECONDS", 5))
     italy_regional_enabled: bool = False
     live_observations_enabled: bool = _env_bool("LIVE_OBSERVATIONS_ENABLED", True)
     socib_buoy_enabled: bool = _env_bool("SOCIB_BUOY_ENABLED", True)

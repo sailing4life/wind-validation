@@ -109,3 +109,4 @@ def test_rate_limited_empty_forecast_reports_retry_instead_of_replacing_display(
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "120"
     assert "opgeslagen forecast" in response.json()["detail"]
+    assert "2 minuten" in response.json()["detail"]

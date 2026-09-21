@@ -40,10 +40,11 @@ def test_identical_concurrent_requests_make_one_http_call():
         assert first.result() is second.result()
 
 
-def test_rate_limit_blocks_other_models_and_endpoints_but_serves_cache(clock):
+def test_rate_limit_blocks_other_models_and_endpoints_but_serves_cache(clock, caplog):
     gate = om.OpenMeteoClient(min_interval_seconds=0)
     fetch = Mock(side_effect=[httpx.Response(200, json={"hourly": {}}),
-                              httpx.Response(429, headers={"Retry-After": "120"}),
+                              httpx.Response(429, headers={"Retry-After": "120"},
+                                             json={"reason": "Minutely API request limit exceeded"}),
                               httpx.Response(200, json={"hourly": {}})])
     with httpx.Client(transport=httpx.MockTransport(fetch)) as client:
         saved = gate.get(client, URL, {"models": "icon_eu"})
@@ -56,6 +57,7 @@ def test_rate_limit_blocks_other_models_and_endpoints_but_serves_cache(clock):
         clock[0] += 1
         assert gate.get(client, URL, {}).status_code == 200
         assert fetch.call_count == 3
+        assert "Minutely API request limit exceeded" in caplog.text
 
 
 @pytest.mark.parametrize(("reason", "seconds"), [
@@ -134,7 +136,58 @@ def test_only_cache_misses_are_paced(monkeypatch, clock):
         gate.get(client, URL, {"models": "icon_eu"})
         assert waits == []
         gate.get(client, URL, {"models": "ecmwf"})
-        assert waits == [1]
+    assert waits == [1]
+
+
+def test_configured_pause_is_shared_across_concurrent_models_and_extra_endpoints(monkeypatch, clock):
+    monkeypatch.setattr(om.SETTINGS, "openmeteo_min_interval_seconds", 5)
+    waits, requests = [], []
+    entered, release = Event(), Event()
+
+    def wait(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+
+    def fetch(request):
+        requests.append((str(request.url), clock[0]))
+        # Simulate a slow request: the pause must start after its completion.
+        clock[0] += 2
+        if len(requests) == 1:
+            entered.set()
+            assert release.wait(5)
+        return httpx.Response(200, json={"hourly": {}})
+
+    monkeypatch.setattr(om.time, "sleep", wait)
+    gate = om.OpenMeteoClient()
+    with httpx.Client(transport=httpx.MockTransport(fetch)) as client, ThreadPoolExecutor(3) as pool:
+        first = pool.submit(gate.get, client, URL, {"models": "icon_eu"})
+        assert entered.wait(5)
+        second = pool.submit(gate.get, client, URL, {"models": "ecmwf"})
+        extra = pool.submit(gate.get, client, "https://marine-api.open-meteo.com/v1/marine", {})
+        release.set()
+        assert first.result().status_code == second.result().status_code == extra.result().status_code == 200
+        assert [started for _, started in requests] == [1000, 1007, 1014]
+        assert waits == [5, 5]
+        gate.get(client, URL, {"models": "icon_eu"})
+        assert waits == [5, 5], "a cache hit must not add another pause"
+
+
+def test_configured_pause_applies_after_transport_failure(monkeypatch, clock):
+    monkeypatch.setattr(om.SETTINGS, "openmeteo_min_interval_seconds", 7)
+    waits = []
+
+    def wait(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(om.time, "sleep", wait)
+    fetch = Mock(side_effect=[httpx.ConnectError("connection lost"), httpx.Response(200)])
+    gate = om.OpenMeteoClient()
+    with httpx.Client(transport=httpx.MockTransport(fetch)) as client:
+        with pytest.raises(httpx.ConnectError):
+            gate.get(client, URL, {"models": "icon_eu"})
+        gate.get(client, URL, {"models": "ecmwf"})
+    assert waits == [7]
 
 
 def test_async_and_sync_callers_share_the_same_cache(monkeypatch):
