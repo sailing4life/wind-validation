@@ -44,6 +44,7 @@ function setup() {
     vm.runInContext(handler('app.js', name), context);
   }
   vm.runInContext(handler('forecast.js', 'loadForecast'), context);
+  vm.runInContext(handler('forecast.js', 'fcArchiveNote'), context);
   return {context, calls, rendered, element};
 }
 
@@ -121,6 +122,20 @@ test('quota errors show the server explanation without replacing existing charts
   assert.equal(element('fcRunBtn').disabled, false);
   assert.equal(rendered.length, 0);
   assert.equal(element('fcStatus').textContent, 'Error: Open-Meteo is tijdelijk beperkt.');
+});
+
+test('an archived fallback displays its original fetch time and available horizon', async () => {
+  const {context, element, rendered} = setup();
+  context.fetch = async () => ({ok: true, json: async () => ({
+    models: [{model_id: 'icon_eu', hours: []}],
+    archive_fallbacks: [{model_id: 'icon_eu', fetched_at_utc: '2026-09-21T06:00:00Z',
+      last_valid_time_utc: '2026-09-22T06:00:00Z'}],
+  })});
+  await context.loadForecast();
+  assert.equal(rendered.length, 1);
+  assert.match(element('fcFreshness').textContent, /Archived data: icon_eu/);
+  assert.match(element('fcFreshness').textContent, /fetched 2026-09-21T06:00:00Z/);
+  assert.match(element('fcFreshness').textContent, /available through 2026-09-22T06:00:00Z/);
 });
 
 test('Analyse + Forecast runs validation for a followed location', async () => {

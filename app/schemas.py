@@ -230,11 +230,19 @@ class LocationFingerprintDTO(BaseModel):
     terrain: TerrainFingerprintDTO
 
 
+class ForecastArchiveFallbackDTO(BaseModel):
+    model_id: str
+    # Oldest collection time among the archived values used; never recomputation time.
+    fetched_at_utc: datetime | None = None
+    last_valid_time_utc: datetime
+
+
 class ForecastResponse(BaseModel):
     winner_model_id: str
     bias_ws_ms: float
     hours_ahead: int
     models: list[ForecastModelSeries]
+    archive_fallbacks: list[ForecastArchiveFallbackDTO] = Field(default_factory=list)
     # Consensus of the top validated models; kept out of `models` so model
     # toggles and ensemble logic keep operating on real sources only.
     blend: ForecastModelSeries | None = None

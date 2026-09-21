@@ -1,6 +1,7 @@
 """Collector → archive → causal validation → calibrated API contract, offline."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from app.config import Settings
 from app.domain import ForecastValue, ModelDefinition, Observation, Station
@@ -46,9 +47,12 @@ class Archive:
 class ForecastSource:
     """All source timestamps are explicitly collection times, including backfills."""
     def fetch_forecast_with_extras(self, model, coords, start, end):
-        return self.fetch_model_at_coords(model, coords, start, end)
+        return self._rows(model, coords, start, end)
 
     def fetch_model_at_coords(self, model, coords, start, end):
+        return self._rows(model, coords, start, end)
+
+    def _rows(self, model, coords, start, end):
         result = []
         valid = start
         while valid <= end:
@@ -77,6 +81,7 @@ def test_real_validation_uses_earlier_collected_forecasts_in_next_monitoring_cyc
                  for s in stations for hour in hours], ["fake_source"])
     broker = SimpleNamespace(list_stations=lambda *args: stations, get_observations=observations)
     source = ForecastSource()
+    source.fetch_model_at_coords = Mock(wraps=source.fetch_model_at_coords)
     settings = Settings(live_forecasts_enabled=True, min_samples=6)
     store = Archive()
     validation = ValidationService(repo, broker, source, settings, store=store)
@@ -91,6 +96,7 @@ def test_real_validation_uses_earlier_collected_forecasts_in_next_monitoring_cyc
 
     Clock.current += timedelta(hours=3)
     next_snapshot = monitoring.refresh_location(1)
+    source.fetch_model_at_coords.assert_not_called()
     assert next_snapshot["status"] == "ready"
     assert next_snapshot["validation"]["models"][0]["n_samples"] == 9
     assert len(store.pairs) == 9

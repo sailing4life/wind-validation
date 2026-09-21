@@ -420,11 +420,16 @@ class ValidationService:
             ))
         return samples
 
-    def validate_point(self, lat: float, lon: float, hours_back: int, radius_km: float, *, force_refresh: bool = False) -> dict:
+    def validate_point(self, lat: float, lon: float, hours_back: int, radius_km: float, *,
+                       force_refresh: bool = False, fetch_historical_forecasts: bool = True) -> dict:
         now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
         window_end = now_hour
         window_start = now_hour - timedelta(hours=hours_back)
         cache_key = self._cache_key(lat, lon, radius_km, window_end, hours_back)
+        if not fetch_historical_forecasts:
+            # A cheap forecast preparation must not satisfy an explicit request
+            # to download historical model curves in the Analysis workspace.
+            cache_key += ":archive"
 
         cached = self.cache.get(cache_key)
         if cached is not None and not force_refresh and (
@@ -482,7 +487,7 @@ class ValidationService:
         # server trickling bytes) must not stall the request past the proxy
         # timeout. Models that miss the budget are skipped for this run.
         pool = ThreadPoolExecutor(max_workers=3)
-        futures = {pool.submit(_fetch_model, m): m for m in candidates}
+        futures = {pool.submit(_fetch_model, m): m for m in candidates if fetch_historical_forecasts}
         try:
             for future in as_completed(futures, timeout=150):
                 model = futures[future]
@@ -798,7 +803,10 @@ class ValidationService:
             "lat": lat, "lon": lon, "radius_km": radius_km,
             "hours_back": self.settings.forecast_weight_hours, "window_end_utc": now,
         }.items()):
-            result = self.validate_point(lat, lon, self.settings.forecast_weight_hours, radius_km)
+            # Corrections need forecasts captured before their observations.
+            # Do not spend quota re-downloading history on every Load Forecast.
+            result = self.validate_point(lat, lon, self.settings.forecast_weight_hours, radius_km,
+                                         fetch_historical_forecasts=False)
             context = self._validation_context.get(result["query_id"]) or {}
         self._forecast_context.set(key, context)
         return context
@@ -821,6 +829,7 @@ class ValidationService:
         catalog = self.repo.models
 
         models_series = []
+        archive_fallbacks = []
         context = self._prepare_forecast_context(
             lat, lon, radius_km if radius_km is not None else self.settings.default_radius_km, now, query_id,
         )
@@ -860,12 +869,24 @@ class ValidationService:
             if self.store and fvs:
                 self.store.save_forecasts(fvs)
 
-            if not fvs and self.store and model.on_demand:
-                # GRIB source down or over budget: fall back to the freshest
-                # archived run near this point, so an event still has data.
-                archived = self.store.load_forecasts([model.model_id], now, end, lat, lon, radius_km=50.0)
+            if not fvs and self.store:
+                # Open-Meteo point values must belong to this point, not a
+                # distant station. GRIB archives retain their existing radius.
+                archive_radius = 50.0 if model.on_demand else 0.1
+                archived = self.store.load_forecasts([model.model_id], now, end, lat, lon, radius_km=archive_radius)
+                archived = [fv for fv in archived if (
+                    now <= fv.valid_time_utc <= end and fv.run_time_utc <= calibration_now
+                    and (fv.fetched_at_utc is None or fv.fetched_at_utc <= calibration_now)
+                    and haversine_km(lat, lon, fv.lat, fv.lon) <= archive_radius
+                )]
                 fvs = _freshest_archived_hours(archived, lat, lon)
                 if fvs:
+                    fetched_times = [fv.fetched_at_utc for fv in fvs if fv.fetched_at_utc is not None]
+                    archive_fallbacks.append({
+                        "model_id": model.model_id,
+                        "fetched_at_utc": min(fetched_times) if len(fetched_times) == len(fvs) else None,
+                        "last_valid_time_utc": max(fv.valid_time_utc for fv in fvs),
+                    })
                     logger.info("forecast_point: using %d archived hours for %s (live source unavailable)",
                                 len(fvs), model.model_id)
 
@@ -968,6 +989,7 @@ class ValidationService:
             "bias_ws_ms": bias_ws_ms,
             "hours_ahead": hours_ahead,
             "models": models_series,
+            "archive_fallbacks": archive_fallbacks,
             "blend": blend_series,
             "location_fingerprint": self.fingerprint_service.fingerprint(lat, lon) if self.fingerprint_service else None,
             "calibration": calibration_summary,

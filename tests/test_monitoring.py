@@ -65,6 +65,7 @@ def test_monitoring_archives_pin_and_discovered_stations_before_validation_and_k
     def validate(*args, **kwargs):
         store.events.append("validate")
         assert kwargs["force_refresh"] is True
+        assert kwargs["fetch_historical_forecasts"] is False
         return {"query_id": "q", "winner_model_id": "test", "models": []}
     validation = SimpleNamespace(validate_point=validate, forecast_point=Mock(return_value=envelope()["forecast"]))
     service = LocationMonitoringService(repo, SimpleNamespace(openmeteo=adapter),

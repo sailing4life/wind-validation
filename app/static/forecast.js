@@ -158,7 +158,7 @@ async function loadForecast() {
     if (requestId !== _forecastRequest) return;
     renderPreparedForecast(data, null, null);
     document.getElementById('fcFreshness').classList.remove('is-stale');
-    document.getElementById('fcFreshness').textContent = `On demand · loaded ${fcLocalTime(new Date().toISOString())}`;
+    document.getElementById('fcFreshness').textContent = `On demand · loaded ${fcLocalTime(new Date().toISOString())}${fcArchiveNote(data)}`;
   } catch (err) {
     if (requestId === _forecastRequest) status.textContent = `Error: ${err.message}`;
   } finally {
@@ -1053,6 +1053,14 @@ function resetForecastLocation() {
   document.getElementById('fcIconEpsRow').style.display = 'none';
   renderNowStations(null); renderForecastChanges();
 }
+function fcArchiveNote(data) {
+  const fallbacks = data?.archive_fallbacks || [];
+  if (!fallbacks.length) return '';
+  return ' · Archived data: ' + fallbacks.map(item =>
+    `${item.model_id} (fetched ${fcLocalTime(item.fetched_at_utc)}, available through ${fcLocalTime(item.last_valid_time_utc)})`
+  ).join('; ');
+}
+
 function renderPreparedForecast(data, validation = null, comparison = null) {
   validation = validation || (data.observation_points ? {observation_points: data.observation_points, stations_used: data.stations_used || []} : _forecastValidation);
   forecastData = data;

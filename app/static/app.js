@@ -162,6 +162,7 @@ async function loadLocationSnapshot() {
     const schedule = location.monitoring_start && today < location.monitoring_start ? `Scheduled from ${location.monitoring_start}` : location.monitoring_end && today > location.monitoring_end ? `Monitoring ended ${location.monitoring_end}` : null;
     const status = snapshot.last_error || snapshot.status === 'error' ? 'Update failed' : schedule || (snapshot.status === 'pending' ? 'Update pending' : stale ? 'Update overdue' : 'Following automatically');
     freshness.textContent = date ? `${status} · every ${cadence} · saved ${fcAge(date)} · ${fcLocalTime(date)}` : `${status} · every ${cadence} · the first forecast is not ready yet. Use Load Forecast to run it now.`;
+    freshness.textContent += fcArchiveNote(snapshot.forecast);
     freshness.classList.toggle('is-stale', !!stale || !!snapshot.last_error || snapshot.status === 'error');
     document.getElementById('fcStatus').textContent = date ? `${snapshot.forecast?.hours_ahead || 48}h saved forecast` : 'Waiting for background collection.';
   } catch (err) {

@@ -95,7 +95,8 @@ def test_forecast_preparation_ignores_analysis_window_and_reuses_fixed_evidence(
     svc._validation_context.set("analysis", analysis)
     calls = []
 
-    def validate(lat, lon, hours, radius):
+    def validate(lat, lon, hours, radius, *, fetch_historical_forecasts):
+        assert fetch_historical_forecasts is False
         calls.append((lat, lon, hours, radius))
         svc._validation_context.set("fixed", fixed)
         return {"query_id": "fixed"}
@@ -129,7 +130,8 @@ def test_forecast_without_validation_request_prepares_weights_and_ignores_legacy
     monkeypatch.setattr("app.services.fetch_eps_sigma", lambda *args: {})
     calls = []
 
-    def validate(lat, lon, hours, radius):
+    def validate(lat, lon, hours, radius, *, fetch_historical_forecasts):
+        assert fetch_historical_forecasts is False
         calls.append(hours)
         rows = [CalibrationSample(now - timedelta(hours=age), 0, -5, 0, -6, station_id=sid)
                 for age in (0, 1, 2) for sid in ("a", "b", "c")]

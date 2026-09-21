@@ -145,7 +145,8 @@ class LocationMonitoringService:
                 logger.warning("Future archive failed for %s at %s", model.model_id, location["id"], exc_info=True)
         # All sources' older archived snapshots are loaded by validate_point and
         # paired only when their actual availability predates the observation.
-        validation = self.validation_service.validate_point(lat, lon, 48, radius, force_refresh=True)
+        validation = self.validation_service.validate_point(lat, lon, 48, radius, force_refresh=True,
+                                                            fetch_historical_forecasts=False)
         winner = validation.get("winner_model_id")
         bias = next((m.get("bias_ws") or 0.0 for m in validation.get("models", []) if m["model_id"] == winner), 0.0)
         forecast = self.validation_service.forecast_point(lat, lon, winner or "", bias,

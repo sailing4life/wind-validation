@@ -88,12 +88,25 @@ Future point forecasts retain the full
 downloaded days, so overlapping time windows can reuse the same data. Cached
 forecasts retain their original fetch time for validation provenance.
 
+**Load Forecast** and background collection calculate correction from live
+observations plus forecasts already present in the repository/database. They do
+not download historical model curves for all nearby stations first. An explicit
+**Run analysis** / **Analyse + Forecast** still downloads those curves for the
+selected analysis period. A new location without archived verification evidence
+initially uses raw model forecasts.
+
 An HTTP 429 pauses all uncached Open-Meteo requests in that process instead of
 retrying separately for every model. The pause follows `Retry-After`, or the
 minute/hour/day quota mentioned in the response (five minutes if unspecified).
 Unexpired cached responses remain usable. A manual forecast with no available
 models reports the remaining wait without clearing the displayed forecast. A
-longer pause does not clear an already exhausted hourly or daily quota. These caches
+longer pause does not clear an already exhausted hourly or daily quota. If a
+live model fetch fails, a manual forecast can reuse its archived future hours
+from Postgres. Open-Meteo fallback values must be within 100 m of the selected
+point; distant stations are not substituted. The page labels archived models
+with their original collection time and the last available forecast hour.
+It cannot extend that horizon or serve uncollected locations without a source.
+These caches
 and the cooldown are per process and reset on restart; use one collector and
 avoid unnecessary replicas. Batching locations still consumes provider quota;
 see [Open-Meteo's request accounting](https://open-meteo.com/en/pricing).
