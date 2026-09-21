@@ -120,7 +120,6 @@ document.getElementById('fcMastHeight')?.addEventListener('input', () => {
 
 // â”€â”€ API call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadForecast() {
-  if (selectedLocationRecord?.monitoring_enabled && querySource === 'point') return loadLocationSnapshot();
   const requestId = ++_forecastRequest;
   const pos = currentLatLon();
   const status = document.getElementById('fcStatus');
@@ -131,6 +130,7 @@ async function loadForecast() {
   }
 
   const hoursAhead = parseInt(document.getElementById('fcHoursAhead').value, 10) || 48;
+  beginManualForecast();
   status.textContent = 'Loading...';
   document.getElementById('fcRunBtn').disabled = true;
 
@@ -155,6 +155,7 @@ async function loadForecast() {
     const data = await resp.json();
     if (requestId !== _forecastRequest) return;
     renderPreparedForecast(data, null, null);
+    document.getElementById('fcFreshness').classList.remove('is-stale');
     document.getElementById('fcFreshness').textContent = `On demand · loaded ${fcLocalTime(new Date().toISOString())}`;
   } catch (err) {
     if (requestId === _forecastRequest) status.textContent = `Error: ${err.message}`;

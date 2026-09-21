@@ -8,6 +8,6 @@ services:
       - key: LIVE_FORECASTS_ENABLED
         value: "true"
       - key: REFRESH_INTERVAL_SECONDS
-        value: "600"
+        value: "10800"
       # Add your API keys in the Render dashboard (not here):
       # KNMI_API_KEY, METEOFRANCE_API_KEY, NCEI_TOKEN

@@ -38,7 +38,7 @@ Source settings:
 - `METEOFRANCE_API_KEY`: bearer token for Meteo-France endpoint (if required)
 - `NCEI_TOKEN`: NOAA/NCEI token (optional for some endpoints)
 - `REQUEST_TIMEOUT_SECONDS`: HTTP timeout, default `8`
-- `REFRESH_INTERVAL_SECONDS`: scheduler interval in seconds, default `600` (10 minutes)
+- `REFRESH_INTERVAL_SECONDS`: scheduler interval in seconds, default `10800` (3 hours)
 - `OPENMETEO_KNMI_URL`: defaults to `https://api.open-meteo.com/v1/forecast`
 - `OPENMETEO_KNMI_MODEL`: Open-Meteo model name for harmonie_nl, default `harmonie_seamless`
 - `OPENMETEO_METEOFRANCE_URL`: defaults to `https://api.open-meteo.com/v1/forecast`
@@ -88,7 +88,11 @@ If a live source call fails, that source/model returns no rows for that refresh 
 Forecast is the default workspace. Save a location, enable **Automatically
 follow**, and save its monitoring settings. Optional start/end dates are inclusive
 UTC dates. The last selected location, or the first followed location, opens on
-the next visit. Free map points still support forecasts on demand.
+the next visit. **Load Forecast** runs an on-demand forecast for any location,
+including followed locations, with the selected **Hours ahead**. **Analyse +
+Forecast** also runs the observation analysis first. Automatic page checks do not
+replace a manually loaded forecast; **Show saved forecast** returns to the
+background result and resumes those checks.
 
 The collector discovers stations around each active location, archives forecasts
 at the location and station coordinates, and prepares a 48-hour forecast plus
@@ -96,8 +100,12 @@ validation evidence. Page loads read that prepared result from Postgres; they do
 not wait for weather sources. An incomplete or failed refresh retains the last
 complete result and reports the failure. The browser checks for saved updates
 every minute while visible. Open-Meteo future point requests share an hourly
-cache; observation/derived-result cycles default to ten minutes, plus processing
+cache; observation/derived-result cycles default to three hours, plus processing
 time. This is polling of fetched forecasts, not detection of every source run.
+Collection also runs once at process startup. An existing deployment override of
+`REFRESH_INTERVAL_SECONDS` takes precedence; set it to `10800` for three hours
+and restart the collector. The saved forecast status displays the configured
+interval (keep web and worker settings equal when using separate processes).
 
 Use one continuously running collector with the same `DATABASE_URL` as the web
 service:

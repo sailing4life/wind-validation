@@ -221,7 +221,8 @@ def location_snapshot(location_id: int, response: Response) -> dict:
     if store.get_location(location_id) is None:
         raise HTTPException(status_code=404, detail="Location not found")
     response.headers["Cache-Control"] = "no-store"
-    return monitoring_service.snapshot(location_id)
+    return {**monitoring_service.snapshot(location_id),
+            "refresh_interval_seconds": SETTINGS.refresh_interval_seconds}
 
 
 def _windmap_model_params(model_id: str) -> tuple[str, str]:

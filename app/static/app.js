@@ -56,11 +56,27 @@ let snapshotRequest = 0;
 let snapshotComputedAt = null;
 let locationSelectionVersion = 0;
 let preserveManualAnalysis = false;
+let preserveManualForecast = false;
+
+function beginManualForecast() {
+  preserveManualForecast = true;
+  snapshotRequest += 1;
+}
+
+function showSavedForecast() {
+  // Invalidate any on-demand response still in flight before resuming polling.
+  _forecastRequest += 1;
+  preserveManualForecast = false;
+  snapshotComputedAt = null;
+  document.getElementById('fcRunBtn').disabled = false;
+  return loadLocationSnapshot();
+}
 
 function locationSelectionChanged(location) {
   selectedLocationRecord = location || null;
   locationSelectionVersion += 1;
   preserveManualAnalysis = false;
+  preserveManualForecast = false;
   snapshotRequest += 1;
   snapshotComputedAt = null;
   document.getElementById('monitoringControls').hidden = !location;
@@ -80,8 +96,7 @@ function locationSelectionChanged(location) {
   windowInfo.textContent = 'No analysis loaded for this location';
   updateLocationHeading();
   updateSidebarAction();
-  document.getElementById('fcRunBtn').textContent = location?.monitoring_enabled ? 'Refresh saved forecast' : 'Load Forecast';
-  document.getElementById('fcHoursAhead').disabled = !!location?.monitoring_enabled;
+  document.getElementById('fcSavedBtn').hidden = !location?.monitoring_enabled;
   if (location) localStorage.setItem('wind-location-id', String(location.id));
   else localStorage.removeItem('wind-location-id');
   if (location?.monitoring_enabled) loadLocationSnapshot();
@@ -89,7 +104,7 @@ function locationSelectionChanged(location) {
 
 function updateSidebarAction() {
   const inAnalysis = document.getElementById('tab-validation').classList.contains('active');
-  runBtn.textContent = querySource === 'expedition' ? 'Analyse Expedition log' : inAnalysis ? 'Run analysis' : selectedLocationRecord?.monitoring_enabled ? 'Refresh saved forecast' : 'Analyse + Forecast';
+  runBtn.textContent = querySource === 'expedition' ? 'Analyse Expedition log' : inAnalysis ? 'Run analysis' : 'Analyse + Forecast';
 }
 
 function updateLocationHeading() {
@@ -117,7 +132,7 @@ async function loadSavedLocations(preferredId) {
 
 async function loadLocationSnapshot() {
   const location = selectedLocationRecord;
-  if (!location?.monitoring_enabled || querySource !== 'point') return;
+  if (!location?.monitoring_enabled || querySource !== 'point' || preserveManualForecast) return;
   const requestId = ++snapshotRequest;
   const freshness = document.getElementById('fcFreshness');
   const retained = !!snapshotComputedAt;
@@ -139,11 +154,14 @@ async function loadLocationSnapshot() {
       renderBiasSummary();
     }
     const date = snapshotComputedAt;
-    const stale = date && Date.now() - new Date(date).getTime() > 90 * 60 * 1000;
+    const intervalSeconds = snapshot.refresh_interval_seconds || 10800;
+    // Allow for source processing after the configured wait between cycles.
+    const stale = date && Date.now() - new Date(date).getTime() > (intervalSeconds + 1800) * 1000;
+    const cadence = intervalSeconds >= 3600 ? `${+(intervalSeconds / 3600).toFixed(1)}h` : `${Math.round(intervalSeconds / 60)} min`;
     const today = new Date().toISOString().slice(0, 10);
     const schedule = location.monitoring_start && today < location.monitoring_start ? `Scheduled from ${location.monitoring_start}` : location.monitoring_end && today > location.monitoring_end ? `Monitoring ended ${location.monitoring_end}` : null;
     const status = snapshot.last_error || snapshot.status === 'error' ? 'Update failed' : schedule || (snapshot.status === 'pending' ? 'Update pending' : stale ? 'Update overdue' : 'Following automatically');
-    freshness.textContent = date ? `${status} · saved ${fcAge(date)} · ${fcLocalTime(date)}` : `${status} · the first forecast is not ready yet.`;
+    freshness.textContent = date ? `${status} · every ${cadence} · saved ${fcAge(date)} · ${fcLocalTime(date)}` : `${status} · every ${cadence} · the first forecast is not ready yet. Use Load Forecast to run it now.`;
     freshness.classList.toggle('is-stale', !!stale || !!snapshot.last_error || snapshot.status === 'error');
     document.getElementById('fcStatus').textContent = date ? `${snapshot.forecast?.hours_ahead || 48}h saved forecast` : 'Waiting for background collection.';
   } catch (err) {
@@ -154,6 +172,7 @@ async function loadLocationSnapshot() {
 }
 
 document.getElementById('savedLocation').addEventListener('change', e => locationSelectionChanged(savedLocations.get(e.target.value)));
+document.getElementById('fcSavedBtn').addEventListener('click', showSavedForecast);
 [latInput, lonInput, radiusInput].forEach(input => input.addEventListener('change', () => {
   document.getElementById('savedLocation').value = ''; locationSelectionChanged(null);
 }));
@@ -606,9 +625,10 @@ function fmt2(v) { return v != null ? Number(v).toFixed(2) : "—"; }
 async function runValidation() {
   if (querySource === "expedition") { return runExpeditionValidation(); }
   const inAnalysis = document.getElementById('tab-validation').classList.contains('active');
-  if (selectedLocationRecord?.monitoring_enabled && !inAnalysis) return loadLocationSnapshot();
+  if (!inAnalysis) beginManualForecast();
   if (inAnalysis) preserveManualAnalysis = true;
-  const followedAnalysis = !!selectedLocationRecord?.monitoring_enabled;
+  const followedAnalysis = !!selectedLocationRecord?.monitoring_enabled && inAnalysis;
+  const forecastGeneration = _forecastRequest;
   const locationGeneration = locationSelectionVersion;
   runBtn.disabled = true;
   runBtn.textContent = "Loading…";
@@ -662,7 +682,8 @@ async function runValidation() {
   }
   chartStatus.textContent = "";
 
-  renderValidationResult(data, {loadForecast: !followedAnalysis, updateNow: !followedAnalysis});
+  const prepareForecast = !followedAnalysis && forecastGeneration === _forecastRequest;
+  renderValidationResult(data, {loadForecast: prepareForecast, updateNow: prepareForecast});
 }
 
 function renderValidationResult(data, {loadForecast = true, updateNow = true} = {}) {
@@ -901,7 +922,7 @@ document.querySelectorAll('input[name="querySource"]').forEach((radio) => {
       document.querySelector('[data-tab="validation"]').click();
       runBtn.textContent = 'Analyse Expedition log';
     } else {
-      runBtn.textContent = selectedLocationRecord?.monitoring_enabled ? 'Refresh saved forecast' : 'Analyse + Forecast';
+      updateSidebarAction();
       if (selectedLocationRecord?.monitoring_enabled) loadLocationSnapshot();
     }
     document.getElementById("pointInputs").style.display        = isExp ? "none" : "";

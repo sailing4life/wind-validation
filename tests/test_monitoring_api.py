@@ -70,6 +70,7 @@ def test_snapshot_reads_prepared_result_without_fetching_sources(location_api, m
     assert response.status_code == 200
     assert response.json()["computed_at_utc"] == snapshot["computed_at_utc"]
     assert response.headers["cache-control"] == "no-store"
+    assert response.json()["refresh_interval_seconds"] == main.SETTINGS.refresh_interval_seconds
 
 
 def test_save_location_validates_coordinates_and_normalizes_name(location_api):
