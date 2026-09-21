@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ import httpx
 from .config import Settings
 from .domain import ForecastValue, ModelDefinition, Station
 from .geo import in_bbox
+from .openmeteo_client import get_openmeteo, response_fetched_at
 from .scoring import speed_dir_to_uv
 
 logger = logging.getLogger("wind_validation.forecast_adapters")
@@ -28,17 +30,8 @@ EXTRA_SAFE_HOURLY_VARS = ["cloud_cover", "pressure_msl", "shortwave_radiation"]
 
 
 def _get_with_retry(client: httpx.Client, url: str, params: dict) -> httpx.Response:
-    """GET with exponential backoff on transient statuses (429 rate limit, 5xx hiccups)."""
-    resp = client.get(url, params=params)
-    for attempt in range(3):
-        if resp.status_code not in (429, 502, 503, 504):
-            break
-        # 429: long waits to respect the rate limit; 5xx: short waits, usually momentary
-        wait = (20 if resp.status_code == 429 else 3) * (2 ** attempt)
-        logger.debug("HTTP %d from %s, retrying after %ds", resp.status_code, url, wait)
-        time.sleep(wait)
-        resp = client.get(url, params=params)
-    return resp
+    """Shared cache and quota cooldown; retries belong to later refresh cycles."""
+    return get_openmeteo(client, url, params)
 
 
 def _parse_utc(value) -> datetime:
@@ -70,6 +63,7 @@ class OpenMeteoForecastAdapter:
 
     def __init__(self, settings: Settings) -> None:
         self._future_cache: dict[tuple, tuple[float, datetime, datetime, list[ForecastValue]]] = {}
+        self._future_lock = threading.Lock()
         self.settings = settings
         # Regular forecast endpoints (used for near-future data)
         self.endpoint_map = {
@@ -171,7 +165,7 @@ class OpenMeteoForecastAdapter:
         if not isinstance(payload, list):
             payload = [payload]
 
-        now_utc = datetime.now(UTC)
+        now_utc = response_fetched_at(resp)
         rows: list[ForecastValue] = []
         for i, (lat, lon) in enumerate(in_cov):
             if i >= len(payload):
@@ -256,7 +250,7 @@ class OpenMeteoForecastAdapter:
         end: datetime,
     ) -> list[ForecastValue]:
         """Fetch forecasts using previous-runs API for past data, regular API for future."""
-        in_cov = [(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)]
+        in_cov = sorted({(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)})
         if not in_cov:
             return []
 
@@ -297,8 +291,6 @@ class OpenMeteoForecastAdapter:
         if end > now:
             endpoint = self._endpoint(model.model_id)
             if endpoint:
-                if rows:  # already made a past call; pause before the future call
-                    time.sleep(2.0)
                 model_param = self.model_param_map.get(model.model_id, "")
                 rows.extend(self._fetch_batch(
                     endpoint, model.model_id, model_param, in_cov,
@@ -316,14 +308,20 @@ class OpenMeteoForecastAdapter:
         end: datetime,
     ) -> list[ForecastValue]:
         """Future-only fetch with gust and temperature included (for Forecast tab)."""
-        in_cov = [(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)]
+        with self._future_lock:
+            return self._fetch_future(model, coords, start, end)
+
+    def _fetch_future(self, model, coords, start, end) -> list[ForecastValue]:
+        in_cov = sorted({(lat, lon) for lat, lon in coords if in_bbox(lat, lon, model.coverage_bbox)})
         if not in_cov:
             return []
         endpoint = self._endpoint(model.model_id)
         if not endpoint:
             return []
         now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-        forecast_days = max(1, math.ceil((end - now).total_seconds() / 86400) + 1)
+        day_start = now.replace(hour=0)
+        forecast_days = max(1, (end.date() - day_start.date()).days + 1)
+        fetched_end = day_start + timedelta(days=forecast_days) - timedelta(hours=1)
         model_param = self.model_param_map.get(model.model_id, "")
         # Share hourly future collections between monitored locations and the
         # point forecast builder. Coordinates shared by nearby locations reuse data.
@@ -340,7 +338,7 @@ class OpenMeteoForecastAdapter:
         fetched = self._fetch_batch(
             endpoint, model.model_id, model_param, missing,
             past_days=0, forecast_days=forecast_days,
-            start=start, end=end,
+            start=day_start, end=fetched_end,
             include_extras=True,
         )
         collected = time.monotonic()
@@ -349,8 +347,8 @@ class OpenMeteoForecastAdapter:
         for lat, lon in missing:
             point_rows = [r for r in fetched if r.lat == lat and r.lon == lon]
             if point_rows:
-                self._future_cache[(model.model_id, lat, lon)] = (collected, start, end, point_rows)
-        return cached_rows + fetched
+                self._future_cache[(model.model_id, lat, lon)] = (collected, day_start, fetched_end, point_rows)
+        return cached_rows + [r for r in fetched if start <= r.valid_time_utc <= end]
 
     def fetch_model(self, model: ModelDefinition, request: ForecastFetchRequest) -> list[ForecastValue]:
         stations = [s for s in request.stations if in_bbox(s.lat, s.lon, model.coverage_bbox)]
@@ -388,7 +386,7 @@ class OpenMeteoForecastAdapter:
                 except Exception as exc:
                     logger.warning("Forecast fetch failed for %s station %s", model.model_id, station.station_id, exc_info=exc)
                     continue
-                fetched_at = datetime.now(UTC)
+                fetched_at = response_fetched_at(resp)
                 data = resp.json()
                 api_run_time: datetime | None = None
                 run_time_raw = data.get("run_time")

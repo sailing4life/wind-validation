@@ -6,6 +6,7 @@ from math import asin, atan2, cos, degrees, radians, sin, sqrt
 import httpx
 
 from .cache import TTLCache
+from .openmeteo_client import get_openmeteo
 from .config import Settings
 from .geo import haversine_km
 
@@ -287,7 +288,7 @@ class LocationFingerprintService:
 
     def _fetch_elevations(self, coords: list[tuple[float, float]]) -> list[float | None]:
         with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
-            resp = client.get(
+            resp = get_openmeteo(client,
                 self.settings.openmeteo_elevation_url,
                 params={
                     "latitude": ",".join(str(lat) for lat, _ in coords),
@@ -312,7 +313,7 @@ class LocationFingerprintService:
 
     def _fetch_marine_points(self, coords: list[tuple[float, float]]) -> list[dict]:
         with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
-            resp = client.get(
+            resp = get_openmeteo(client,
                 self.settings.openmeteo_marine_url,
                 params={
                     "latitude": ",".join(str(lat) for lat, _ in coords),

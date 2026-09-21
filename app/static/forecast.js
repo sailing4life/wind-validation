@@ -150,7 +150,9 @@ async function loadForecast() {
     });
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+      let detail;
+      try { detail = JSON.parse(txt).detail; } catch (_) { /* Non-JSON proxy error. */ }
+      throw new Error(typeof detail === 'string' ? detail : `HTTP ${resp.status}: ${txt.slice(0, 200)}`);
     }
     const data = await resp.json();
     if (requestId !== _forecastRequest) return;

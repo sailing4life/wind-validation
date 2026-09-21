@@ -112,6 +112,17 @@ test('a failed manual request leaves the button usable', async () => {
   assert.match(element('fcStatus').textContent, /Source unavailable/);
 });
 
+test('quota errors show the server explanation without replacing existing charts', async () => {
+  const {context, element, rendered} = setup();
+  context.fetch = async () => ({ok: false, status: 503,
+    text: async () => JSON.stringify({detail: 'Open-Meteo is tijdelijk beperkt.'}),
+  });
+  await context.loadForecast();
+  assert.equal(element('fcRunBtn').disabled, false);
+  assert.equal(rendered.length, 0);
+  assert.equal(element('fcStatus').textContent, 'Error: Open-Meteo is tijdelijk beperkt.');
+});
+
 test('Analyse + Forecast runs validation for a followed location', async () => {
   const {context, calls} = setup();
   Object.assign(context, {

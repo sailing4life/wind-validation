@@ -27,6 +27,7 @@ from .ingestion import IngestionService
 from .location_fingerprint import LocationFingerprintService
 from .monitoring import LocationMonitoringService
 from .observation_broker import ObservationBroker
+from .openmeteo_client import async_get_openmeteo, openmeteo_client
 from .repositories import InMemoryRepository
 from .storage import PostgresStore
 from .schemas import ForecastPushRequest, ForecastRequest, ForecastResponse, FreshnessDTO, LocationMonitoringRequest, SaveLocationRequest, ValidatePointRequest, ValidatePointResponse
@@ -115,7 +116,7 @@ def validate_point(payload: ValidatePointRequest) -> dict:
 
 @app.post("/api/forecast", response_model=ForecastResponse)
 def forecast(payload: ForecastRequest) -> dict:
-    return validation_service.forecast_point(
+    result = validation_service.forecast_point(
         lat=payload.lat,
         lon=payload.lon,
         winner_model_id=payload.winner_model_id,
@@ -124,6 +125,12 @@ def forecast(payload: ForecastRequest) -> dict:
         hours_ahead=payload.hours_ahead,
         radius_km=payload.radius_km,
     )
+    retry_after = openmeteo_client.cooldown_remaining()
+    if not result.get("models") and retry_after:
+        raise HTTPException(status_code=503,
+                            detail="Open-Meteo is tijdelijk beperkt. Probeer het later opnieuw of toon de opgeslagen forecast.",
+                            headers={"Retry-After": str(retry_after)})
+    return result
 
 
 @app.get("/v1/models/coverage")
@@ -417,9 +424,8 @@ async def forecast_ensemble(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(SETTINGS.openmeteo_ensemble_url, params=params)
-            resp.raise_for_status()
+        resp = await async_get_openmeteo(SETTINGS.openmeteo_ensemble_url, params)
+        resp.raise_for_status()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Ensemble API unavailable: {exc}")
 
@@ -520,9 +526,8 @@ async def gradient_wind(
         params["models"] = SETTINGS.openmeteo_ecmwf_model
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(SETTINGS.openmeteo_ecmwf_url, params=params)
-            resp.raise_for_status()
+        resp = await async_get_openmeteo(SETTINGS.openmeteo_ecmwf_url, params)
+        resp.raise_for_status()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Gradient wind API unavailable: {exc}")
 
@@ -599,9 +604,8 @@ async def _sea_level_extrema(lat: float, lon: float, start_date: str, end_date: 
         "timezone": "UTC",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(SETTINGS.openmeteo_marine_url, params=params)
-            resp.raise_for_status()
+        resp = await async_get_openmeteo(SETTINGS.openmeteo_marine_url, params)
+        resp.raise_for_status()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Tide data unavailable: {exc}")
 
@@ -778,31 +782,31 @@ async def briefing_extras(
 
     waves: dict | None = None
     sky: dict | None = None
-    async with httpx.AsyncClient(timeout=30) as client:
-        # Marine API 400s on land points — waves are optional
-        try:
-            resp = await client.get(SETTINGS.openmeteo_marine_url, params=marine_params)
-            resp.raise_for_status()
-            h = resp.json().get("hourly", {})
-            waves = {
-                "times": [t if t.endswith("Z") else t + "Z" for t in h.get("time", [])],
-                "height_m": h.get("wave_height") or [],
-                "direction_deg": h.get("wave_direction") or [],
-                "period_s": h.get("wave_period") or [],
-            }
-        except Exception:
-            waves = None
-        try:
-            resp = await client.get(SETTINGS.openmeteo_icon_eu_url, params=sky_params)
-            resp.raise_for_status()
-            h = resp.json().get("hourly", {})
-            sky = {
-                "times": [t if t.endswith("Z") else t + "Z" for t in h.get("time", [])],
-                "cloud_cover_pct": h.get("cloud_cover") or [],
-                "cape_jkg": h.get("cape") or [],
-            }
-        except Exception:
-            sky = None
+    # Both optional sources share the forecast cache and quota cooldown.
+    # Marine API 400s on land points — waves are optional
+    try:
+        resp = await async_get_openmeteo(SETTINGS.openmeteo_marine_url, marine_params)
+        resp.raise_for_status()
+        h = resp.json().get("hourly", {})
+        waves = {
+            "times": [t if t.endswith("Z") else t + "Z" for t in h.get("time", [])],
+            "height_m": h.get("wave_height") or [],
+            "direction_deg": h.get("wave_direction") or [],
+            "period_s": h.get("wave_period") or [],
+        }
+    except Exception:
+        waves = None
+    try:
+        resp = await async_get_openmeteo(SETTINGS.openmeteo_icon_eu_url, sky_params)
+        resp.raise_for_status()
+        h = resp.json().get("hourly", {})
+        sky = {
+            "times": [t if t.endswith("Z") else t + "Z" for t in h.get("time", [])],
+            "cloud_cover_pct": h.get("cloud_cover") or [],
+            "cape_jkg": h.get("cape") or [],
+        }
+    except Exception:
+        sky = None
 
     if waves is None and sky is None:
         raise HTTPException(status_code=503, detail="Briefing extras unavailable")
@@ -971,9 +975,11 @@ async def ocean_current(
         "forecast_hours": min(hours, 120),
         "timezone": "UTC",
     }
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(SETTINGS.openmeteo_marine_url, params=params)
+    try:
+        resp = await async_get_openmeteo(SETTINGS.openmeteo_marine_url, params, timeout=15)
         resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Ocean current data unavailable: {exc}")
 
     data = resp.json()
     hourly = data.get("hourly", {})

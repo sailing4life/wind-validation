@@ -100,3 +100,12 @@ def test_free_point_forecast_accepts_no_validation_id_and_preserves_bias_metadat
     assert seen["query_id"] is None
     assert seen["winner_model_id"] == ""
     assert response.json()["models"][0]["hours"][0]["calibration_bias_source"] == "recent_3h"
+
+
+def test_rate_limited_empty_forecast_reports_retry_instead_of_replacing_display(monkeypatch):
+    monkeypatch.setattr(main.validation_service, "forecast_point", lambda **kwargs: {"models": []})
+    monkeypatch.setattr(main, "openmeteo_client", SimpleNamespace(cooldown_remaining=lambda: 120))
+    response = TestClient(main.app).post("/api/forecast", json={"lat": 52, "lon": 5})
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "120"
+    assert "opgeslagen forecast" in response.json()["detail"]

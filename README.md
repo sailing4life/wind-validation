@@ -77,6 +77,22 @@ statistics and marine forecasts are not substituted for this app's validation.
 
 If a live source call fails, that source/model returns no rows for that refresh cycle.
 
+Open-Meteo requests share a one-hour, bounded in-memory HTTP cache across
+forecast/analysis, ensemble, marine, gradient and location-context features.
+Simultaneous identical requests are merged; uncached requests run one at a time
+with at least one second between them. Future point forecasts retain the full
+downloaded days, so overlapping time windows can reuse the same data. Cached
+forecasts retain their original fetch time for validation provenance.
+
+An HTTP 429 pauses all uncached Open-Meteo requests in that process instead of
+retrying separately for every model. The pause follows `Retry-After`, or the
+minute/hour/day quota mentioned in the response (five minutes if unspecified).
+Unexpired cached responses remain usable. A manual forecast with no available
+models reports the limit without clearing the displayed forecast. These caches
+and the cooldown are per process and reset on restart; use one collector and
+avoid unnecessary replicas. Batching locations still consumes provider quota;
+see [Open-Meteo's request accounting](https://open-meteo.com/en/pricing).
+
 ## Notes
 
 - V1 is wind-only (10m speed + direction).

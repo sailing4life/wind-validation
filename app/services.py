@@ -13,6 +13,7 @@ from uuid import uuid4
 import httpx
 
 from .cache import TTLCache
+from .openmeteo_client import get_openmeteo
 from .calibration import CalibrationSample, band_from_sigma, bias_drift, blend_hour, calibrate, circular_delta, scale_gust
 from .catalog import select_candidate_models
 from .config import Settings
@@ -195,7 +196,7 @@ def fetch_eps_sigma(settings: Settings, lat: float, lon: float, hours: int) -> d
     }
     try:
         with httpx.Client(timeout=settings.request_timeout_seconds * 3) as client:
-            resp = client.get(settings.openmeteo_ensemble_url, params=params)
+            resp = get_openmeteo(client, settings.openmeteo_ensemble_url, params)
             resp.raise_for_status()
             hourly = resp.json().get("hourly", {})
     except Exception as exc:
@@ -846,8 +847,6 @@ class ValidationService:
                 elif model.model_id == _ALADIN_CZ_ID:
                     fvs = _fetch_aladin_cz_at_coords([(lat, lon)], now, end)
                 else:
-                    if models_series:  # sleep only after a real HTTP call was made
-                        time.sleep(4.0)
                     fvs = self.forecast_adapter.fetch_forecast_with_extras(
                         model, [(lat, lon)], now, end
                     )
