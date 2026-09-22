@@ -98,6 +98,9 @@ initially uses raw model forecasts.
 An HTTP 429 pauses all uncached Open-Meteo requests in that process instead of
 retrying separately for every model. The pause follows `Retry-After`, or the
 minute/hour/day quota mentioned in the response (five minutes if unspecified).
+Only the actual provider 429 logs a warning, including its reason and pause
+duration. Models skipped locally during that pause do not log additional batch
+failures; they make no HTTP requests. Other HTTP errors remain visible.
 Unexpired cached responses remain usable. A manual forecast with no available
 models reports the remaining wait without clearing the displayed forecast. A
 longer pause does not clear an already exhausted hourly or daily quota. If a

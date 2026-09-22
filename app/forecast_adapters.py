@@ -147,6 +147,11 @@ class OpenMeteoForecastAdapter:
                     payload = resp.json()
                     break
                 except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 429:
+                        # The shared client logs the actual provider response once.
+                        # During its cooldown it returns local 429s without HTTP;
+                        # logging those as batch failures suggests a request storm.
+                        return []
                     can_fallback = include_extras and exc.response.status_code == 400 and hourly_vars is not hourly_var_sets[-1]
                     if can_fallback:
                         logger.info(
@@ -377,6 +382,10 @@ class OpenMeteoForecastAdapter:
                     resp = _get_with_retry(client, self.previous_runs_url, params)
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 429:
+                        # Other stations may still be available in the shared cache.
+                        # The quota warning belongs to the shared HTTP client.
+                        continue
                     logger.warning(
                         "Forecast fetch failed for %s station %s: HTTP %s — %s",
                         model.model_id, station.station_id,

@@ -11,7 +11,8 @@ import pytest
 import app.openmeteo_client as om
 from app.catalog import default_model_catalog
 from app.config import Settings
-from app.forecast_adapters import OpenMeteoForecastAdapter
+from app.domain import Station
+from app.forecast_adapters import ForecastFetchRequest, OpenMeteoForecastAdapter
 
 URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -235,16 +236,53 @@ def test_future_cache_keeps_full_days_and_preserves_fetch_time(monkeypatch):
     assert {r.run_time_utc for r in third} == {r.run_time_utc for r in first}
 
 
-def test_adapter_stops_fallback_requests_after_a_rate_limit(monkeypatch):
+def test_adapter_stops_fallback_requests_after_a_rate_limit(monkeypatch, caplog, clock):
     gate = om.OpenMeteoClient(min_interval_seconds=0)
     monkeypatch.setattr(om, "openmeteo_client", gate)
-    fetch = Mock(side_effect=lambda request: httpx.Response(429, headers={"Retry-After": "3600"}))
+    fetch = Mock(side_effect=lambda request: httpx.Response(
+        429, headers={"Retry-After": "3600"}, json={"reason": "Hourly API request limit exceeded"},
+    ))
     real_client = httpx.Client
     monkeypatch.setattr(om.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(fetch)))
     adapter = OpenMeteoForecastAdapter(Settings())
     now = datetime.now(UTC)
-    models = [m for m in default_model_catalog() if m.model_id in {"icon_eu", "ecmwf_global"}]
+    models = [m for m in default_model_catalog() if m.model_id in {
+        "harmonie_nl", "harmonie_eu", "arome_hd", "icon_eu", "arpege", "ecmwf_global",
+    }]
     for model in models:
         assert adapter.fetch_model_at_coords(model, [(52, 5)], now - timedelta(hours=48), now) == []
         assert adapter.fetch_forecast_with_extras(model, [(52, 5)], now, now + timedelta(hours=48)) == []
+        assert adapter.fetch_model(model, ForecastFetchRequest(
+            stations=[Station("test", "test", "NL", 52, 5)],
+            start=now - timedelta(hours=48), end=now,
+        )) == []
     assert fetch.call_count == 1
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "Hourly API request limit exceeded" in warnings[0].message
+    assert "3600 seconds" in warnings[0].message
+    assert "Batch fetch failed" not in caplog.text
+
+    # When the pause expires, try again and recover without restarting the app.
+    clock[0] += 3600
+    fetch.side_effect = lambda request: httpx.Response(200, json={"hourly": {
+        "time": [now.isoformat()], "wind_speed_10m": [5], "wind_direction_10m": [270],
+    }})
+    assert adapter.fetch_forecast_with_extras(models[0], [(52, 5)], now, now + timedelta(hours=48))
+    assert fetch.call_count == 2
+    assert gate.cooldown_remaining() == 0
+
+
+def test_non_quota_batch_failures_remain_visible(monkeypatch, caplog):
+    gate = om.OpenMeteoClient(min_interval_seconds=0)
+    monkeypatch.setattr(om, "openmeteo_client", gate)
+    real_client = httpx.Client
+    monkeypatch.setattr(om.httpx, "Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+    ))
+    adapter = OpenMeteoForecastAdapter(Settings())
+    model = next(m for m in default_model_catalog() if m.model_id == "icon_eu")
+    now = datetime.now(UTC)
+    assert adapter.fetch_forecast_with_extras(model, [(52, 5)], now, now + timedelta(hours=48)) == []
+    assert "Batch fetch failed" in caplog.text
+    assert "503" in caplog.text
