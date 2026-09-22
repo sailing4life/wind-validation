@@ -717,15 +717,21 @@ class ValidationService:
         station_series = []
         for station in stations:
             station_obs: dict[datetime, list[float]] = defaultdict(list)
+            station_directions: dict[datetime, list[float]] = defaultdict(list)
             for obs in observations:
                 if obs.station_id == station.station_id:
                     station_obs[obs.time_utc.replace(minute=0, second=0, microsecond=0)].append(obs.ws_ms)
+                    station_directions[obs.time_utc.replace(minute=0, second=0, microsecond=0)].append(obs.wd_deg)
             points = []
             for hour in axis:
                 point = {"time_utc": hour, "obs_ws_ms": (sum(station_obs[hour]) / len(station_obs[hour])) if station_obs[hour] else None}
+                point["obs_wd_deg"] = self._circular_mean(station_directions[hour])
+                point["model_wd_deg"] = {}
                 for model in candidates:
                     fc = nearest_fc(model.model_id, station.lat, station.lon, hour)
-                    point[model.model_id] = uv_to_speed_dir(fc.u10, fc.v10)[0] if fc else None
+                    ws, wd = uv_to_speed_dir(fc.u10, fc.v10) if fc else (None, None)
+                    point[model.model_id] = ws
+                    point["model_wd_deg"][model.model_id] = wd
                 points.append(point)
             station_series.append({"station_id": station.station_id, "points": points})
 
@@ -780,6 +786,7 @@ class ValidationService:
             "computed_at_utc": result["computed_at_utc"],
             "observation_points": observation_points,
             "stations_used": result["stations_used"],
+            "station_series": station_series,
         }
         self._validation_context.set(query_id, context)
         if hours_back == self.settings.forecast_weight_hours:
@@ -995,6 +1002,7 @@ class ValidationService:
             "calibration": calibration_summary,
             "observation_points": context.get("observation_points", []),
             "stations_used": context.get("stations_used", []),
+            "station_series": context.get("station_series", []),
             "computed_at_utc": datetime.now(timezone.utc),
         }
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Wind Validation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=43" />
+  <link rel="stylesheet" href="/static/styles.css?v=44" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -23,10 +23,19 @@
     <p id="briefingImageCaption"></p>
   </div>
 
+  <dialog id="fcDetailDialog" class="fc-detail-dialog" aria-labelledby="fcDetailTitle">
+    <div class="fc-detail-header"><div><p id="fcDetailEyebrow" class="fc-eyebrow"></p><h2 id="fcDetailTitle"></h2></div><button id="fcDetailClose" type="button" class="btn-secondary" aria-label="Close chart details">Close &times;</button></div>
+    <p id="fcDetailDescription" class="fc-detail-description"></p>
+    <label id="fcDetailModelLabel">Forecast model<select id="fcDetailModel"></select></label>
+    <p id="fcDetailStatus" class="fc-status" role="status"></p>
+    <div class="fc-detail-plots"><section><h3>TWS · Wind speed (kt)</h3><div id="fcDetailTws"></div></section><section><h3>TWD · Wind direction (°)</h3><div id="fcDetailTwd"></div></section></div>
+  </dialog>
+
   <div class="app-layout">
 
     <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
-    <aside class="app-sidebar">
+    <aside class="app-sidebar" aria-label="Location and analysis settings">
+      <div class="sidebar-heading"><h2>Location</h2><span>Choose your sailing area</span></div>
 
       <div class="source-toggle">
         <label class="mode-pill"><input type="radio" name="querySource" value="point" checked><span>Wind points</span></label>
@@ -46,10 +55,11 @@
           <button id="saveMonitoringBtn" type="button" class="btn-secondary">Save monitoring</button>
           <span id="monitoringStatus" role="status"></span>
         </fieldset>
+        <details class="location-settings"><summary>Coordinates &amp; radius</summary>
         <label>Latitude  <input id="lat"       type="number" step="0.0001" value="52.1" /></label>
         <label>Longitude <input id="lon"       type="number" step="0.0001" value="5.1"  /></label>
         <label>Radius (km) <input id="radius"  type="number" step="1"      value="50"   /></label>
-        <label>Analysis history (hours)  <input id="hoursBack" type="number" step="1"    value="48" min="1" max="168" /></label>
+        </details>
       </div>
 
       <div id="expeditionInputs" class="sidebar-inputs" style="display:none">
@@ -73,8 +83,12 @@
         </details>
       </div>
 
+      <details id="analysisOptions" class="analysis-settings"><summary>Analysis settings</summary>
+      <p>Compare past forecasts with station observations.</p>
+      <label>History (hours)<input id="hoursBack" type="number" step="1" value="48" min="1" max="168" /></label>
       <button id="run" title="Analyse recent observations and prepare a forecast">Analyse + Forecast</button>
       <div id="meta" class="meta-block"></div>
+      </details>
 
       <div class="sidebar-map-wrap">
         <div id="map"></div>
@@ -92,16 +106,17 @@
     <!-- ── Main area ──────────────────────────────────────────────────── -->
     <div class="app-main">
 
-      <div class="main-tab-nav">
-        <button class="tab active" data-tab="forecast">Forecast</button>
-        <button class="tab" data-tab="validation">Analysis</button>
-        <button class="tab" data-tab="briefing">Briefing</button>
-        <a class="tab tab-link" href="/currents" title="SHOM tidal current atlas — Pornichet / La Baule">Currents &nearr;</a>
-      </div>
+      <nav class="main-tab-nav" aria-label="Workspace">
+        <a class="tab active" data-tab="forecast" href="#forecast" aria-current="page"><span>Forecast</span><small>Wind &amp; outlook</small></a>
+        <a class="tab" data-tab="validation" href="#validation"><span>Analysis</span><small>Model performance</small></a>
+        <a class="tab" data-tab="briefing" href="#briefing"><span>Briefing</span><small>Prepare &amp; share</small></a>
+        <a class="tab tab-link" href="/currents" title="SHOM tidal current atlas — Pornichet / La Baule"><span>Currents &nearr;</span><small>Tidal atlas</small></a>
+      </nav>
 
       <!-- Validation tab -->
       <div id="tab-validation" class="tab-panel">
         <div class="val-page">
+          <div class="workspace-heading"><div><p class="fc-eyebrow">Past performance</p><h2>Analysis</h2></div><p>Compare models with observations for the selected history.</p></div>
 
           <div class="panel chart-panel">
             <div class="chart-header">
@@ -167,38 +182,56 @@
             <div><p class="fc-eyebrow">Wind outlook</p><h2 id="fcLocationTitle">Choose a location</h2></div>
             <p id="fcFreshness" class="fc-freshness" role="status">Select a saved location, or choose a point on the map.</p>
           </section>
+          <div class="fc-controls panel">
+            <label class="fc-ctrl-label">Hours ahead
+              <input id="fcHoursAhead" type="number" value="48" min="6" max="168" step="6">
+            </label>
+            <button id="fcRunBtn">Load Forecast</button>
+            <button id="fcSavedBtn" class="btn-secondary" type="button" hidden>Show saved forecast</button>
+            <details class="forecast-settings"><summary>Display settings</summary>            <label class="fc-ctrl-label" title="Scale the 10 m model wind up to masthead height using the log wind profile over water">Masthead height (m)
+              <input id="fcMastHeight" type="number" value="10" min="10" max="40" step="1">
+            </label>
+            </details>
+            <a href="#briefing" class="workspace-link">Open briefing &rarr;</a>
+            <span id="fcStatus" class="fc-status" role="status"></span>
+          </div>
+          <div class="fc-view-nav" role="tablist" aria-label="Forecast views">
+            <button id="fcViewOverview" type="button" role="tab" data-forecast-view="overview" aria-controls="fcOverview" aria-selected="true">Overview</button>
+            <button id="fcViewCharts" type="button" role="tab" data-forecast-view="charts" aria-controls="fcCharts" aria-selected="false" tabindex="-1">Forecast &amp; ensembles</button>
+            <button id="fcViewWeather" type="button" role="tab" data-forecast-view="weather" aria-controls="fcWeather" aria-selected="false" tabindex="-1">Weather report</button>
+          </div>
+          <section id="fcOverview" role="tabpanel" aria-labelledby="fcViewOverview" data-forecast-panel="overview">
           <section class="fc-now" aria-labelledby="fcNowHeading">
             <div class="fc-section-heading"><h2 id="fcNowHeading">Now</h2><span>Observed wind · 10 m · local time</span></div>
             <div id="fcNowStations" class="fc-now-stations"><p class="fc-empty">Observations will appear when a location is ready.</p></div>
           </section>
 
-          <div class="fc-controls panel">
-            <label class="fc-ctrl-label">Hours ahead
-              <input id="fcHoursAhead" type="number" value="48" min="6" max="168" step="6">
-            </label>
-            <label class="fc-ctrl-label" title="Scale the 10 m model wind up to masthead height using the log wind profile over water">Masthead height (m)
-              <input id="fcMastHeight" type="number" value="10" min="10" max="40" step="1">
-            </label>
-            <button id="fcRunBtn">Load Forecast</button>
-            <button id="fcSavedBtn" class="btn-secondary" type="button" hidden>Show saved forecast</button>
-            <span id="fcStatus" class="fc-status" role="status"></span>
-          </div>
 
-          <div class="fc-chart-panel panel" id="fcBestPanel" style="display:none">
-            <div class="fc-chart-title">Next hours &nbsp;&middot;&nbsp; <span id="fcBestTitle"></span></div>
-            <div id="fcBestChart"></div>
-          </div>
+
           <section class="fc-changes" aria-labelledby="fcChangesHeading">
             <div class="fc-section-heading"><h2 id="fcChangesHeading">What changed?</h2></div>
             <p id="fcBiasSummary" class="fc-bias-summary">Current correction is assessed separately from the analysis history.</p>
             <div id="fcRunComparison"><p class="fc-empty">Follow a saved location to build a history of forecasts.</p></div>
           </section>
-          <details id="fcEvidence" class="fc-evidence">
-            <summary>Forecast evidence <span>Models, correction and hourly detail</span></summary>
-            <div class="fc-toggles-bar panel"><div id="fcModelToggles" class="model-toggles"></div></div>
-          <div class="fc-chart-panel panel" id="fcVerificationPanel" style="display:none"><div class="fc-chart-title">Verification</div><div id="fcVerification"></div></div>
+            <a class="workspace-link" href="#" id="fcExploreCharts">Explore the forecast &amp; ensembles &rarr;</a>
+          </section>
+          <section id="fcCharts" role="tabpanel" aria-labelledby="fcViewCharts" data-forecast-panel="charts" hidden>
+            <div class="fc-chart-toolbar"><label>Show<select id="fcChartView">
+              <option value="best">Wind forecast</option><option value="comparison">Compare models</option>
+              <option value="uncertainty">Ensemble uncertainty</option><option value="weather">Temperature &amp; rain</option><option value="upperair">Upper-air wind</option>
+              <option value="table">Hourly table</option><option value="calibration">Correction &amp; evidence</option>
+            </select></label><p id="fcChartDescription">Expected wind, gusts and direction for your location.</p></div>
+            <p id="fcChartsEmpty" class="workspace-empty" hidden>Load a forecast to explore the charts.</p>
+          <div data-chart-view="best" class="fc-chart-panel panel" id="fcBestPanel" style="display:none">
+            <div class="fc-chart-title">Next hours &nbsp;&middot;&nbsp; <span id="fcBestTitle"></span></div>
+            <div id="fcBestChart"></div>
+          </div>
+          <div id="fcEvidence" class="fc-chart-workspace">
 
-          <div class="fc-ensemble-row" id="fcEnsembleRow" style="display:none">
+            <div data-chart-view="comparison" class="fc-toggles-bar panel"><div id="fcModelToggles" class="model-toggles"></div></div>
+          <div data-chart-view="calibration" class="fc-chart-panel panel" id="fcVerificationPanel" style="display:none"><div class="fc-chart-title">Verification</div><div id="fcVerification"></div></div>
+
+          <div data-chart-view="comparison" class="fc-ensemble-row" id="fcEnsembleRow" style="display:none">
             <div class="fc-chart-panel panel" id="fcEnsemblePanel">
               <div class="fc-chart-title">Ensemble TWS &nbsp;&ndash;&nbsp; All Models</div>
               <div id="fcEnsembleChart"></div>
@@ -209,9 +242,9 @@
             </div>
           </div>
 
-          <div class="fc-extra-controls"><button id="fcLoadExtras" class="btn-secondary" type="button">Load ensemble &amp; upper-air detail</button><span id="fcExtrasStatus" class="fc-status"></span></div>
+          <div data-chart-view="extras" class="fc-extra-controls"><button id="fcLoadExtras" class="btn-secondary" type="button">Load ensemble &amp; upper-air detail</button><span id="fcExtrasStatus" class="fc-status"></span></div>
           <!-- ICON-EPS uncertainty ribbon -->
-          <div class="fc-ensemble-row" id="fcIconEpsRow" style="display:none">
+          <div data-chart-view="uncertainty" class="fc-ensemble-row" id="fcIconEpsRow" style="display:none">
             <div class="fc-chart-panel panel" id="fcIconEpsTwsPanel">
               <div class="fc-chart-title-row">
                 <span class="fc-chart-title">ICON-EPS &ndash; TWS Uncertainty</span>
@@ -227,7 +260,7 @@
           </div>
 
           <!-- Gradient wind: 925 hPa vs surface -->
-          <div class="fc-chart-panel panel" id="fcGradientPanel" style="display:none">
+          <div data-chart-view="upperair" class="fc-chart-panel panel" id="fcGradientPanel" style="display:none">
             <div class="fc-chart-title-row">
               <span class="fc-chart-title">Gradient Wind &ndash; 925 hPa (~800 m)</span>
               <span id="fcGradientStatus" class="fc-status"></span>
@@ -235,7 +268,7 @@
             <div id="fcGradientChart"></div>
           </div>
 
-          <div class="fc-ensemble-row" id="fcTempPrecipRow" style="display:none">
+          <div data-chart-view="weather" class="fc-ensemble-row" id="fcTempPrecipRow" style="display:none">
             <div class="fc-chart-panel panel" id="fcTempPanel">
               <div class="fc-chart-title">Temperature (&deg;C)</div>
               <div id="fcTempChart"></div>
@@ -246,10 +279,12 @@
             </div>
           </div>
 
-          <div id="fcTableWrap" class="fc-chart-panel panel" style="display:none"></div>
+          <div data-chart-view="table" id="fcTableWrap" class="fc-chart-panel panel" style="display:none"></div>
 
-          </details>
+          </div>
 
+          </section>
+          <section id="fcWeather" role="tabpanel" aria-labelledby="fcViewWeather" data-forecast-panel="weather" hidden>
           <!-- Weather analysis — collapsed by default -->
           <details class="wx-details panel" id="wxDetails">
             <summary class="wx-details-summary">Weather Analysis</summary>
@@ -286,7 +321,7 @@
                     </div>
                   </div>
                   <div id="wxReportText" class="wx-report-text">
-                    Run validation, then load forecast data to generate a weather report from the active models.
+                    Load a forecast to generate a weather report from the active models.
                   </div>
                 </section>
 
@@ -335,6 +370,7 @@
               </div>
             </div>
           </details>
+          </section>
 
         </div>
       </div>
@@ -343,25 +379,32 @@
       <div id="tab-briefing" class="tab-panel">
         <div class="bf-page">
 
-          <div class="bf-actions panel">
-            <div class="bf-range">
-              <label class="bf-range-label">From
-                <select id="bfRangeStart"></select>
-              </label>
-              <label class="bf-range-label">To
-                <select id="bfRangeEnd"></select>
-              </label>
-              <span id="bfMetaText" class="bf-meta"></span>
+          <div class="workspace-heading"><div><p class="fc-eyebrow">Crew report</p><h2>Briefing</h2></div><p>Use the loaded forecast, add your notes and share with the crew.</p></div>
+          <div class="bf-library">
+            <label>Saved briefings<select id="bfArchiveSelect"><option value="">Saved briefings…</option></select></label>
+            <input type="file" id="bfFileInput" accept=".json" hidden>
+            <button id="bfLoadBtn" class="btn-secondary" type="button">Open file</button>
+            <button id="bfArchiveDeleteBtn" class="btn-secondary" type="button" title="Delete the selected saved briefing" aria-label="Delete selected saved briefing">Delete saved</button>
+          </div>
+          <section id="bfEmpty" class="workspace-empty">
+            <p class="fc-eyebrow">Get started</p><h3>Choose a forecast for your briefing</h3>
+            <p>Load a forecast for your location, or open a saved briefing above.</p>
+            <a href="#forecast" class="workspace-link">Go to Forecast &rarr;</a>
+          </section>
+          <div id="bfForecastTools" hidden>
+            <div class="bf-actions">
+              <div class="bf-range">
+                <label class="bf-range-label">From<select id="bfRangeStart"></select></label>
+                <label class="bf-range-label">To<select id="bfRangeEnd"></select></label>
+              </div>
+              <div class="bf-primary-actions">
+                <button id="bfArchiveBtn" class="btn-secondary" type="button">Save online</button>
+                <button id="bfPrintCrewBtn" type="button">Print crew report</button>
+                <button id="bfPrintBtn" class="btn-secondary" type="button">Print full report</button>
+              </div>
             </div>
-            <div class="bf-btn-group">
-              <input type="file" id="bfFileInput" accept=".json" style="display:none">
-              <button id="bfLoadBtn" class="btn-secondary" title="Load a briefing from a JSON file">Load</button>
-              <button id="bfSaveBtn" class="btn-secondary" title="Download this briefing as a JSON file">Save</button>
-              <button id="bfArchiveBtn" class="btn-secondary" title="Save this briefing on the server so you can look it up later">Save online</button>
-              <select id="bfArchiveSelect" title="Open a previously saved briefing">
-                <option value="">Saved briefings…</option>
-              </select>
-              <button id="bfArchiveDeleteBtn" class="btn-secondary" title="Delete the selected saved briefing">✕</button>
+            <details class="bf-options"><summary>Report options <span>Models, maps &amp; export</span></summary>
+              <div class="bf-btn-group">
               <button id="bfWindmapBtn" class="btn-secondary" title="Generate animated wind map GIF">Wind Map GIF</button>
               <label class="bf-include-label" title="Embed wind map snapshots in the printed report">
                 <input type="checkbox" id="bfIncludeWindmaps">
@@ -392,12 +435,13 @@
                 <input type="checkbox" id="bfCrewIncludeEnsemble">
                 <span>Ensemble in Crew</span>
               </label>
-              <button id="bfPrintCrewBtn" class="btn-secondary" title="One-pager for the crew: header, summary bullets, wind chart, hourly table, wind maps and optionally ensemble">Print Crew</button>
-              <button id="bfPrintBtn" title="Full briefing: all sections, charts and notes">Print Full</button>
-            </div>
+                <button id="bfSaveBtn" class="btn-secondary" type="button">Download JSON</button>
+              </div>
+            </details>
           </div>
+          <p id="bfMetaText" class="bf-meta" role="status"></p>
 
-          <div id="bfContent">
+          <div id="bfContent" hidden>
 
             <div class="panel bf-section bf-header-section">
               <input  id="bfTitle"    class="bf-title-input"    type="text" placeholder="Weather Briefing" />
@@ -503,8 +547,10 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script src="/static/app.js?v=46"></script>
-  <script src="/static/forecast.js?v=46"></script>
+  <script src="/static/forecast.js?v=47"></script>
   <script src="/static/weather.js?v=31"></script>
-  <script src="/static/briefing.js?v=41"></script>
+  <script src="/static/briefing.js?v=42"></script>
+  <script src="/static/forecast_workspace.js?v=1"></script>
+  <script src="/static/navigation.js?v=1"></script>
 </body>
 </html>

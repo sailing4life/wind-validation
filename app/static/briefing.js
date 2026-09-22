@@ -9,8 +9,9 @@
 const BF_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function bfParseUtc(isoStr) {
-  // Always treat server strings as UTC (append Z if missing)
-  return new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z');
+  // Saved snapshots include +00:00; appending Z makes those dates invalid.
+  const value = String(isoStr || '');
+  return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : value + 'Z');
 }
 
 function bfFmt(isoStr) {
@@ -30,20 +31,28 @@ function bfLocalISO(isoStr) {
 function bfInitRange() {
   const hours = forecastData?.models?.[0]?.hours ?? [];
   const sel = ['bfRangeStart', 'bfRangeEnd'].map(id => document.getElementById(id));
+  const previous = sel.map(s => s.selectedOptions[0]?.dataset.time);
   sel.forEach(s => { s.innerHTML = ''; });
   hours.forEach((h, i) => {
     const label = bfFmt(h.time_utc);   // local time label
-    sel.forEach(s => s.add(new Option(label, i)));
+    sel.forEach(s => {
+      const option = new Option(label, i);
+      option.dataset.time = h.time_utc;
+      s.add(option);
+    });
   });
-  sel[0].value = '0';
-  sel[1].value = String(hours.length - 1);
+  sel.forEach((s, i) => {
+    const index = hours.findIndex(h => h.time_utc === previous[i]);
+    s.value = String(index >= 0 ? index : i === 0 ? 0 : hours.length - 1);
+  });
   sel.forEach(s => s.addEventListener('change', bfRerender));
 }
 
 function bfGetRangeTimes() {
   const hours = forecastData?.models?.[0]?.hours ?? [];
   const si = parseInt(document.getElementById('bfRangeStart').value, 10) || 0;
-  const ei = parseInt(document.getElementById('bfRangeEnd').value, 10) || hours.length - 1;
+  const parsedEnd = parseInt(document.getElementById('bfRangeEnd').value, 10);
+  const ei = Number.isFinite(parsedEnd) ? parsedEnd : hours.length - 1;
   return {
     startTime: hours[si]?.time_utc ?? null,
     endTime:   hours[ei]?.time_utc ?? null,
@@ -53,7 +62,8 @@ function bfGetRangeTimes() {
 function bfFilterHours(hours) {
   const { startTime, endTime } = bfGetRangeTimes();
   if (!startTime || !endTime) return hours;
-  return hours.filter(h => h.time_utc >= startTime && h.time_utc <= endTime);
+  const start = bfParseUtc(startTime).getTime(), end = bfParseUtc(endTime).getTime();
+  return hours.filter(h => { const time = bfParseUtc(h.time_utc).getTime(); return time >= start && time <= end; });
 }
 
 // â”€â”€ Every-point labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -973,8 +983,13 @@ const BF_SCEN_TEMPLATE = 'Main: \nAlt 1: \nAlt 2: ';
 
 function renderBriefingTab() {
   const meta = document.getElementById('bfMetaText');
-  if (!forecastData) {
-    if (meta) meta.textContent = 'Run Validation + load Forecast first.';
+  const ready = !!forecastData?.models?.some(model => model.hours?.length);
+  document.getElementById('bfEmpty').hidden = ready;
+  document.getElementById('bfContent').hidden = !ready;
+  document.getElementById('bfForecastTools').hidden = !ready;
+  bfRefreshArchiveList();
+  if (!ready) {
+    if (meta) meta.textContent = 'No forecast loaded';
     return;
   }
   const pos = currentLatLon();
@@ -992,7 +1007,6 @@ function renderBriefingTab() {
   bfFetchPressureCharts().then(bfRenderPressureCharts);
   bfFetchGradient().then(bfRenderGradientChart);
   bfFetchExtras().then(() => { bfRenderSkyChart(); bfRenderWavesChart(); });
-  bfRefreshArchiveList();
 }
 
 // ── Crew summary auto-fill ───────────────────────────────────────────────────────
@@ -1238,8 +1252,7 @@ document.getElementById('bfCopyTextBtn')?.addEventListener('click', async () => 
 });
 
 // â”€â”€ Tab click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-document.querySelector('.tab[data-tab="briefing"]')
-  ?.addEventListener('click', renderBriefingTab);
+// Page entry (including direct URLs and history) is handled by navigation.js.
 
 // â”€â”€ Print / PDF (convert Plotly charts to images before printing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function bfChartAsImg(id, fallbackHeight = 300) {
@@ -1792,12 +1805,28 @@ document.getElementById('bfLoadBtn')?.addEventListener('click', () => {
 function bfApplyPayload(payload) {
   if (!payload.forecastData) throw new Error('Invalid briefing file');
 
+  // A saved report is a manual snapshot. Background polling must not replace
+  // it, and station drilldowns must use its evidence rather than another point.
+  if (payload.lat != null) document.getElementById('lat').value = payload.lat;
+  if (payload.lon != null) document.getElementById('lon').value = payload.lon;
+  document.getElementById('savedLocation').value = '';
+  locationSelectionChanged(null);
+  beginManualForecast();
+
   // Restore global forecast state (variables defined in forecast.js)
   forecastData      = payload.forecastData;
   _winnerModelId    = payload.winner_model_id ?? forecastData.winner_model_id;
   _biasWsMs         = payload.bias_ws_ms      ?? forecastData.bias_ws_ms;
   _selectedModels   = new Set(forecastData.models.map(m => m.model_id));
   _ensembleData     = payload.ensembleData ?? null;   // older files: EPS charts stay hidden
+  _forecastValidation = {
+    observation_points: forecastData.observation_points || [],
+    stations_used: forecastData.stations_used || [],
+    station_series: forecastData.station_series || [],
+  };
+  renderNowStations(_forecastValidation);
+  renderForecastChanges();
+  renderAllCharts();
   bfPopulateModelOverride();
 
   // Restore coordinates

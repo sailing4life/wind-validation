@@ -95,19 +95,6 @@ function currentLatLon() {
 }
 
 // â”€â”€ Tab switching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-document.querySelectorAll('button.tab[data-tab]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-
-    updateSidebarAction();
-    resizeForecastCharts();
-    if (btn.dataset.tab === 'validation' && typeof drawCharts === 'function') drawCharts();
-  });
-});
-
 document.getElementById('fcRunBtn').addEventListener('click', loadForecast);
 document.getElementById('fcCorrectedOnly')?.addEventListener('change', e => {
   _correctedOnly = e.target.checked;
@@ -314,12 +301,12 @@ function renderBestForecastChart() {
     });
   }
 
-  // TWD  -  red line+markers+labels, right axis
+  // Direction has its own aligned track, separate from wind speed.
   traces.push({
     x: times, y: wd,
-    name: 'TWD ( deg)',
+    name: 'TWD (°)',
     type: 'scatter', mode: 'lines+markers+text',
-    line: { color: '#dc2626', width: 1.5 },
+    line: { color: '#64748b', width: 1.5 },
     marker: { color: '#dc2626', size: 5 },
     text: every3hText(times, wd, v => String(Math.round(v))),
     textposition: 'top center',
@@ -330,18 +317,20 @@ function renderBestForecastChart() {
 
   const mobile = window.innerWidth < 700;
   _forecastIsMobile = mobile;
-  if (mobile) traces.forEach(trace => {
-    if (trace.mode?.includes('text')) { trace.mode = trace.mode.replace('+text', ''); delete trace.text; }
+  traces.forEach(trace => {
+    if (trace.mode?.includes('text')) { trace.mode = 'lines'; delete trace.text; }
   });
   const mobileRange = mobile && times.length ? [fcPlotTime(times[0]), fcPlotTime(new Date(new Date(times[0]).getTime() + 12 * 3600000).toISOString())] : null;
 
   const layout = {
     ...LIGHT_LAYOUT,
-    height: 480,
-    margin: { t: 70, b: 30, l: 55, r: 65 },
+    height: 440,
+    margin: { t: 70, b: 55, l: 55, r: 20 },
+    hovermode: 'x unified',
     legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 11 } },
     xaxis: {
       ...LIGHT_XAXIS,
+      anchor: 'y2',
       ...(mobileRange ? {range: mobileRange} : {}),
       rangeselector: {
         buttons: [
@@ -355,15 +344,14 @@ function renderBestForecastChart() {
         bordercolor: '#e2e8f0',
         font: { size: 10 },
       },
-      rangeslider: { visible: true, thickness: 0.06 },
+      rangeslider: { visible: false },
     },
-    yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
+    yaxis: { ...LIGHT_YAXIS('TWS · kt'), zeroline: false, domain: [0.42, 1] },
     yaxis2: {
-      title: ' deg', overlaying: 'y', side: 'right',
+      title: 'TWD · °', domain: [0, 0.26], anchor: 'x',
       range: [0, 360], dtick: 90,
-      gridcolor: 'transparent',
-      tickfont: { color: '#dc2626' },
-      titlefont: { color: '#dc2626' },
+      gridcolor: '#e2e8f0',
+      tickfont: { color: '#64748b' },
     },
   };
 
@@ -576,23 +564,7 @@ function renderPrecipChart() {
 
 // â”€â”€ Render all charts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderAllCharts() {
-  if (!forecastData) return;
-  renderBestForecastChart();
-  if (!document.getElementById('fcEvidence').open) return;
-  renderEnsembleChart();
-  renderIconEpsCharts();
-  if (_gradientData) renderGradientChart();
-  renderTempChart();
-  renderPrecipChart();
-  // Show temp+precip row if at least one panel is visible
-  const row = document.getElementById('fcTempPrecipRow');
-  if (row) {
-    const tempVis   = document.getElementById('fcTempPanel')?.style.display   !== 'none';
-    const precipVis = document.getElementById('fcPrecipPanel')?.style.display !== 'none';
-    row.style.display = (tempVis || precipVis) ? '' : 'none';
-  }
-  renderForecastTable();
-  renderVerification();
+  if (typeof renderForecastWorkspace === 'function') renderForecastWorkspace();
 }
 
 function renderVerification() {
@@ -711,20 +683,19 @@ function renderHistoricalErrorProfile() {
   const source = sourceLabels[rows[0].calibration_uncertainty_source] || 'Recent regime residuals';
   const layout = {
     height: 245,
-    margin: { l: 42, r: 40, t: 38, b: 35 },
-    title: { text: `Error profile · ${source}`, x: 0, xanchor: 'left', font: { size: 12 } },
+    margin: { l: 48, r: 15, t: 55, b: 65 },
+    title: { text: 'Uncertainty along and across the wind', x: 0, xanchor: 'left', font: { size: 12 } },
     paper_bgcolor: 'white', plot_bgcolor: 'white',
     xaxis: { title: { text: `Forecast time (${LOCAL_TIME_ZONE})`, font: { size: 10 } }, tickformat: '%d %b<br>%H:%M', showgrid: false },
     yaxis: { title: { text: 'σ residual (kt)', font: { size: 10 } }, rangemode: 'tozero', gridcolor: '#e2e8f0' },
-    yaxis2: { title: { text: 'n eff.', font: { size: 10 } }, overlaying: 'y', side: 'right', rangemode: 'tozero', showgrid: false },
-    legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 10 } },
+    legend: { orientation: 'h', y: -0.4, x: 0, font: { size: 10 } },
     hovermode: 'x unified',
   };
   fcLocalPlot(target, [
-    { x: times, y: nEff, type: 'bar', name: 'Comparable cases (n eff.)', yaxis: 'y2', marker: { color: '#cbd5e1' }, hovertemplate: '%{y:.1f}<extra>n eff.</extra>' },
-    { x: times, y: along, type: 'scatter', mode: 'lines+markers', name: 'σ along-wind', line: { color: '#0369a1', width: 2 }, marker: { size: 4 }, hovertemplate: '%{y:.2f} kt<extra>σ along</extra>' },
-    { x: times, y: cross, type: 'scatter', mode: 'lines+markers', name: 'σ cross-wind', line: { color: '#b45309', width: 2 }, marker: { size: 4 }, hovertemplate: '%{y:.2f} kt<extra>σ cross</extra>' },
+    { x: times, y: along, customdata: nEff, type: 'scatter', mode: 'lines', name: 'Along wind (1σ)', line: { color: '#0369a1', width: 2 }, hovertemplate: '%{y:.2f} kt · %{customdata:.1f} effective cases<extra>Along wind</extra>' },
+    { x: times, y: cross, customdata: nEff, type: 'scatter', mode: 'lines', name: 'Across wind (1σ)', line: { color: '#64748b', width: 2, dash: 'dash' }, hovertemplate: '%{y:.2f} kt · %{customdata:.1f} effective cases<extra>Across wind</extra>' },
   ], layout, { responsive: true, displayModeBar: false });
+  target.setAttribute('aria-label', `Wind uncertainty: ${source}. Hover for the number of effective cases.`);
 }
 
 // â”€â”€ ICON-EPS ensemble load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1044,14 +1015,15 @@ function resetForecastLocation() {
   document.getElementById('fcStatus').textContent = '';
   document.getElementById('fcFreshness').classList.remove('is-stale');
   document.getElementById('fcBestPanel').style.display = 'none';
-  document.getElementById('fcEvidence').open = false;
+  document.getElementById('fcDetailDialog')?.close();
   document.getElementById('wxDetails').open = false;
   document.querySelectorAll('#fcVerificationPanel, #fcEnsembleRow, #fcIconEpsRow, #fcGradientPanel, #fcTempPrecipRow, #fcTableWrap').forEach(el => { el.style.display = 'none'; });
   document.getElementById('fcModelToggles').replaceChildren();
   document.getElementById('fcExtrasStatus').textContent = '';
   document.getElementById('fcGradientPanel').style.display = 'none';
   document.getElementById('fcIconEpsRow').style.display = 'none';
-  renderNowStations(null); renderForecastChanges();
+  renderNowStations(null); renderForecastChanges(); renderAllCharts();
+  if (typeof renderBriefingTab === 'function' && document.getElementById('tab-briefing').classList.contains('active')) renderBriefingTab();
 }
 function fcArchiveNote(data) {
   const fallbacks = data?.archive_fallbacks || [];
@@ -1062,7 +1034,7 @@ function fcArchiveNote(data) {
 }
 
 function renderPreparedForecast(data, validation = null, comparison = null) {
-  validation = validation || (data.observation_points ? {observation_points: data.observation_points, stations_used: data.stations_used || []} : _forecastValidation);
+  validation = validation || (data.observation_points ? {observation_points: data.observation_points, stations_used: data.stations_used || [], station_series: data.station_series || []} : _forecastValidation);
   forecastData = data;
   if (selectedLocationRecord?.monitoring_enabled && data.hours_ahead) document.getElementById('fcHoursAhead').value = data.hours_ahead;
   _forecastValidation = validation; _forecastComparison = comparison;
@@ -1080,6 +1052,7 @@ function renderPreparedForecast(data, validation = null, comparison = null) {
   renderNowStations(validation); renderForecastChanges(); renderModelToggles(); renderAllCharts();
   if (document.getElementById('wxDetails').open && typeof renderWeatherTab === 'function') renderWeatherTab(true);
   resizeForecastCharts();
+  if (document.getElementById('tab-briefing').classList.contains('active') && typeof renderBriefingTab === 'function') renderBriefingTab();
 }
 function renderNowStations(validation) {
   _forecastValidation = validation;
@@ -1094,18 +1067,21 @@ function renderNowStations(validation) {
   if (!points.length) { const p = document.createElement('p'); p.className = 'fc-empty'; p.textContent = 'No recent station observations available for this location.'; container.append(p); return; }
   points.forEach(point => {
     const station = (validation.stations_used || []).find(s => s.station_id === point.station_id);
-    const item = document.createElement('article'); item.className = 'fc-now-station';
-    const name = document.createElement('h3'); name.textContent = station?.name || point.station_id;
-    const wind = document.createElement('p'); wind.className = 'fc-now-wind';
+    const item = document.createElement('button'); item.type = 'button'; item.className = 'fc-now-station';
+    item.addEventListener('click', () => openForecastStation(point.station_id));
+    item.setAttribute('aria-label', `View observed and forecast wind at ${station?.name || point.station_id}`);
+    const name = document.createElement('span'); name.className = 'fc-now-name'; name.textContent = station?.name || point.station_id;
+    const wind = document.createElement('span'); wind.className = 'fc-now-wind';
     wind.textContent = Number.isFinite(point.ws_ms) ? `${(point.ws_ms * MS_TO_KT).toFixed(1)} kt` : '—';
     const dir = document.createElement('span'); dir.textContent = Number.isFinite(point.wd_deg) ? `${Math.round(point.wd_deg)}°` : '—'; wind.append(dir);
     if (Number.isFinite(point.gust_ms)) {
       const gust = document.createElement('span'); gust.textContent = `gust ${(point.gust_ms * MS_TO_KT).toFixed(1)} kt`; wind.append(gust);
     }
-    const age = document.createElement('p'); age.className = 'fc-now-age'; age.textContent = `${point.source || 'Station'} · ${fcAge(point.time_utc)}`;
+    const age = document.createElement('span'); age.className = 'fc-now-age'; age.textContent = `${point.source || 'Station'} · ${fcAge(point.time_utc)}`;
     age.title = fcLocalTime(point.time_utc);
     if (Date.now() - new Date(point.time_utc).getTime() > 3 * 3600000) age.classList.add('is-stale');
-    item.append(name, wind, age); container.append(item);
+    const hint = document.createElement('span'); hint.className = 'fc-now-hint'; hint.textContent = 'Observed vs forecast ↗';
+    item.append(name, wind, age, hint); container.append(item);
   });
   appendObservationCredits(container, [...latest.values()]);
 }
@@ -1144,36 +1120,33 @@ function renderForecastChanges() {
   models.forEach(model => {
     const row = document.createElement('tr');
     const values = [model.model_id,fcSigned(Number.isFinite(model.mean_ws_change_ms) ? model.mean_ws_change_ms * MS_TO_KT : null) + ' kt',Number.isFinite(model.max_abs_ws_change_ms) ? (model.max_abs_ws_change_ms * MS_TO_KT).toFixed(1) + ' kt' : '—',fcSigned(model.mean_wd_change_deg, 0) + '°',model.overlap_hours];
-    values.forEach(value => { const td = document.createElement('td'); td.textContent = value ?? '—'; row.append(td); }); body.append(row);
+    values.forEach((value, index) => {
+      const td = document.createElement('td');
+      if (index === 0) {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'fc-model-detail';
+        button.textContent = `${value} ↗`; button.addEventListener('click', () => openForecastChange(model.model_id)); td.append(button);
+      } else td.textContent = value ?? '—';
+      row.append(td);
+    }); body.append(row);
   });
   table.append(body); const wrap = document.createElement('div'); wrap.className = 'fc-comparison-scroll'; wrap.append(table); container.append(wrap);
-  const detail = document.createElement('details'); detail.className = 'fc-comparison-detail';
-  const title = document.createElement('summary'); title.textContent = 'Compare forecast curves'; detail.append(title);
-  const chart = document.createElement('div'); chart.id = 'fcComparisonChart'; detail.append(chart); container.append(detail);
-  detail.addEventListener('toggle', () => {
-    if (!detail.open) return;
-    const traces = [];
-    models.forEach((model, idx) => {
-      const hours = model.hours || []; const color = FC_COLORS[idx % FC_COLORS.length];
-      traces.push({x:hours.map(h => h.time_utc),y:hours.map(h => h.previous_ws_ms == null ? null : h.previous_ws_ms * MS_TO_KT),name:`${model.model_id} previous`,mode:'lines',line:{color,width:1.5,dash:'dot'}});
-      traces.push({x:hours.map(h => h.time_utc),y:hours.map(h => h.current_ws_ms == null ? null : h.current_ws_ms * MS_TO_KT),name:`${model.model_id} latest`,mode:'lines',line:{color,width:2}});
-    });
-    fcLocalPlot(chart, traces, {...LIGHT_LAYOUT,height:340,margin:{t:30,b:60,l:45,r:15},xaxis:LIGHT_XAXIS,yaxis:LIGHT_YAXIS('kt'),legend:{orientation:'h',y:-0.3}}, {responsive:true,displayModeBar:false});
-  });
+
 }
 function resizeForecastCharts() {
   requestAnimationFrame(() => {
     document.querySelectorAll('.tab-panel.active .js-plotly-plot').forEach(el => { if (el.offsetWidth && el.offsetHeight) Plotly.Plots.resize(el); });
   });
 }
-document.getElementById('fcEvidence').addEventListener('toggle', e => { if (e.target.open && forecastData) { renderAllCharts(); resizeForecastCharts(); } });
 document.getElementById('wxDetails').addEventListener('toggle', e => { if (e.target.open && forecastData && typeof renderWeatherTab === 'function') { renderWeatherTab(); resizeForecastCharts(); } });
 document.getElementById('fcLoadExtras').addEventListener('click', async () => {
   if (!forecastData) return;
   const button = document.getElementById('fcLoadExtras'); button.disabled = true;
   const state = forecastData;
   document.getElementById('fcExtrasStatus').textContent = 'Loading extra detail…';
-  try { await Promise.all([loadEnsemble(), loadGradientWind()]); }
+  try {
+    if (document.getElementById('fcChartView').value === 'upperair') await loadGradientWind();
+    else await loadEnsemble();
+  }
   finally {
     button.disabled = false;
     if (state === forecastData) { document.getElementById('fcExtrasStatus').textContent = 'Detail checked.'; resizeForecastCharts(); }

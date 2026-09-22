@@ -131,6 +131,20 @@ Forecast** also runs the observation analysis first. Automatic page checks do no
 replace a manually loaded forecast; **Show saved forecast** returns to the
 background result and resumes those checks.
 
+The Forecast workspace has three views: **Overview**, **Forecast & ensembles**,
+and **Weather report**. On Overview, click a station for observed versus forecast
+TWS/TWD at that station, or a model under **What changed?** for its previous and
+latest forecast curves. These drilldowns reuse the loaded snapshot. Direction
+history is included in newly prepared snapshots; older snapshots show which
+history is missing. The chart view displays one selected subject at a time;
+ensemble and upper-air detail are fetched only using their respective load button.
+
+The main pages support direct links (`/#forecast`, `/#validation`, `/#briefing`)
+and browser history. Briefing can open an archived report even before a forecast
+is loaded, and preserves notes and the selected time window when switching pages.
+Analysis history and its action are grouped under **Analysis settings** in the
+sidebar; report/model/export options are grouped under **Report options**.
+
 The collector discovers stations around each active location, archives forecasts
 at the location and station coordinates, and prepares a 48-hour forecast plus
 validation evidence. Page loads read that prepared result from Postgres; they do

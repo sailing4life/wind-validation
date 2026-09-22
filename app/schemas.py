@@ -250,4 +250,5 @@ class ForecastResponse(BaseModel):
     calibration: dict = Field(default_factory=dict)
     observation_points: list[ObservationPointDTO] = Field(default_factory=list)
     stations_used: list[StationDTO] = Field(default_factory=list)
+    station_series: list[dict] = Field(default_factory=list)
     computed_at_utc: datetime | None = None

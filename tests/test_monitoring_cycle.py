@@ -106,6 +106,11 @@ def test_real_validation_uses_earlier_collected_forecasts_in_next_monitoring_cyc
     forecast = ForecastResponse.model_validate(next_snapshot["forecast"])
     assert forecast.calibration["bias_source"] == "recent_3h"
     assert forecast.calibration["bias_window_hours"] == 3
+    station_hours = forecast.station_series[0]["points"]
+    matched = [p for p in station_hours if p["obs_ws_ms"] is not None and p["test"] is not None]
+    assert len(matched) == 3
+    assert all(p["obs_ws_ms"] == 6 and p["test"] == 5 for p in matched)
+    assert all(p["obs_wd_deg"] == 0 and p["model_wd_deg"]["test"] == 0 for p in matched)
     assert forecast.models[0].hours[0].corrected_ws_ms > forecast.models[0].hours[0].ws_ms
     assert forecast.model_dump_json()
 
