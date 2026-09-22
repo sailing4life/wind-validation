@@ -301,12 +301,12 @@ function renderBestForecastChart() {
     });
   }
 
-  // Direction has its own aligned track, separate from wind speed.
+  // TWD  -  red line+markers+labels, right axis
   traces.push({
     x: times, y: wd,
-    name: 'TWD (°)',
+    name: 'TWD ( deg)',
     type: 'scatter', mode: 'lines+markers+text',
-    line: { color: '#64748b', width: 1.5 },
+    line: { color: '#dc2626', width: 1.5 },
     marker: { color: '#dc2626', size: 5 },
     text: every3hText(times, wd, v => String(Math.round(v))),
     textposition: 'top center',
@@ -317,20 +317,18 @@ function renderBestForecastChart() {
 
   const mobile = window.innerWidth < 700;
   _forecastIsMobile = mobile;
-  traces.forEach(trace => {
-    if (trace.mode?.includes('text')) { trace.mode = 'lines'; delete trace.text; }
+  if (mobile) traces.forEach(trace => {
+    if (trace.mode?.includes('text')) { trace.mode = trace.mode.replace('+text', ''); delete trace.text; }
   });
   const mobileRange = mobile && times.length ? [fcPlotTime(times[0]), fcPlotTime(new Date(new Date(times[0]).getTime() + 12 * 3600000).toISOString())] : null;
 
   const layout = {
     ...LIGHT_LAYOUT,
-    height: 440,
-    margin: { t: 70, b: 55, l: 55, r: 20 },
-    hovermode: 'x unified',
+    height: 480,
+    margin: { t: 70, b: 30, l: 55, r: 65 },
     legend: { orientation: 'h', x: 0, y: 1.18, font: { size: 11 } },
     xaxis: {
       ...LIGHT_XAXIS,
-      anchor: 'y2',
       ...(mobileRange ? {range: mobileRange} : {}),
       rangeselector: {
         buttons: [
@@ -344,14 +342,15 @@ function renderBestForecastChart() {
         bordercolor: '#e2e8f0',
         font: { size: 10 },
       },
-      rangeslider: { visible: false },
+      rangeslider: { visible: true, thickness: 0.06 },
     },
-    yaxis: { ...LIGHT_YAXIS('TWS · kt'), zeroline: false, domain: [0.42, 1] },
+    yaxis: { ...LIGHT_YAXIS('kt'), zeroline: false },
     yaxis2: {
-      title: 'TWD · °', domain: [0, 0.26], anchor: 'x',
+      title: ' deg', overlaying: 'y', side: 'right',
       range: [0, 360], dtick: 90,
-      gridcolor: '#e2e8f0',
-      tickfont: { color: '#64748b' },
+      gridcolor: 'transparent',
+      tickfont: { color: '#dc2626' },
+      titlefont: { color: '#dc2626' },
     },
   };
 
